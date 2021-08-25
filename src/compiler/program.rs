@@ -1,7 +1,6 @@
-use crate::ast::Program;
-use super::Compile;
 use super::AssemblyOutput;
-use crate::assembly::{Assembly, Directive, Instruction};
+use super::Compile;
+use crate::ast::Program;
 
 impl Compile for Program {
     fn compile(self) -> AssemblyOutput {

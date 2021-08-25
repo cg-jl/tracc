@@ -1,4 +1,4 @@
-use comp::ast::*;
+use comp::ast::Program;
 use comp::error::SourceMetadata;
 use comp::parser::Parser;
 use std::error::Error;
@@ -13,7 +13,6 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     use comp::compiler::Compile;
-    use std::env;
     use std::fs;
     use std::io::Write;
     let opt = Opt::from_args_safe()?;

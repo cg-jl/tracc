@@ -2,6 +2,9 @@ use super::{stack::StackManager, AssemblyOutput, CompileWith};
 use crate::assembly::*;
 use std::collections::{HashMap, HashSet};
 
+// TODO: differentiate between mutable and non-mutable access in
+// both instructions and the register manager
+
 pub fn with_registers<F>(stack: &mut StackManager, mut cont: F) -> AssemblyOutput
 where
     F: FnMut(&mut StackManager, &mut RegisterManager) -> AssemblyOutput,

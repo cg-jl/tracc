@@ -1,5 +1,6 @@
 mod expr;
 mod function;
+mod labels;
 mod program;
 pub mod registers;
 pub mod stack;
@@ -17,6 +18,12 @@ pub trait CompileWith<State> {
 #[repr(transparent)]
 pub struct AssemblyOutput {
     inner: VecDeque<Assembly>,
+}
+
+impl Default for AssemblyOutput {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AssemblyOutput {
@@ -59,4 +66,39 @@ impl AssemblyOutput {
     pub fn extend(&mut self, mut other: Self) {
         self.inner.extend(other.release());
     }
+    pub fn singleton_asm(assembly: Assembly) -> Self {
+        let mut s = Self::new();
+        s.push_asm(assembly);
+        s
+    }
+    pub fn singleton_instruction(instruction: Instruction) -> Self {
+        Self::singleton_asm(Assembly::Instruction(instruction))
+    }
+    pub fn labelled(mut self, label: Label) -> Self {
+        self.cons_asm(Assembly::Label(label.to_string()));
+        self
+    }
+    pub fn push_label(&mut self, label: Label) {
+        self.push_asm(Assembly::Label(label.to_string()))
+    }
+}
+
+#[macro_export]
+macro_rules! asm_out {
+    [] => { $crate::compiler::AssemblyOutput::new() };
+    {} => { $crate::compiler::AssemblyOutput::new() };
+    {$($expr:expr),+} => { {
+        let mut out = $crate::compiler::AssemblyOutput::new();
+        $(
+            out.push_asm($expr);
+        ),+
+        out
+    } };
+    [$($expr:expr),+] => { {
+        let mut out = $crate::compiler::AssemblyOutput::new();
+        $(
+            out.push_instruction($expr);
+        ),+
+        out
+    } };
 }

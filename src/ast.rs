@@ -1,14 +1,9 @@
 use crate::lexer::Operator;
-use crate::parser::*;
+
+// TODO: span
 
 #[derive(Debug)]
 pub struct Program(pub Function);
-
-impl Parse for Program {
-    fn parse(parser: &mut Parser) -> ParseRes<Self> {
-        Function::parse(parser).map(Program)
-    }
-}
 
 #[derive(Debug)]
 pub struct Function {
@@ -41,7 +36,7 @@ pub enum UnaryOp {
 }
 
 impl UnaryOp {
-    pub const fn from_operator(op: Operator) -> Option<Self> {
+    pub const fn from_operator((op, _): (Operator, bool)) -> Option<Self> {
         Some(match op {
             Operator::Minus => Self::Negate,
             Operator::ExclamationMark => Self::LogicNot,
@@ -51,7 +46,11 @@ impl UnaryOp {
             | Operator::Star
             | Operator::Slash
             | Operator::DoubleAnd
-            | Operator::DoublePipe => return None,
+            | Operator::DoublePipe
+            | Operator::AngleLeft
+            | Operator::AngleRight
+            | Operator::ExclamationEquals
+            | Operator::DoubleEquals => return None,
         })
     }
 }
@@ -64,6 +63,44 @@ pub enum BinaryOp {
     Divide,
     LogicAnd,
     LogicOr,
+    Relational(Relational),
+    Equality(Equality),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Relational {
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Equality {
+    Equals,
+    NotEquals,
+}
+
+impl Equality {
+    pub const fn to_condition(self) -> crate::assembly::Condition {
+        use crate::assembly::Condition;
+        match self {
+            Self::Equals => Condition::Equals,
+            Self::NotEquals => Condition::NotEquals,
+        }
+    }
+}
+
+impl Relational {
+    pub const fn to_condition(self) -> crate::assembly::Condition {
+        use crate::assembly::Condition;
+        match self {
+            Self::Less => Condition::LessThan,
+            Self::LessEqual => Condition::LessEqual,
+            Self::Greater => Condition::GreaterThan,
+            Self::GreaterEqual => Condition::GreaterEqual,
+        }
+    }
 }
 
 impl BinaryOp {
@@ -71,11 +108,13 @@ impl BinaryOp {
         match self {
             Self::LogicAnd => 4,
             Self::LogicOr => 3,
-            Self::Add | Self::Subtract => 8,
-            Self::Multiply | Self::Divide => 9,
+            Self::Add | Self::Subtract => 11,
+            Self::Multiply | Self::Divide => 12,
+            Self::Relational(_) => 9,
+            Self::Equality(_) => 8,
         }
     }
-    pub const fn from_operator(op: Operator) -> Option<Self> {
+    pub const fn from_operator((op, has_equal): (Operator, bool)) -> Option<Self> {
         Some(match op {
             Operator::Minus => Self::Subtract,
             Operator::Plus => Self::Add,
@@ -83,6 +122,22 @@ impl BinaryOp {
             Operator::Slash => Self::Divide,
             Operator::DoubleAnd => Self::LogicAnd,
             Operator::DoublePipe => Self::LogicOr,
+            Operator::AngleLeft => {
+                if has_equal {
+                    Self::Relational(Relational::LessEqual)
+                } else {
+                    Self::Relational(Relational::Less)
+                }
+            }
+            Operator::AngleRight => {
+                if has_equal {
+                    Self::Relational(Relational::GreaterEqual)
+                } else {
+                    Self::Relational(Relational::Greater)
+                }
+            }
+            Operator::DoubleEquals => Self::Equality(Equality::Equals),
+            Operator::ExclamationEquals => Self::Equality(Equality::NotEquals),
             Operator::Tilde | Operator::ExclamationMark => return None,
         })
     }

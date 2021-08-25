@@ -15,7 +15,12 @@ impl fmt::Display for TokenKind {
             Self::CloseParen => write!(f, "closing parentheses ')'"),
             Self::Semicolon => write!(f, "semicolon ';'"),
             Self::Whitespace => write!(f, "whitespace"),
-            Self::Operator { kind } => write!(f, "operator `{}`", kind),
+            Self::Operator { kind, has_equal } => write!(
+                f,
+                "operator `{}{}`",
+                kind,
+                if *has_equal { "=" } else { "" }
+            ),
         }
     }
 }
@@ -31,6 +36,10 @@ impl fmt::Display for Operator {
             Self::Slash => write!(f, "/"),
             Self::DoubleAnd => write!(f, "&&"),
             Self::DoublePipe => write!(f, "||"),
+            Self::AngleRight => write!(f, ">"),
+            Self::AngleLeft => write!(f, "<"),
+            Self::ExclamationEquals => write!(f, "!="),
+            Self::DoubleEquals => write!(f, "=="),
         }
     }
 }
@@ -99,8 +108,8 @@ impl<'a> Token<'a> {
     pub const fn number(source: Source<'a>) -> Self {
         Self::new(TokenKind::Number, source)
     }
-    pub const fn operator(kind: Operator, source: Source<'a>) -> Self {
-        Self::new(TokenKind::Operator { kind }, source)
+    pub const fn operator(kind: Operator, has_equal: bool, source: Source<'a>) -> Self {
+        Self::new(TokenKind::Operator { kind, has_equal }, source)
     }
     pub const fn identifier(source: Source<'a>) -> Self {
         Self::new(TokenKind::Identifier, source)
@@ -126,13 +135,13 @@ pub enum TokenKind {
     Identifier,
     Semicolon,
     Whitespace,
-    Operator { kind: Operator },
+    Operator { kind: Operator, has_equal: bool },
 }
 
 impl TokenKind {
-    pub const fn as_operator(self) -> Option<Operator> {
-        if let TokenKind::Operator { kind } = self {
-            Some(kind)
+    pub const fn as_operator(self) -> Option<(Operator, bool)> {
+        if let TokenKind::Operator { kind, has_equal } = self {
+            Some((kind, has_equal))
         } else {
             None
         }
@@ -149,6 +158,10 @@ pub enum Operator {
     Slash,
     DoubleAnd,
     DoublePipe,
+    AngleRight,
+    AngleLeft,
+    DoubleEquals,
+    ExclamationEquals,
 }
 
 #[derive(Debug)]
@@ -206,8 +219,10 @@ impl<'a> Lexer<'a> {
             return Ok(Some(Token::identifier(src)));
         }
         if let Some((start, kind)) = self.operator() {
+            let has_equal = self.skip_if(|x| x == '=').is_some();
             return Ok(Some(Token::operator(
                 kind,
+                has_equal,
                 self.source_until_current(start),
             )));
         }
@@ -234,10 +249,14 @@ impl<'a> Lexer<'a> {
         let op: Operator = self.choice::<Operator>(&[
             &|lexer: &mut Self| lexer.eat_char('+').map(|_| Operator::Plus),
             &|lexer: &mut Self| lexer.eat_char('-').map(|_| Operator::Minus),
+            &|lexer: &mut Self| lexer.eat_str("!=").map(|_| Operator::ExclamationEquals),
+            &|lexer: &mut Self| lexer.eat_str("==").map(|_| Operator::DoubleEquals),
             &|lexer: &mut Self| lexer.eat_char('!').map(|_| Operator::ExclamationMark),
             &|lexer: &mut Self| lexer.eat_char('~').map(|_| Operator::Tilde),
             &|lexer: &mut Self| lexer.eat_char('*').map(|_| Operator::Star),
             &|lexer: &mut Self| lexer.eat_char('/').map(|_| Operator::Slash),
+            &|lexer: &mut Self| lexer.eat_char('<').map(|_| Operator::AngleLeft),
+            &|lexer: &mut Self| lexer.eat_char('>').map(|_| Operator::AngleRight),
             &|lexer: &mut Self| lexer.eat_str("&&").map(|_| Operator::DoubleAnd),
             &|lexer: &mut Self| lexer.eat_str("||").map(|_| Operator::DoublePipe),
         ])?;

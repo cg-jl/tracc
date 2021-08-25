@@ -1,5 +1,31 @@
 use crate::{format_instr, format_instr_args, write_instruction};
+// use bitflags::bitflags;
 use std::fmt;
+
+// bitflags! {
+//     /// The ALU flags available to the assembly
+//     struct PState: u8 {
+//         /// Negative flag
+//         const N = 0b1000;
+//         /// Carry flag
+//         const C = 0b0100;
+//         /// Overflow flag
+//         const V = 0b0010;
+//         /// Zero flag
+//         const Z = 0b0001;
+//     }
+// }
+
+// impl PState {
+//     pub const fn to_immediate(self) -> Data {
+//         Data::Immediate(self.bits as u64)
+//     }
+// }
+
+// NOTE: could do something in the compiler to make
+// instructions that may modify state "adds", "subs" etc
+// and make decisions to modify or not the state.
+
 #[derive(Debug, Clone)]
 pub enum Assembly {
     Directive(Directive),
@@ -52,18 +78,30 @@ pub enum Instruction {
     /// Return from a function
     Ret,
     /// Move data to a register
-    Mov { target: Register, source: Data },
+    Mov {
+        target: Register,
+        source: Data,
+    },
     /// Move (with applied not) data to a register
-    MvN { target: Register, source: Data },
+    MvN {
+        target: Register,
+        source: Data,
+    },
     /// Compare a register with some data
-    Cmp { register: Register, data: Data },
+    Cmp {
+        register: Register,
+        data: Data,
+    },
     /// Sets register 1 or 0 depending on condition
     Cset {
         target: Register,
         condition: Condition,
     },
     /// Negate a register
-    Neg { target: Register, source: Register },
+    Neg {
+        target: Register,
+        source: Register,
+    },
     /// Add a register and a source of data into a register
     Add {
         target: Register,
@@ -90,9 +128,46 @@ pub enum Instruction {
         signed: bool,
     },
     /// Store a register into memory
-    Str { register: Register, address: Memory },
+    Str {
+        register: Register,
+        address: Memory,
+    },
     /// Load a register from memory
-    Ldr { register: Register, address: Memory },
+    Ldr {
+        register: Register,
+        address: Memory,
+    },
+    // /// Branch for different situations
+    Branch(Branch),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Branch {
+    /// normal (unconditional) branch, always executed
+    Unconditional {
+        register: Option<Register>,
+        label: Label,
+    },
+    /// branch with link (aka call)
+    Linked { label: Label },
+    /// Conditional branch
+    Conditional { condition: Condition, label: Label },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Label {
+    num: usize,
+}
+
+impl Label {
+    /// Creates a new label from its number
+    ///
+    /// # Safety
+    /// The number generated for this label **must** be unique.
+    /// Use [`LabelGenerator::new_label`] to get labels.
+    pub const unsafe fn new(num: usize) -> Self {
+        Self { num }
+    }
 }
 
 impl fmt::Display for Instruction {
@@ -121,7 +196,33 @@ impl fmt::Display for Instruction {
                 lhs,
                 rhs
             ),
+            Self::Branch(branch) => branch.fmt(f),
         }
+    }
+}
+
+impl fmt::Display for Branch {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Conditional { condition, label } => {
+                write_instruction!(f, format!("b{}", condition), label)
+            }
+            Self::Unconditional {
+                register: Some(register),
+                label,
+            } => write_instruction!(f, "br", register, label),
+            Self::Unconditional {
+                register: None,
+                label,
+            } => write_instruction!(f, "b", label),
+            Self::Linked { label } => write_instruction!(f, "bl", label),
+        }
+    }
+}
+
+impl fmt::Display for Label {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, ".L{}", self.num)
     }
 }
 
@@ -171,6 +272,7 @@ impl Instruction {
             | Self::Cmp { .. }
             | Self::Mul { .. }
             | Self::Div { .. }
+            | Self::Branch(_)
             | Self::Ret => {}
         }
     }
@@ -209,6 +311,10 @@ pub enum Condition {
     Equals,
     /// Previous comparison resulted in not equal
     NotEquals,
+    GreaterThan,
+    GreaterEqual,
+    LessThan,
+    LessEqual,
 }
 
 impl fmt::Display for Condition {
@@ -216,6 +322,10 @@ impl fmt::Display for Condition {
         match self {
             Self::Equals => write!(f, "eq"),
             Self::NotEquals => write!(f, "ne"),
+            Self::LessEqual => write!(f, "le"),
+            Self::LessThan => write!(f, "lt"),
+            Self::GreaterThan => write!(f, "gt"),
+            Self::GreaterEqual => write!(f, "ge"),
         }
     }
 }
