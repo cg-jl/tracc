@@ -3,7 +3,7 @@ use std::fmt;
 
 #[derive(Debug, Clone)]
 pub struct Error<T> {
-    kind: T,
+    pub kind: T,
     file: Option<std::path::PathBuf>,
     snippet: Option<Snippet>,
     contexts: Vec<&'static str>,

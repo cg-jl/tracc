@@ -97,6 +97,27 @@ impl<'a> Parser<'a> {
     {
         cont(self).map_err(|x| x.add_context(context))
     }
+
+    /// Iterates the same parser until a failure happens. The [`Err`] variant
+    /// is used only for lexing errors, the rest will only trigger a [`None`]
+    pub fn iterate<T: Parse>(&'a mut self) -> impl Iterator<Item = ParseRes<T>> + 'a {
+        let mut had_err = false;
+        std::iter::from_fn(move || {
+            if had_err {
+                None
+            } else {
+                match T::parse(self) {
+                    Err(p) if p.kind.is_critical() => {
+                        had_err = true;
+                        Some(Err(p))
+                    }
+                    Err(_) => None,
+                    ok => Some(ok),
+                }
+            }
+        })
+        .fuse()
+    }
 }
 
 pub type ParseRes<T> = Result<T, ParseError>;
@@ -112,6 +133,12 @@ pub enum ParseErrorKind {
     UnexpectedEOF {
         wanted: Option<WantedSpec<TokenKind>>,
     },
+}
+
+impl ParseErrorKind {
+    pub const fn is_critical(&self) -> bool {
+        matches!(self, Self::LexError(_))
+    }
 }
 
 pub trait Parse: Sized {
