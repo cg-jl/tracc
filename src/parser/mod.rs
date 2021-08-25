@@ -118,24 +118,6 @@ impl<'a> Parser<'a> {
         })
         .fuse()
     }
-
-    pub fn choice<T>(
-        &mut self,
-        parsers: &mut [&mut dyn FnMut(&mut Self) -> ParseRes<T>],
-    ) -> ParseRes<T> {
-        let mut parsers = parsers.iter_mut();
-        let mut last_err = match parsers.next().unwrap()(self) {
-            Err(e) => e,
-            Ok(t) => return Ok(t),
-        };
-        for p in parsers {
-            match p(self) {
-                Err(e) => last_err = e,
-                Ok(t) => return Ok(t),
-            }
-        }
-        Err(last_err)
-    }
 }
 
 pub type ParseRes<T> = Result<T, ParseError>;
