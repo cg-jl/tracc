@@ -1,6 +1,6 @@
 use crate::lexer::Operator;
 
-// TODO: span
+// TODO: spans
 
 #[derive(Debug)]
 pub struct Program(pub Function);
@@ -8,7 +8,16 @@ pub struct Program(pub Function);
 #[derive(Debug)]
 pub struct Function {
     pub name: Identifier,
-    pub return_expr: Expr,
+    pub body: Block,
+}
+
+// TODO: better debug for `Block`
+#[derive(Debug)]
+pub struct Block(pub Vec<Statement>);
+
+#[derive(Debug)]
+pub enum Statement {
+    Return(Expr),
 }
 
 #[derive(Debug)]

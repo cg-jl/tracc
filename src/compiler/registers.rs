@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 // TODO: differentiate between mutable and non-mutable access in
 // both instructions and the register manager
+// NOTE: when this happens; have the register manager not let mutable access with read-only access.
 
 pub fn with_registers<F>(stack: &mut StackManager, mut cont: F) -> AssemblyOutput
 where

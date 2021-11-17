@@ -1,3 +1,4 @@
+mod block;
 mod expr;
 mod function;
 mod labels;

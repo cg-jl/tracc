@@ -1,9 +1,12 @@
 use crate::error::*;
+
+mod block;
 use crate::lexer::*;
 mod expr;
 mod function;
 mod identifier;
 mod program;
+mod statement;
 
 // TODO: add measureme to the parser
 
@@ -100,23 +103,18 @@ impl<'a> Parser<'a> {
 
     /// Iterates the same parser until a failure happens. The [`Err`] variant
     /// is used only for lexing errors, the rest will only trigger a [`None`]
-    pub fn iterate<T: Parse>(&'a mut self) -> impl Iterator<Item = ParseRes<T>> + 'a {
-        let mut had_err = false;
-        std::iter::from_fn(move || {
-            if had_err {
-                None
-            } else {
-                match T::parse(self) {
-                    Err(p) if p.kind.is_critical() => {
-                        had_err = true;
-                        Some(Err(p))
-                    }
-                    Err(_) => None,
-                    ok => Some(ok),
-                }
+    pub fn iterate<T: Parse>(&mut self) -> ParseRes<Vec<T>> {
+        let mut result = Vec::new();
+
+        loop {
+            match T::parse(self) {
+                Err(p) if p.kind.is_critical() => return Err(p),
+                Err(_) => break,
+                Ok(ok) => result.push(ok),
             }
-        })
-        .fuse()
+        }
+
+        Ok(result)
     }
 }
 
