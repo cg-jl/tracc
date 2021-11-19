@@ -28,6 +28,7 @@ impl fmt::Display for TokenKind {
 impl fmt::Display for Operator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Equals => write!(f, "="),
             Self::ExclamationMark => write!(f, "!"),
             Self::Minus => write!(f, "-"),
             Self::Plus => write!(f, "+"),
@@ -161,6 +162,7 @@ pub enum Operator {
     AngleRight,
     AngleLeft,
     DoubleEquals,
+    Equals,
     ExclamationEquals,
 }
 
@@ -251,6 +253,7 @@ impl<'a> Lexer<'a> {
             &|lexer: &mut Self| lexer.eat_char('-').map(|_| Operator::Minus),
             &|lexer: &mut Self| lexer.eat_str("!=").map(|_| Operator::ExclamationEquals),
             &|lexer: &mut Self| lexer.eat_str("==").map(|_| Operator::DoubleEquals),
+            &|lexer: &mut Self| lexer.eat_char('=').map(|_| Operator::Equals),
             &|lexer: &mut Self| lexer.eat_char('!').map(|_| Operator::ExclamationMark),
             &|lexer: &mut Self| lexer.eat_char('~').map(|_| Operator::Tilde),
             &|lexer: &mut Self| lexer.eat_char('*').map(|_| Operator::Star),

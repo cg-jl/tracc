@@ -284,6 +284,8 @@ pub enum Data {
     Register(Register),
     /// Take data from an immediate value
     Immediate(u64),
+    /// Stack offset
+    StackOffset(u64),
 }
 
 impl fmt::Display for Data {
@@ -291,6 +293,7 @@ impl fmt::Display for Data {
         match self {
             Self::Immediate(value) => write!(f, "#{}", value),
             Self::Register(reg) => write!(f, "{}", reg),
+            Self::StackOffset(_) => unreachable!("stack offsets must be determined before"),
         }
     }
 }

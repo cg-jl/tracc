@@ -1,8 +1,11 @@
 use super::{Parse, ParseErrorKind, ParseRes, Parser, WantedSpec};
+use crate::ast::Associativity;
 use crate::ast::BinaryOp;
 use crate::ast::Expr;
 use crate::ast::UnaryOp;
+use crate::ast::VariableKind;
 use crate::lexer::TokenKind;
+
 
 impl Parse for Expr {
     fn parse(parser: &mut Parser) -> ParseRes<Self> {
@@ -46,9 +49,14 @@ fn parse_primary(parser: &mut Parser) -> ParseRes<Expr> {
                 parser.accept_current();
                 Ok(Expr::Constant(num))
             }
+            TokenKind::Identifier => {
+                let source = parser.current_token_source().to_string();
+                parser.accept_current();
+                Ok(Expr::Variable(VariableKind::Unprocessed(source)))
+            }
             tok => parser.reject_current_token(ParseErrorKind::Expected {
                 found: tok,
-                wanted: WantedSpec::Description("open paren or number"),
+                wanted: WantedSpec::Description("open paren, identifier or number"),
             }),
         }?;
         for operator in ops.drain(..).rev() {
@@ -78,7 +86,11 @@ fn parse_binary_expression(
             .peek_token()?
             .and_then(TokenKind::as_operator)
             .and_then(BinaryOp::from_operator)
-            .filter(|op2| op2.precedence() > op.precedence())
+            .filter(|op2| {
+                op2.associativity() == Associativity::Left && op2.precedence() > op.precedence()
+                    || op2.associativity() == Associativity::Right
+                        && op2.precedence() == op.precedence()
+            })
             .is_some()
         {
             rhs = parse_binary_expression(parser, rhs, min_precedence + 1)?;

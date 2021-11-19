@@ -47,16 +47,36 @@ impl StackManager {
             self.currently_used, 0,
             "finalize() with currently used bytes"
         );
-        let final_allocated_size = align_to_stack(self.allocated_size);
-        let adjust_offset = Assembly::map_instruction(Instruction::map_over_memory(|mem| {
-            if let Memory {
-                offset: Offset::Undetermined(offt),
-                ..
-            } = mem
-            {
-                mem.offset = Offset::Determined(final_allocated_size - *offt);
+        let final_allocated_size = align_to_stack(self.allocated_size) as u64;
+        let adjust_memory = |mem: &mut Memory| {
+            if let Offset::Undetermined(from_stack) = mem.offset {
+                mem.offset = Offset::Determined(final_allocated_size as usize - from_stack);
             }
-        }));
+        };
+        let adjust_data = |data: &mut Data| {
+            if let Data::StackOffset(from_stack) = data {
+                *data = Data::Immediate(final_allocated_size - *from_stack);
+            }
+        };
+        let adjust_offset = Assembly::map_instruction(|instr| match instr {
+            Instruction::Add { rhs, .. } => {
+                adjust_data(rhs);
+            }
+            Instruction::Cmp { data, .. } => adjust_data(data),
+            Instruction::Div { rhs, .. } => adjust_data(rhs),
+            Instruction::Ldr { address, .. } => adjust_memory(address),
+            Instruction::Mov { source, .. } => adjust_data(source),
+            Instruction::Mul { rhs, .. } => {
+                adjust_data(rhs);
+            }
+            Instruction::MvN { source, .. } => adjust_data(source),
+            Instruction::Str { address, .. } => adjust_memory(address),
+            Instruction::Sub { rhs, .. } => {
+                adjust_data(rhs);
+            }
+            // NOTE: this is a good error point
+            _ => (),
+        });
 
         for asm in instructions.iter_mut() {
             adjust_offset(asm);

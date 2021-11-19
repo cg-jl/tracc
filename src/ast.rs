@@ -18,13 +18,18 @@ pub struct Block(pub Vec<Statement>);
 #[derive(Debug)]
 pub enum Statement {
     Return(Expr),
+    SingleExpr(Expr),
+    DeclareVar(String), // TODO: add initial assignment possibility; multiple vars
 }
 
 #[derive(Debug)]
 pub struct Identifier(pub String);
 
+// NOTE: should I make a processed expr type?
 #[derive(Debug, PartialEq, Eq)]
 pub enum Expr {
+    // TODO: convert variables to &'source str instead of using strings (`Parse<'source>`)
+    Variable(VariableKind),
     Constant(i32),
     Unary {
         operator: UnaryOp,
@@ -35,6 +40,21 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
+}
+
+impl Expr {
+    pub fn is_writable(&self) -> bool {
+        match self {
+            Self::Variable(_) => true,
+            _ => false, // NOTE: missing pointers for lvalues
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum VariableKind {
+    Unprocessed(String),        // TODO: this must be &'source str later
+    Processed { index: usize }, // NOTE: currently all variables are ints.
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +79,7 @@ impl UnaryOp {
             | Operator::AngleLeft
             | Operator::AngleRight
             | Operator::ExclamationEquals
+            | Operator::Equals
             | Operator::DoubleEquals => return None,
         })
     }
@@ -74,6 +95,13 @@ pub enum BinaryOp {
     LogicOr,
     Relational(Relational),
     Equality(Equality),
+    Assign,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Associativity {
+    Right,
+    Left,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,6 +141,19 @@ impl Relational {
 }
 
 impl BinaryOp {
+    pub const fn associativity(self) -> Associativity {
+        match self {
+            Self::LogicAnd
+            | Self::LogicOr
+            | Self::Add
+            | Self::Subtract
+            | Self::Multiply
+            | Self::Divide
+            | Self::Relational(_)
+            | Self::Equality(_) => Associativity::Left,
+            Self::Assign => Associativity::Right,
+        }
+    }
     pub const fn precedence(self) -> u8 {
         match self {
             Self::LogicAnd => 4,
@@ -120,6 +161,7 @@ impl BinaryOp {
             Self::Add | Self::Subtract => 11,
             Self::Multiply | Self::Divide => 12,
             Self::Relational(_) => 9,
+            Self::Assign => 14, // NOTE: assignment is RTL!
             Self::Equality(_) => 8,
         }
     }
@@ -145,6 +187,7 @@ impl BinaryOp {
                     Self::Relational(Relational::Greater)
                 }
             }
+            Operator::Equals => Self::Assign,
             Operator::DoubleEquals => Self::Equality(Equality::Equals),
             Operator::ExclamationEquals => Self::Equality(Equality::NotEquals),
             Operator::Tilde | Operator::ExclamationMark => return None,

@@ -2,6 +2,7 @@ mod block;
 mod expr;
 mod function;
 mod labels;
+use std::iter::FromIterator;
 mod program;
 pub mod registers;
 pub mod stack;
@@ -81,6 +82,22 @@ impl AssemblyOutput {
     }
     pub fn push_label(&mut self, label: Label) {
         self.push_asm(Assembly::Label(label.to_string()))
+    }
+}
+
+impl IntoIterator for AssemblyOutput {
+    type IntoIter = <VecDeque<Assembly> as IntoIterator>::IntoIter;
+    type Item = <Self::IntoIter as Iterator>::Item;
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+impl FromIterator<Assembly> for AssemblyOutput {
+    fn from_iter<T: IntoIterator<Item = Assembly>>(iter: T) -> Self {
+        Self {
+            inner: VecDeque::from_iter(iter),
+        }
     }
 }
 

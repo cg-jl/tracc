@@ -8,13 +8,16 @@ impl Parse for Block {
             parser.expect_token(TokenKind::OpenBrace)?;
             parser.accept_current();
 
-            let statements = parser.iterate()?;
+            let mut statements = Vec::new();
+
+            while parser.peek_token()? != Some(TokenKind::CloseBrace) {
+                statements.push(parser.parse()?);
+            }
 
             parser.expect_token(TokenKind::CloseBrace)?;
             parser.accept_current();
 
             Ok(Self(statements))
-
         })
     }
 }
