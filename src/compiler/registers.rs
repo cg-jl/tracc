@@ -91,14 +91,15 @@ impl RegisterManager {
         };
         RegisterDescriptor { register }
     }
-    pub fn using_registers<F>(
+    pub fn using_registers<F, T>(
         &mut self,
         stack: &mut StackManager,
         register_data: &[(RegisterDescriptor, BitSize)],
         mut cont: F,
     ) -> AssemblyOutput
     where
-        F: FnMut(&[Register]) -> AssemblyOutput,
+        F: FnMut(&[Register]) -> T,
+        T: Into<AssemblyOutput>,
     {
         let registers: Vec<_> = register_data
             .iter()
@@ -118,17 +119,18 @@ impl RegisterManager {
             })
             .collect();
 
-        saving_registers(stack, &registers_need_saving, || cont(&registers))
+        saving_registers(stack, &registers_need_saving, || cont(&registers).into())
     }
-    pub fn using_register<F>(
+    pub fn using_register<F, T>(
         &mut self,
         stack: &mut StackManager,
         register: RegisterDescriptor,
         bit_size: BitSize,
-        cont: F,
+        mut cont: F,
     ) -> AssemblyOutput
     where
-        F: Fn(&mut StackManager, &mut Self, Register) -> AssemblyOutput,
+        F: FnMut(&mut StackManager, &mut Self, Register) -> T,
+        T: Into<AssemblyOutput>,
     {
         let RegisterDescriptor { register } = register;
         if (9..=15).contains(&register) {
@@ -138,10 +140,10 @@ impl RegisterManager {
         let current = *self.register_usage.entry(register).or_insert(0);
         if current != 0 {
             saving_register(stack, real_register, |stack| {
-                cont(stack, self, real_register)
+                cont(stack, self, real_register).into()
             })
         } else {
-            cont(stack, self, real_register)
+            cont(stack, self, real_register).into()
         }
     }
     pub fn locking_register<F, T>(&mut self, register: RegisterDescriptor, mut cont: F) -> T

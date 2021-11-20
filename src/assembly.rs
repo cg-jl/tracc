@@ -31,6 +31,7 @@ pub enum Assembly {
     Directive(Directive),
     Label(String),
     Instruction(Instruction),
+    Comment(String),
 }
 
 impl fmt::Display for Assembly {
@@ -39,6 +40,7 @@ impl fmt::Display for Assembly {
             Self::Directive(direct) => write!(f, "\t.{}", direct),
             Self::Instruction(instr) => write!(f, "\t{}", instr),
             Self::Label(name) => write!(f, "{}:", name),
+            Self::Comment(comment) => write!(f, "// {}", comment),
         }
     }
 }
@@ -56,6 +58,18 @@ impl Assembly {
     }
 }
 
+impl From<Instruction> for Assembly {
+    fn from(instr: Instruction) -> Self {
+        Self::Instruction(instr)
+    }
+}
+
+impl From<Branch> for Assembly {
+    fn from(branch: Branch) -> Self {
+        Self::Instruction(Instruction::Branch(branch))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Directive {
     Global(String),
@@ -68,7 +82,7 @@ impl fmt::Display for Directive {
         match self {
             Self::Global(name) => write!(f, "global {}", name),
             Self::Type(name, t) => write!(f, "type {}, %{}", name, t),
-            Self::Architecture(arch) => write!(f, "arch {:?}", arch),
+            Self::Architecture(arch) => write!(f, "arch {}", arch),
         }
     }
 }
@@ -157,6 +171,12 @@ pub enum Branch {
 #[derive(Debug, Clone, Copy)]
 pub struct Label {
     num: usize,
+}
+
+impl Into<Assembly> for Label {
+    fn into(self) -> Assembly {
+        Assembly::Label(self.to_string())
+    }
 }
 
 impl Label {
@@ -363,8 +383,8 @@ impl Register {
     }
 }
 
-/// wether the register is 32 or 64 bit (to use 'w' or 'z')
-#[derive(Debug, Clone, Copy)]
+/// wether the register is 32 or 64 bit (to use 'w' or 'x')
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BitSize {
     Bit32,
     Bit64,

@@ -9,6 +9,8 @@ pub mod stack;
 use crate::assembly::*;
 use std::collections::vec_deque::IterMut;
 use std::collections::VecDeque;
+mod target;
+
 pub trait Compile {
     fn compile(self) -> AssemblyOutput;
 }
@@ -18,6 +20,7 @@ pub trait CompileWith<State> {
 }
 
 #[repr(transparent)]
+#[derive(Debug, Clone)]
 pub struct AssemblyOutput {
     inner: VecDeque<Assembly>,
 }
@@ -65,9 +68,20 @@ impl AssemblyOutput {
     pub fn release(&mut self) -> std::collections::vec_deque::Drain<'_, Assembly> {
         self.inner.drain(..)
     }
-    pub fn extend(&mut self, mut other: Self) {
-        self.inner.extend(other.release());
+    pub fn extend<T: Into<Assembly>>(&mut self, other: impl IntoIterator<Item = T>) {
+        self.inner.extend(other.into_iter().map(|x| x.into()));
     }
+
+    pub fn chain<T: Into<Assembly>>(mut self, other: impl IntoIterator<Item = T>) -> Self {
+        self.extend(other);
+        self
+    }
+
+    pub fn chain_single(mut self, other: impl Into<Assembly>) -> Self {
+        self.push_asm(other.into());
+        self
+    }
+    // TODO: join all `singleton`s into a single one
     pub fn singleton_asm(assembly: Assembly) -> Self {
         let mut s = Self::new();
         s.push_asm(assembly);
@@ -85,6 +99,12 @@ impl AssemblyOutput {
     }
 }
 
+impl<A: Into<Assembly>> From<A> for AssemblyOutput {
+    fn from(asm: A) -> Self {
+        Self::singleton_asm(asm.into())
+    }
+}
+
 impl IntoIterator for AssemblyOutput {
     type IntoIter = <VecDeque<Assembly> as IntoIterator>::IntoIter;
     type Item = <Self::IntoIter as Iterator>::Item;
@@ -93,10 +113,10 @@ impl IntoIterator for AssemblyOutput {
     }
 }
 
-impl FromIterator<Assembly> for AssemblyOutput {
-    fn from_iter<T: IntoIterator<Item = Assembly>>(iter: T) -> Self {
+impl<A: Into<Assembly>> FromIterator<A> for AssemblyOutput {
+    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
         Self {
-            inner: VecDeque::from_iter(iter),
+            inner: VecDeque::from_iter(iter.into_iter().map(|x| x.into())),
         }
     }
 }

@@ -15,7 +15,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     use comp::compiler::Compile;
     use std::fs;
     use std::io::Write;
-    let opt = Opt::from_args_safe()?;
+    let opt = Opt::from_args();
     let filename = opt.file;
     let file = fs::read_to_string(&filename)?;
     let out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));

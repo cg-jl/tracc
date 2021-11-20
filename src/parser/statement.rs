@@ -1,6 +1,7 @@
 use super::{Parse, ParseRes, Parser};
 use crate::ast::Identifier;
 use crate::ast::Statement;
+use crate::lexer::Operator;
 use crate::lexer::TokenKind;
 
 // TODO: parse an optional expression to declare variable
@@ -23,9 +24,19 @@ impl Parse for Statement {
                         "int" => {
                             parser.accept_current();
                             let Identifier(name) = parser.parse()?;
+                            let init = if let Some(TokenKind::Operator {
+                                kind: Operator::Equals,
+                                ..
+                            }) = parser.peek_token()?
+                            {
+                                parser.accept_current();
+                                parser.parse().map(Some)?
+                            } else {
+                                None
+                            };
                             parser.expect_token(TokenKind::Semicolon)?;
                             parser.accept_current();
-                            Self::DeclareVar(name)
+                            Self::DeclareVar { name, init }
                         }
                         _ => single_expr(parser)?,
                     }

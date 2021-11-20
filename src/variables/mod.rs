@@ -2,6 +2,7 @@ use super::ast::Block;
 use super::ast::Expr;
 use super::ast::Statement;
 use super::ast::VariableKind;
+use crate::ast::BinaryOp;
 use std::collections::HashMap;
 
 // NOTE: all variables are currently integers. no type info is taken into account.
@@ -13,14 +14,32 @@ pub fn walk_block(Block(statements): &mut Block) -> usize {
         walk_statement(st, &mut ctx);
     }
 
-    statements.retain(|x| !matches!(x, Statement::DeclareVar(_)));
+    // remove all the declare var statements with no initializer
+    statements.retain(|x| !matches!(x, Statement::DeclareVar { init: None, .. }));
+    // transform all the declare var statements to assign operations
+    for st in statements.iter_mut() {
+        let new_statement = match std::mem::take(st) {
+            Statement::DeclareVar {
+                init: Some(expr),
+                name,
+            } => Statement::SingleExpr(Expr::Binary {
+                operator: BinaryOp::Assign,
+                // using ctx[] because it HAS to be there; we just process it.
+                lhs: Box::new(Expr::Variable(VariableKind::Processed { index: ctx[&name] })),
+                rhs: Box::new(expr),
+            }),
+            other => other,
+        };
+        std::mem::replace(st, new_statement);
+
+    }
 
     ctx.len()
 }
 
 fn walk_statement(statement: &mut Statement, context: &mut HashMap<String, usize>) {
     match statement {
-        Statement::DeclareVar(name) => {
+        Statement::DeclareVar { name, .. } => {
             context.insert(name.to_string(), context.len());
         }
         Statement::Return(expr) => {
@@ -46,6 +65,8 @@ fn walk_expr(expr: &mut Expr, context: &mut HashMap<String, usize>) {
                 let index = context
                     .get(name)
                     .map(|x| *x)
+                     // TODO: this is a user error, and must be reported through other means.
+                    // TODO: this is a user error, and must be reported through other means.
                     .expect(&format!("no variable named `{}` in scope", name));
 
                 *kind = VariableKind::Processed { index };

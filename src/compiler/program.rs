@@ -1,10 +1,14 @@
+use crate::assembly::Directive;
+use crate::ast::Program;
+
 use super::AssemblyOutput;
 use super::Compile;
-use crate::ast::Program;
 
 impl Compile for Program {
     fn compile(self) -> AssemblyOutput {
         let Program(function) = self;
-        function.compile()
+        let mut out = function.compile();
+        out.cons_directive(Directive::Architecture(String::from("armv8-a")));
+        out
     }
 }
