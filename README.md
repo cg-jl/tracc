@@ -15,18 +15,27 @@ Input file:
 
 ```c
 int foo() {
-  return 1 + 2;
+  int a = 1;
+  int b = 2;
+  return a + b;
 }
 ```
 
 Output assembly:
 
 ```armasm
-  .global foo
-  .type foo, %function
-main:
-  mov w1, #1
-  mov w0, #2
-  add w0, w1, w0
-  ret
+	.arch armv8-a
+	.global foo
+	.type foo, %function
+foo:
+	sub sp, sp, #16
+	mov w0, #1
+	str w0, [sp, #12]
+	mov w0, #2
+	str w0, [sp, #8]
+	ldr w1, [sp, #12]
+	ldr w0, [sp, #8]
+	add w0, w1, w0
+	add sp, sp, #16
+	ret
 ```
