@@ -24,6 +24,8 @@ pub fn expr_as_target(expr: &Expr, var_ctx: &[Memory]) -> (Target, AssemblyOutpu
     }
 }
 
+// TODO: operate on constant expressions wisely
+
 // TODO: remove unused expressions
 pub fn compile_expr(
     expr: &Expr,
@@ -31,6 +33,7 @@ pub fn compile_expr(
     registers: &mut RegisterManager,
     stack: &mut StackManager,
     var_ctx: &[Memory],
+    is_ignored: bool,
 ) -> AssemblyOutput {
     match expr {
         Expr::Variable(VariableKind::Unprocessed(name)) => {
@@ -40,14 +43,26 @@ pub fn compile_expr(
             // Bit32 because all the variables are int32 for the moment
             target.load_from_memory(var_ctx[*index], BitSize::Bit32, registers, stack)
         }
-        Expr::Constant(value) => target.load_immediate(*value, registers, stack),
-        Expr::Unary { operator, expr } => compile_expr(expr, target, registers, stack, var_ctx)
-            .chain(target.through_register(
-                |_, _, target| compile_unary(*operator, target),
-                registers,
-                true, // operator does modify the location
-                stack,
-            )),
+        Expr::Constant(value) => {
+            if !is_ignored {
+                target.load_immediate(*value, registers, stack)
+            } else {
+                AssemblyOutput::new()
+            }
+        }
+        Expr::Unary { operator, expr } => {
+            let expr = compile_expr(expr, target, registers, stack, var_ctx, is_ignored);
+            if is_ignored {
+                expr
+            } else {
+                expr.chain(target.through_register(
+                    |_, _, target| compile_unary(*operator, target),
+                    registers,
+                    true, // operator does modify the location
+                    stack,
+                ))
+            }
+        }
         Expr::Binary {
             operator: BinaryOp::LogicAnd,
             lhs,
@@ -65,14 +80,31 @@ pub fn compile_expr(
             // fail:
             //   mov rx, #0
             // end:
-            let (failed, end) = {
+            let (failed, maybe_end) = {
                 let gen = LabelGenerator::global();
-                (gen.new_label(), gen.new_label())
+                (
+                    gen.new_label(),
+                    if !is_ignored {
+                        Some(gen.new_label())
+                    } else {
+                        None
+                    },
+                )
             };
-            let failed_out = target.load_immediate(0, registers, stack).labelled(failed);
-            let ok = target.load_immediate(1, registers, stack);
-            let compute_first = compile_expr(lhs, target, registers, stack, var_ctx);
-            let compute_second = compile_expr(rhs, target, registers, stack, var_ctx);
+            let failed_out = if !is_ignored {
+                target.load_immediate(0, registers, stack)
+            } else {
+                AssemblyOutput::new()
+            }
+            .labelled(failed);
+            let ok = if !is_ignored {
+                target.load_immediate(1, registers, stack)
+            } else {
+                AssemblyOutput::new()
+            };
+            // both are taken into account
+            let compute_first = compile_expr(lhs, target, registers, stack, var_ctx, false);
+            let compute_second = compile_expr(rhs, target, registers, stack, var_ctx, is_ignored);
             // comparison doesn't modify the location
             let compare_and_bail = target.through_register(
                 |_, _, register| {
@@ -94,12 +126,14 @@ pub fn compile_expr(
                 .chain(compute_second)
                 .chain(compare_and_bail)
                 .chain(ok)
-                .chain_single(Instruction::Branch(Branch::Unconditional {
-                    register: None,
-                    label: end,
+                .chain(maybe_end.map(|end| {
+                    Instruction::Branch(Branch::Unconditional {
+                        register: None,
+                        label: end,
+                    })
                 }))
                 .chain(failed_out)
-                .chain_single(end)
+                .chain(maybe_end)
         }
         Expr::Binary {
             operator: BinaryOp::LogicOr,
@@ -118,9 +152,16 @@ pub fn compile_expr(
             // set_one:
             //   mov rx, #1
             // end:
-            let (set_one, end) = {
+            let (set_one, maybe_end) = {
                 let gen = LabelGenerator::global();
-                (gen.new_label(), gen.new_label())
+                (
+                    gen.new_label(),
+                    if !is_ignored {
+                        Some(gen.new_label())
+                    } else {
+                        None
+                    },
+                )
             };
             let compare_zero = target.through_register(
                 |_, _, register| Instruction::Cmp {
@@ -132,7 +173,7 @@ pub fn compile_expr(
                 stack,
             );
             // compute lhs
-            compile_expr(lhs, target, registers, stack, var_ctx)
+            compile_expr(lhs, target, registers, stack, var_ctx, false)
                 // if lhs != 0, then go to set_one and shortcut
                 .chain(compare_zero.clone())
                 .chain_single(Instruction::Branch(Branch::Conditional {
@@ -140,22 +181,43 @@ pub fn compile_expr(
                     label: set_one,
                 }))
                 // otherwise, compute rhs
-                .chain(compile_expr(rhs, target, registers, stack, var_ctx))
+                .chain(compile_expr(
+                    rhs, target, registers, stack, var_ctx, is_ignored,
+                ))
                 // if it wasn't zero, then go to set_one again
-                .chain(compare_zero)
-                .chain_single(Instruction::Branch(Branch::Conditional {
-                    condition: Condition::NotEquals,
-                    label: set_one,
-                }))
+                .chain(if !is_ignored {
+                    compare_zero
+                } else {
+                    AssemblyOutput::new()
+                })
+                .chain(if !is_ignored {
+                    Some(Instruction::Branch(Branch::Conditional {
+                        condition: Condition::NotEquals,
+                        label: set_one,
+                    }))
+                } else {
+                    None
+                })
                 // otherwise, load a zero and go to end
-                .chain(target.load_immediate(0, registers, stack))
-                .chain_single(Branch::Unconditional {
+                .chain(if !is_ignored {
+                    target.load_immediate(0, registers, stack)
+                } else {
+                    AssemblyOutput::new()
+                })
+                .chain(maybe_end.map(|end| Branch::Unconditional {
                     register: None,
                     label: end,
-                })
+                }))
                 // set_one: put one
-                .chain(target.load_immediate(1, registers, stack).labelled(set_one))
-                .chain_single(end)
+                .chain(
+                    if !is_ignored {
+                        target.load_immediate(1, registers, stack)
+                    } else {
+                        AssemblyOutput::new()
+                    }
+                    .labelled(set_one),
+                )
+                .chain(maybe_end)
         }
         Expr::Binary {
             operator: BinaryOp::Assign,
@@ -164,7 +226,7 @@ pub fn compile_expr(
         } => {
             let (lhs_target, prepare_lhs) =
                 target.locking_target(|_| expr_as_target(lhs, var_ctx), registers);
-            let prepare_rhs = compile_expr(rhs, target, registers, stack, var_ctx);
+            let prepare_rhs = compile_expr(rhs, target, registers, stack, var_ctx, false);
             prepare_rhs
                 .chain(prepare_lhs)
                 .chain(lhs_target.load_from_target(target, registers, stack))
@@ -181,28 +243,32 @@ pub fn compile_expr(
                         rd: target,
                         bits: BitSize::Bit32,
                     };
-                    let out = compile_expr(lhs, &target, registers, stack, var_ctx);
+                    let out = compile_expr(lhs, &target, registers, stack, var_ctx, is_ignored);
                     (target, out)
                 },
                 registers,
             );
             let rhs_out = lhs_target.locking_target(
-                |registers| compile_expr(rhs, target, registers, stack, var_ctx),
+                |registers| compile_expr(rhs, target, registers, stack, var_ctx, is_ignored),
                 registers,
             );
-            let binop = target.through_register(
-                |stack, registers, rhs| {
-                    lhs_target.through_register(
-                        |_, _, lhs| compile_binary(*operator, lhs, rhs, rhs),
-                        registers,
-                        false,
-                        stack,
-                    )
-                },
-                registers,
-                true,
-                stack,
-            );
+            let binop = if !is_ignored {
+                target.through_register(
+                    |stack, registers, rhs| {
+                        lhs_target.through_register(
+                            |_, _, lhs| compile_binary(*operator, lhs, rhs, rhs),
+                            registers,
+                            false,
+                            stack,
+                        )
+                    },
+                    registers,
+                    true,
+                    stack,
+                )
+            } else {
+                AssemblyOutput::new()
+            };
             lhs_out.chain(rhs_out).chain(binop)
             // let (lhs_target, mut lhs_out) = registers.locking_register(target, |registers| {
             //     let target = registers.get_suitable_register(UsageContext::Normal);

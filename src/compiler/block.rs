@@ -16,13 +16,13 @@ pub fn compile_block(
     for statement in &block.0 {
         out.extend(match statement {
             Statement::Return(expr) => {
-                compile_expr(expr, bail_return_target, registers, stack, var_ctx)
+                compile_expr(expr, bail_return_target, registers, stack, var_ctx, false)
             }
             Statement::DeclareVar { .. } => {
                 unreachable!("declaring variables should not get to assembly phase")
             }
             Statement::SingleExpr(expr) => {
-                compile_expr(expr, bail_return_target, registers, stack, var_ctx)
+                compile_expr(expr, bail_return_target, registers, stack, var_ctx, true)
             }
         })
     }

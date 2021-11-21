@@ -21,7 +21,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
-    let output: Vec<_> = program.compile().release().collect();
+    let output = program.compile();
     let mut file = fs::File::create(out_file)?;
     for x in output {
         writeln!(file, "{}", x)?;
