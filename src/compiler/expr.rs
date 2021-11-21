@@ -6,7 +6,7 @@ use super::{
     AssemblyOutput, Memory,
 };
 use crate::{
-    assembly::{Assembly, BitSize, Branch, Condition, Data, Instruction, Register},
+    assembly::{BitSize, Branch, Condition, Data, Instruction, Register},
     ast::{BinaryOp, Expr, UnaryOp, VariableKind},
 };
 

@@ -50,10 +50,7 @@ pub enum Expr {
 
 impl Expr {
     pub fn is_writable(&self) -> bool {
-        match self {
-            Self::Variable(_) => true,
-            _ => false, // NOTE: missing pointers for lvalues
-        }
+        matches!(self, Self::Variable(_))
     }
 }
 
@@ -203,6 +200,8 @@ impl BinaryOp {
 
 #[cfg(test)]
 mod tests {
+    use crate::parser::{Parse, ParseRes, Parser};
+
     use super::*;
 
     fn parse_test<T: Parse>(source: &str) -> ParseRes<T> {

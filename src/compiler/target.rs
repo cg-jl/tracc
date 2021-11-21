@@ -3,7 +3,7 @@ use super::{
     stack::StackManager,
     AssemblyOutput,
 };
-use crate::assembly::{Assembly, BitSize, Data, Instruction, Memory, Register};
+use crate::assembly::{BitSize, Data, Instruction, Memory, Register};
 
 #[derive(Debug, Clone)]
 pub enum Target {

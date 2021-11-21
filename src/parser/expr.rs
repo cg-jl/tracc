@@ -6,7 +6,6 @@ use crate::ast::UnaryOp;
 use crate::ast::VariableKind;
 use crate::lexer::TokenKind;
 
-
 impl Parse for Expr {
     fn parse(parser: &mut Parser) -> ParseRes<Self> {
         parse_primary(parser)
@@ -82,14 +81,21 @@ fn parse_binary_expression(
     {
         parser.accept_current();
         let mut rhs = parse_primary(parser)?;
+        let this_precedence = op.precedence();
+        #[allow(clippy::blocks_in_if_conditions)]
+        // XXX: I don't know what clippy is trying to tell me; that closure is fine.
         while parser
             .peek_token()?
             .and_then(TokenKind::as_operator)
             .and_then(BinaryOp::from_operator)
-            .filter(|op2| {
-                op2.associativity() == Associativity::Left && op2.precedence() > op.precedence()
-                    || op2.associativity() == Associativity::Right
-                        && op2.precedence() == op.precedence()
+            .filter(move |op2| {
+                let other_precedence = op2.precedence();
+                let assoc = op2.associativity();
+                if let Associativity::Left = assoc {
+                    other_precedence > this_precedence
+                } else {
+                    other_precedence == this_precedence
+                }
             })
             .is_some()
         {

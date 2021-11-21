@@ -173,9 +173,9 @@ pub struct Label {
     num: usize,
 }
 
-impl Into<Assembly> for Label {
-    fn into(self) -> Assembly {
-        Assembly::Label(self.to_string())
+impl From<Label> for Assembly {
+    fn from(val: Label) -> Self {
+        Assembly::Label(val.to_string())
     }
 }
 
@@ -446,7 +446,7 @@ impl Offset {
     pub fn partition(self, block_size: usize) -> Box<dyn Iterator<Item = Self>> {
         match self {
             Self::Determined(begin) => Box::new(
-                partition(block_size, 0)
+                partition(block_size, block_size)
                     .take_while(move |x| *x <= begin)
                     .map(Self::Determined),
             ),
