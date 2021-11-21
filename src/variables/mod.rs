@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 pub fn walk_block(Block(statements): &mut Block) -> usize {
     let mut ctx = HashMap::new();
-    for (i, st) in statements.iter_mut().enumerate() {
+    for st in statements.iter_mut() {
         walk_statement(st, &mut ctx);
     }
 
@@ -20,18 +20,22 @@ pub fn walk_block(Block(statements): &mut Block) -> usize {
     for st in statements.iter_mut() {
         let new_statement = match std::mem::take(st) {
             Statement::DeclareVar {
-                init: Some(expr),
+                init: Some(mut expr),
                 name,
-            } => Statement::SingleExpr(Expr::Binary {
-                operator: BinaryOp::Assign,
-                // using ctx[] because it HAS to be there; we just process it.
-                lhs: Box::new(Expr::Variable(VariableKind::Processed { index: ctx[&name] })),
-                rhs: Box::new(expr),
-            }),
+            } => {
+                walk_expr(&mut expr, &ctx);
+                Statement::SingleExpr(Expr::Binary {
+                    operator: BinaryOp::Assign,
+                    // using ctx[] because it HAS to be there; we just process it.
+                    lhs: Box::new(Expr::Variable(VariableKind::Processed {
+                        index: ctx[&name],
+                    })),
+                    rhs: Box::new(expr),
+                })
+            }
             other => other,
         };
-        std::mem::replace(st, new_statement);
-
+        *st = new_statement;
     }
 
     ctx.len()
@@ -51,7 +55,7 @@ fn walk_statement(statement: &mut Statement, context: &mut HashMap<String, usize
     }
 }
 
-fn walk_expr(expr: &mut Expr, context: &mut HashMap<String, usize>) {
+fn walk_expr(expr: &mut Expr, context: &HashMap<String, usize>) {
     match expr {
         Expr::Binary { lhs, rhs, .. } => {
             walk_expr(lhs, context);
@@ -64,11 +68,9 @@ fn walk_expr(expr: &mut Expr, context: &mut HashMap<String, usize>) {
                 // TODO: better errors at walking
                 let index = context
                     .get(name)
-                    .map(|x| *x)
-                     // TODO: this is a user error, and must be reported through other means.
+                    .copied()
                     // TODO: this is a user error, and must be reported through other means.
-                    .expect(&format!("no variable named `{}` in scope", name));
-
+                    .unwrap_or_else(|| panic!("no variable named `{}` in scope", name));
                 *kind = VariableKind::Processed { index };
             } // otherwise, leave it untouched
         }

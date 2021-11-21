@@ -23,7 +23,6 @@ impl Compile for Function {
             // register all the variables in the stack
             stack.with_alloc_bytes(var_amt * 4, |stack, memory| {
                 let variables: Vec<_> = memory.partition(4).skip(1).take(var_amt).collect();
-                dbg!(&variables);
                 with_registers(stack, |stack, registers| {
                     // UNSAFE: safe, the register 0 is callee-saved
                     let r0 = unsafe { RegisterDescriptor::from_index(0) };
