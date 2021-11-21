@@ -102,7 +102,7 @@ pub fn compile_expr(
             } else {
                 AssemblyOutput::new()
             };
-            // both are taken into account
+            // first is taken into account to check if the program can skip the second
             let compute_first = compile_expr(lhs, target, registers, stack, var_ctx, false);
             let compute_second = compile_expr(rhs, target, registers, stack, var_ctx, is_ignored);
             // comparison doesn't modify the location

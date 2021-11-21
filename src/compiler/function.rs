@@ -13,9 +13,9 @@ use crate::variables::walk_block;
 impl Compile for Function {
     fn compile(self) -> AssemblyOutput {
         let mut output = AssemblyOutput::new();
-        let Function { name, mut body } = self;
+        let Function { name, body } = self;
         let Identifier(name) = name;
-        let var_amt = walk_block(&mut body);
+        let (body, var_amt) = walk_block(body);
         output.push_directive(Directive::Global(name.clone()));
         output.push_directive(Directive::Type(name.clone(), "function".to_string()));
         output.push_asm(Assembly::Label(name));
