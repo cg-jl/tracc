@@ -26,10 +26,9 @@ pub fn expr_as_target(expr: &Expr, var_ctx: &[Memory]) -> (Target, AssemblyOutpu
 
 // TODO: operate on constant expressions wisely
 
-// TODO: remove unused expressions
 pub fn compile_expr(
     expr: &Expr,
-    target: &Target, // TODO: consider the target being a memory address and not just a register
+    target: &Target, 
     registers: &mut RegisterManager,
     stack: &mut StackManager,
     var_ctx: &[Memory],

@@ -107,10 +107,8 @@ impl Target {
         match self {
             Target::Register { rd, .. } => registers.locking_register(*rd, cont),
             Target::Address { .. } => {
-                // NOTE: memory is not locked by the compiler, so a memory target must ensure its
                 // TODO: lock register that refers to the memory if it is a general purpose one
                 // (writable)
-                // own safety.
                 cont(registers)
             }
         }

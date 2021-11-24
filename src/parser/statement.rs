@@ -4,8 +4,6 @@ use crate::ast::Statement;
 use crate::lexer::Operator;
 use crate::lexer::TokenKind;
 
-// TODO: parse an optional expression to declare variable
-
 impl Parse for Statement {
     fn parse(parser: &mut Parser) -> ParseRes<Self> {
         parser.with_context("parsing statement", |parser| {

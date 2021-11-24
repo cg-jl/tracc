@@ -1,4 +1,5 @@
 use crate::lexer::Operator;
+use std::fmt;
 
 // TODO: spans
 
@@ -11,9 +12,18 @@ pub struct Function {
     pub body: Block,
 }
 
-// TODO: better debug for `Block`
-#[derive(Debug)]
+//#[derive(Debug)]
 pub struct Block(pub Vec<Statement>);
+
+impl fmt::Debug for Block {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut dbg_struct = f.debug_struct("Block");
+        for (i, stmt) in self.0.iter().enumerate() {
+            dbg_struct.field(&i.to_string(), stmt);
+        }
+        dbg_struct.finish()
+    }
+}
 
 #[derive(Debug)]
 pub enum Statement {
