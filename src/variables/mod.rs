@@ -59,7 +59,7 @@ pub fn walk_block(Block(statements): Block) -> (Block, usize) {
         ctx_vec
             .into_iter()
             .map(|(name, _)| name)
-            .zip(1usize..)
+            .zip(0usize..)
             .collect()
     };
 
@@ -74,7 +74,7 @@ pub fn walk_block(Block(statements): Block) -> (Block, usize) {
                         lhs: Box::new(Expr::Variable(VariableKind::Processed {
                             index: vars[&name],
                         })),
-                        rhs: Box::new(init),
+                        rhs: Box::new(assign_indices(init, &vars)),
                     })
                 }),
                 Statement::Return(expr) => Some(Statement::Return(assign_indices(expr, &vars))),
@@ -92,8 +92,8 @@ fn assign_indices(expr: Expr, vars: &HashMap<String, usize>) -> Expr {
     match expr {
         Expr::Binary { lhs, rhs, operator } => Expr::Binary {
             operator,
-            lhs: Box::new(*lhs),
-            rhs: Box::new(*rhs),
+            lhs: Box::new(assign_indices(*lhs, vars)),
+            rhs: Box::new(assign_indices(*rhs, vars)),
         },
         Expr::Variable(kind) => Expr::Variable(match kind {
             k @ VariableKind::Processed { .. } => k,

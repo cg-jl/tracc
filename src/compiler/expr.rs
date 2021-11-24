@@ -28,7 +28,7 @@ pub fn expr_as_target(expr: &Expr, var_ctx: &[Memory]) -> (Target, AssemblyOutpu
 
 pub fn compile_expr(
     expr: &Expr,
-    target: &Target, 
+    target: &Target,
     registers: &mut RegisterManager,
     stack: &mut StackManager,
     var_ctx: &[Memory],
