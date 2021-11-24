@@ -19,7 +19,7 @@ pub struct Block(pub Vec<Statement>);
 pub enum Statement {
     Return(Expr),
     SingleExpr(Expr),
-    DeclareVar { name: String, init: Option<Expr> }, // TODO: add initial assignment possibility; multiple vars
+    DeclareVar { name: String, init: Option<Expr> }, // TODO: add multiple vars
 }
 
 impl Default for Statement {

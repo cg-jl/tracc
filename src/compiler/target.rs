@@ -32,7 +32,7 @@ impl Target {
                 |regs| {
                     let target = regs[0];
                     let current = regs[1];
-                    AssemblyOutput::singleton_instruction(Instruction::Mov {
+                    AssemblyOutput::singleton(Instruction::Mov {
                         target,
                         source: Data::Register(current),
                     })
@@ -43,7 +43,7 @@ impl Target {
                 target_register,
                 std::cmp::min(*bits, target_bitsize), // we want to not get out of memory bounds
                 |_, _, register| {
-                    AssemblyOutput::singleton_instruction(Instruction::Ldr {
+                    AssemblyOutput::singleton(Instruction::Ldr {
                         register,
                         address: *mem,
                     })
@@ -78,7 +78,7 @@ impl Target {
                 |regs| {
                     let target = regs[0];
                     let source = regs[1];
-                    AssemblyOutput::singleton_instruction(Instruction::Mov {
+                    AssemblyOutput::singleton(Instruction::Mov {
                         source: Data::Register(source),
                         target,
                     })
@@ -89,7 +89,7 @@ impl Target {
                 source_register,
                 source_size.min(*bits),
                 |_, _, source| {
-                    AssemblyOutput::singleton_instruction(Instruction::Str {
+                    AssemblyOutput::singleton(Instruction::Str {
                         register: source,
                         address: *mem,
                     })
@@ -217,9 +217,7 @@ impl Target {
                 stack,
                 *rd,
                 std::cmp::min(*bits, target_bitsize),
-                |_, _, register| {
-                    AssemblyOutput::singleton_instruction(Instruction::Str { register, address })
-                },
+                |_, _, register| AssemblyOutput::singleton(Instruction::Str { register, address }),
             ),
             Target::Address { mem, bits } => {
                 // we're going to have to use a helper register

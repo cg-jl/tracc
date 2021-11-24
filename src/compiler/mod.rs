@@ -81,14 +81,10 @@ impl AssemblyOutput {
         self.push_asm(other.into());
         self
     }
-    // TODO: join all `singleton`s into a single one
-    pub fn singleton_asm(assembly: Assembly) -> Self {
+    pub fn singleton(item: impl Into<Assembly>) -> Self {
         let mut s = Self::new();
-        s.push_asm(assembly);
+        s.inner.push_back(item.into());
         s
-    }
-    pub fn singleton_instruction(instruction: Instruction) -> Self {
-        Self::singleton_asm(Assembly::Instruction(instruction))
     }
     pub fn labelled(mut self, label: Label) -> Self {
         self.cons_asm(Assembly::Label(label.to_string()));
@@ -101,7 +97,7 @@ impl AssemblyOutput {
 
 impl<A: Into<Assembly>> From<A> for AssemblyOutput {
     fn from(asm: A) -> Self {
-        Self::singleton_asm(asm.into())
+        Self::singleton(asm)
     }
 }
 

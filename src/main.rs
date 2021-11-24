@@ -4,6 +4,8 @@ use comp::parser::Parser;
 use std::error::Error;
 use structopt::StructOpt;
 
+// TODO: create test crate
+
 fn main() {
     if let Err(ref e) = run() {
         eprintln!("{}", e);
