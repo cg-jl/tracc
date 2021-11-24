@@ -28,6 +28,17 @@ declarations, some [expressions](#expressions-supported) and return statements.
   - `~`: Bitwise not
   - `-`: Negate (`* -1`)
 
+**NOTE** that no assignment shorthands exist, e.g:
+```c
+a *= b
+```
+is not expanded to 
+```c
+a = a * b
+```
+but rather seen as an unknown operator.
+
+
 
 Input file:
 
