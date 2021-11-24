@@ -8,8 +8,26 @@ If you have an x86\_64 host (like I do), use `qemu-static`, compiling the code w
 
 ## Currently supported stuff
 
-The compiler currently expects an only function, with no parameters and a single return statement,
-with a constant expression (some binary operators and number literals)
+The compiler currently expects an only function, with no parameters. Statements supported are variable
+declarations, some [expressions](#expressions-supported) and return statements.
+
+### Expressions supported
+- **Binary**:
+  - **Basic**:
+  - `+`: Add
+  - `-`: Subtract
+  - `*`: Multiply
+  - `/`: Divide
+  - `&&`: Logic and gate (logic means that it is reduced to 1/0)
+  - `||`: Logic or gate
+  - Relational: `<=`, `<`, `>`, `>=`
+  - Equality: `==`, `!=`
+
+- **Unary**:
+  - `!`: Logic not
+  - `~`: Bitwise not
+  - `-`: Negate (`* -1`)
+
 
 Input file:
 
