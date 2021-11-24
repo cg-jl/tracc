@@ -1,4 +1,6 @@
+#![feature(try_trait_v2)]
 use comp::ast::Program;
+use comp::compiler::CouldCompile;
 use comp::error::SourceMetadata;
 use comp::parser::Parser;
 use std::error::Error;
@@ -14,7 +16,6 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    use comp::compiler::Compile;
     use std::fs;
     use std::io::Write;
     let opt = Opt::from_args();
@@ -23,7 +24,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
-    let output = program.compile();
+    let output = program.could_compile()?;
     let mut file = fs::File::create(out_file)?;
     for x in output {
         writeln!(file, "{}", x)?;

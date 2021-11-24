@@ -4,6 +4,7 @@ use super::ast::Statement;
 use super::ast::VariableKind;
 use crate::ast::BinaryOp;
 use std::collections::HashMap;
+use std::fmt;
 
 // struct VarCtx {
 //     inner: HashMap<String, (usize, usize)>,
@@ -25,7 +26,7 @@ use std::collections::HashMap;
 
 // NOTE: all variables are currently integers. no type info is taken into account.
 // HACK: this is just a bootstrapper for variables
-pub fn walk_block(Block(statements): Block) -> (Block, usize) {
+pub fn walk_block(Block(statements): Block) -> Result<(Block, usize), VarError> {
     let mut ctx = HashMap::new();
 
     // 1. Walk the statements looking for variables
@@ -33,12 +34,12 @@ pub fn walk_block(Block(statements): Block) -> (Block, usize) {
         match st {
             Statement::DeclareVar { name, .. } => {
                 if ctx.get(name).is_some() {
-                    panic!("variable `{}` is already declared in this scope", name);
+                    return Err(VarError::Redeclared(name.to_string()));
                 }
                 ctx.insert(name.to_string(), 0);
             }
-            Statement::Return(expr) => count_refs(expr, &mut ctx),
-            Statement::SingleExpr(expr) => count_refs(expr, &mut ctx),
+            Statement::Return(expr) => count_refs(expr, &mut ctx)?,
+            Statement::SingleExpr(expr) => count_refs(expr, &mut ctx)?,
         }
     }
 
@@ -85,7 +86,7 @@ pub fn walk_block(Block(statements): Block) -> (Block, usize) {
             .collect(),
     );
 
-    (block, vars.len())
+    Ok((block, vars.len()))
 }
 
 fn assign_indices(expr: Expr, vars: &HashMap<String, usize>) -> Expr {
@@ -107,20 +108,39 @@ fn assign_indices(expr: Expr, vars: &HashMap<String, usize>) -> Expr {
     }
 }
 
-fn count_refs(expr: &Expr, ctx: &mut HashMap<String, usize>) {
+#[derive(Debug)]
+pub enum VarError {
+    Undeclared(String),
+    Redeclared(String),
+}
+impl fmt::Display for VarError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Undeclared(name) => write!(f, "unknown variable: `{}`", name),
+            Self::Redeclared(name) => {
+                write!(f, "variable `{}` was already declared in this scope", name)
+            }
+        }
+    }
+}
+
+impl std::error::Error for VarError {}
+
+fn count_refs(expr: &Expr, ctx: &mut HashMap<String, usize>) -> Result<(), VarError> {
     match expr {
         Expr::Binary { lhs, rhs, .. } => {
-            count_refs(lhs, ctx);
-            count_refs(rhs, ctx);
+            count_refs(lhs, ctx)?;
+            count_refs(rhs, ctx)?;
         }
         Expr::Variable(VariableKind::Unprocessed(name)) => {
             *ctx.get_mut(name)
-                .unwrap_or_else(|| panic!("undeclared variable: `{}`", name)) += 1;
+                .ok_or_else(|| VarError::Undeclared(name.to_string()))? += 1;
         }
         Expr::Variable(VariableKind::Processed { .. }) => {
             unreachable!("shouldn't have processed variables yet")
         }
-        Expr::Unary { expr, .. } => count_refs(expr, ctx),
+        Expr::Unary { expr, .. } => count_refs(expr, ctx)?,
         _ => (),
-    }
+    };
+    Ok(())
 }

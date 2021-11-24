@@ -1,5 +1,8 @@
 use super::{
-    expr::compile_expr, registers::RegisterManager, stack::StackManager, target::Target,
+    expr::{compile_expr, CompileExprError},
+    registers::RegisterManager,
+    stack::StackManager,
+    target::Target,
     AssemblyOutput, Memory,
 };
 use crate::ast::{Block, Statement};
@@ -11,20 +14,20 @@ pub fn compile_block(
     block: &Block,
     bail_return_target: &Target,
     var_ctx: &[Memory],
-) -> AssemblyOutput {
+) -> Result<AssemblyOutput, CompileExprError> {
     let mut out = AssemblyOutput::new();
     for statement in &block.0 {
         out.extend(match statement {
             Statement::Return(expr) => {
-                compile_expr(expr, bail_return_target, registers, stack, var_ctx, false)
+                compile_expr(expr, bail_return_target, registers, stack, var_ctx, false)?
             }
             Statement::DeclareVar { .. } => {
                 unreachable!("declaring variables should not get to assembly phase")
             }
             Statement::SingleExpr(expr) => {
-                compile_expr(expr, bail_return_target, registers, stack, var_ctx, true)
+                compile_expr(expr, bail_return_target, registers, stack, var_ctx, true)?
             }
         })
     }
-    out
+    Ok(out)
 }

@@ -7,9 +7,24 @@ mod program;
 pub mod registers;
 pub mod stack;
 use crate::assembly::*;
+use core::convert::Infallible;
 use std::collections::vec_deque::IterMut;
 use std::collections::VecDeque;
 mod target;
+
+pub trait CouldCompile {
+    type Error: std::error::Error;
+
+    fn could_compile(self) -> Result<AssemblyOutput, Self::Error>;
+}
+
+impl<A: Compile> CouldCompile for A {
+    type Error = Infallible;
+
+    fn could_compile(self) -> Result<AssemblyOutput, Self::Error> {
+        Ok(self.compile())
+    }
+}
 
 pub trait Compile {
     fn compile(self) -> AssemblyOutput;

@@ -1,3 +1,5 @@
+use std::ops::Try;
+
 use super::{AssemblyOutput, Compile, CompileWith};
 use crate::assembly::*;
 
@@ -6,13 +8,14 @@ pub struct StackManager {
     currently_used: usize,
 }
 
-pub fn with_stack<F>(cont: F) -> AssemblyOutput
+pub fn with_stack<F, O>(cont: F) -> O
 where
-    F: Fn(&mut StackManager) -> AssemblyOutput,
+    F: Fn(&mut StackManager) -> O,
+    O: Try<Output = AssemblyOutput>,
 {
     let mut stack = StackManager::new();
-    let out = cont(&mut stack);
-    stack.finalize(out)
+    let out = cont(&mut stack)?;
+    O::from_output(stack.finalize(out))
 }
 
 impl StackManager {

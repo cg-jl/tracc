@@ -9,9 +9,28 @@ use crate::{
     assembly::{BitSize, Branch, Condition, Data, Instruction, Register},
     ast::{BinaryOp, Expr, UnaryOp, VariableKind},
 };
+use std::fmt;
 
-pub fn expr_as_target(expr: &Expr, var_ctx: &[Memory]) -> (Target, AssemblyOutput) {
-    match expr {
+#[derive(Debug)]
+pub enum CompileExprError {
+    ExprNotAssignable(String),
+}
+
+impl std::error::Error for CompileExprError {}
+
+impl fmt::Display for CompileExprError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ExprNotAssignable(expr) => write!(f, "expression is not assignable: {:?}", expr),
+        }
+    }
+}
+
+pub fn expr_as_target(
+    expr: &Expr,
+    var_ctx: &[Memory],
+) -> Result<(Target, AssemblyOutput), CompileExprError> {
+    Ok(match expr {
         Expr::Variable(VariableKind::Processed { index }) => (
             Target::Address {
                 mem: var_ctx[*index],
@@ -20,8 +39,8 @@ pub fn expr_as_target(expr: &Expr, var_ctx: &[Memory]) -> (Target, AssemblyOutpu
             AssemblyOutput::new(),
         ),
         // NOTE: unary operations with pointers are also assignable
-        e => panic!("expression is not assignable: {:?}", e),
-    }
+        e => return Err(CompileExprError::ExprNotAssignable(format!("{:?}", e))),
+    })
 }
 
 // TODO: operate on constant expressions wisely
@@ -33,25 +52,23 @@ pub fn compile_expr(
     stack: &mut StackManager,
     var_ctx: &[Memory],
     is_ignored: bool,
-) -> AssemblyOutput {
+) -> Result<AssemblyOutput, CompileExprError> {
     match expr {
         Expr::Variable(VariableKind::Unprocessed(name)) => {
             unreachable!(&format!("unprocessed variable: {}", name))
         }
         Expr::Variable(VariableKind::Processed { index }) => {
             // Bit32 because all the variables are int32 for the moment
-            target.load_from_memory(var_ctx[*index], BitSize::Bit32, registers, stack)
+            Ok(target.load_from_memory(var_ctx[*index], BitSize::Bit32, registers, stack))
         }
-        Expr::Constant(value) => {
-            if !is_ignored {
-                target.load_immediate(*value, registers, stack)
-            } else {
-                AssemblyOutput::new()
-            }
-        }
+        Expr::Constant(value) => Ok(if !is_ignored {
+            target.load_immediate(*value, registers, stack)
+        } else {
+            AssemblyOutput::new()
+        }),
         Expr::Unary { operator, expr } => {
-            let expr = compile_expr(expr, target, registers, stack, var_ctx, is_ignored);
-            if is_ignored {
+            let expr = compile_expr(expr, target, registers, stack, var_ctx, is_ignored)?;
+            Ok(if is_ignored {
                 expr
             } else {
                 expr.chain(target.through_register(
@@ -60,7 +77,7 @@ pub fn compile_expr(
                     true, // operator does modify the location
                     stack,
                 ))
-            }
+            })
         }
         Expr::Binary {
             operator: BinaryOp::LogicAnd,
@@ -120,9 +137,9 @@ pub fn compile_expr(
                 false,
                 stack,
             );
-            compute_first
+            Ok(compute_first?
                 .chain(compare_and_bail.clone())
-                .chain(compute_second)
+                .chain(compute_second?)
                 .chain(compare_and_bail)
                 .chain(ok)
                 .chain(maybe_end.map(|end| {
@@ -132,7 +149,7 @@ pub fn compile_expr(
                     })
                 }))
                 .chain(failed_out)
-                .chain(maybe_end)
+                .chain(maybe_end))
         }
         Expr::Binary {
             operator: BinaryOp::LogicOr,
@@ -172,7 +189,7 @@ pub fn compile_expr(
                 stack,
             );
             // compute lhs
-            compile_expr(lhs, target, registers, stack, var_ctx, false)
+            Ok(compile_expr(lhs, target, registers, stack, var_ctx, false)?
                 // if lhs != 0, then go to set_one and shortcut
                 .chain(compare_zero.clone())
                 .chain_single(Instruction::Branch(Branch::Conditional {
@@ -182,7 +199,7 @@ pub fn compile_expr(
                 // otherwise, compute rhs
                 .chain(compile_expr(
                     rhs, target, registers, stack, var_ctx, is_ignored,
-                ))
+                )?)
                 // if it wasn't zero, then go to set_one again
                 .chain(if !is_ignored {
                     compare_zero
@@ -216,7 +233,7 @@ pub fn compile_expr(
                     }
                     .labelled(set_one),
                 )
-                .chain(maybe_end)
+                .chain(maybe_end))
         }
         Expr::Binary {
             operator: BinaryOp::Assign,
@@ -224,11 +241,11 @@ pub fn compile_expr(
             rhs,
         } => {
             let (lhs_target, prepare_lhs) =
-                target.locking_target(|_| expr_as_target(lhs, var_ctx), registers);
-            let prepare_rhs = compile_expr(rhs, target, registers, stack, var_ctx, false);
-            prepare_rhs
+                target.locking_target(|_| expr_as_target(lhs, var_ctx), registers)?;
+            let prepare_rhs = compile_expr(rhs, target, registers, stack, var_ctx, false)?;
+            Ok(prepare_rhs
                 .chain(prepare_lhs)
-                .chain(lhs_target.load_from_target(target, registers, stack))
+                .chain(lhs_target.load_from_target(target, registers, stack)))
         }
         Expr::Binary { operator, lhs, rhs } => {
             // NOTE: revise register locking; could do something about it
@@ -243,14 +260,14 @@ pub fn compile_expr(
                         bits: BitSize::Bit32,
                     };
                     let out = compile_expr(lhs, &target, registers, stack, var_ctx, is_ignored);
-                    (target, out)
+                    out.map(|out| (target, out))
                 },
                 registers,
-            );
+            )?;
             let rhs_out = lhs_target.locking_target(
                 |registers| compile_expr(rhs, target, registers, stack, var_ctx, is_ignored),
                 registers,
-            );
+            )?;
             let binop = if !is_ignored {
                 target.through_register(
                     |stack, registers, rhs| {
@@ -268,7 +285,7 @@ pub fn compile_expr(
             } else {
                 AssemblyOutput::new()
             };
-            lhs_out.chain(rhs_out).chain(binop)
+            Ok(lhs_out.chain(rhs_out).chain(binop))
             // let (lhs_target, mut lhs_out) = registers.locking_register(target, |registers| {
             //     let target = registers.get_suitable_register(UsageContext::Normal);
             //     let out = compile_expr(

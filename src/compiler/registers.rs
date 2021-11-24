@@ -1,18 +1,20 @@
 use super::{stack::StackManager, AssemblyOutput, CompileWith};
 use crate::assembly::*;
 use std::collections::{HashMap, HashSet};
+use std::ops::Try;
 
 // TODO: differentiate between mutable and non-mutable access in
 // both instructions and the register manager
 // NOTE: when this happens; have the register manager not let mutable access with read-only access.
 
-pub fn with_registers<F>(stack: &mut StackManager, mut cont: F) -> AssemblyOutput
+pub fn with_registers<F, O>(stack: &mut StackManager, mut cont: F) -> O
 where
-    F: FnMut(&mut StackManager, &mut RegisterManager) -> AssemblyOutput,
+    F: FnMut(&mut StackManager, &mut RegisterManager) -> O,
+    O: Try<Output = AssemblyOutput>,
 {
     let mut registers = RegisterManager::new();
-    let out = cont(stack, &mut registers);
-    registers.finalize(stack, out)
+    let out = cont(stack, &mut registers)?;
+    O::from_output(registers.finalize(stack, out))
 }
 
 fn saving_register<F>(stack: &mut StackManager, register: Register, mut cont: F) -> AssemblyOutput
