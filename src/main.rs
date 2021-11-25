@@ -7,7 +7,7 @@ use std::error::Error;
 use structopt::StructOpt;
 
 // TODO(#3): structured formatting lib (error,warning,note,help, etc)
-// TODO: create test crate
+// TODO(#4): create test crate
 
 fn main() {
     if let Err(ref e) = run() {
