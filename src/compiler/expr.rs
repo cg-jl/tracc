@@ -43,7 +43,7 @@ pub fn expr_as_target(
     })
 }
 
-// TODO: operate on constant expressions wisely
+// TODO(#2): operate on constant expressions wisely
 
 pub fn compile_expr(
     expr: &Expr,
