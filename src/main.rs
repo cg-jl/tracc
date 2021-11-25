@@ -6,7 +6,7 @@ use comp::parser::Parser;
 use std::error::Error;
 use structopt::StructOpt;
 
-// TODO: structured formatting lib (error,warning,note,help, etc)
+// TODO(#3): structured formatting lib (error,warning,note,help, etc)
 // TODO: create test crate
 
 fn main() {
