@@ -44,7 +44,7 @@ pub struct Identifier(pub String);
 // NOTE: should I make a processed expr type?
 #[derive(Debug, PartialEq, Eq)]
 pub enum Expr {
-    // TODO: convert variables to &'source str instead of using strings (`Parse<'source>`)
+    // TODO(#1): convert variables to &'source str instead of using strings (`Parse<'source>`)
     Variable(VariableKind),
     Constant(i32),
     Unary {
