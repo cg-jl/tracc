@@ -101,7 +101,7 @@ impl Target {
     // TODO: figure out how to lock memory addresses
     pub fn locking_target<T>(
         &self,
-        mut cont: impl FnMut(&mut RegisterManager) -> T,
+        cont: impl FnOnce(&mut RegisterManager) -> T,
         registers: &mut RegisterManager,
     ) -> T {
         match self {
@@ -116,7 +116,7 @@ impl Target {
 
     pub fn through_register<T: Into<AssemblyOutput>>(
         &self,
-        cont: impl FnMut(&mut StackManager, &mut RegisterManager, Register) -> T,
+        cont: impl FnOnce(&mut StackManager, &mut RegisterManager, Register) -> T,
         registers: &mut RegisterManager,
         mutable_register: bool,
         stack: &mut StackManager,

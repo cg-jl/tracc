@@ -11,12 +11,12 @@ use crate::ast::{Block, Statement};
 pub fn compile_block(
     stack: &mut StackManager,
     registers: &mut RegisterManager,
-    block: &Block,
+    block: Block,
     bail_return_target: &Target,
     var_ctx: &[Memory],
 ) -> Result<AssemblyOutput, CompileExprError> {
     let mut out = AssemblyOutput::new();
-    for statement in &block.0 {
+    for statement in block.0 {
         out.extend(match statement {
             Statement::Return(expr) => {
                 compile_expr(expr, bail_return_target, registers, stack, var_ctx, false)?

@@ -60,9 +60,9 @@ impl CouldCompile for Function {
         output.push_directive(Directive::Global(name.clone()));
         output.push_directive(Directive::Type(name.clone(), "function".to_string()));
         output.push_asm(Assembly::Label(name));
-        output.extend(with_stack(|stack| {
+        output.extend(with_stack(move |stack| {
             // register all the variables in the stack
-            stack.with_alloc_bytes(var_amt * 4, |stack, memory| {
+            stack.with_alloc_bytes(var_amt * 4, move |stack, memory| {
                 let variables: Vec<_> = memory.partition(4).skip(1).take(var_amt).collect();
                 // UNSAFE: safe, the register 0 is callee-saved
                 let r0 = unsafe { RegisterDescriptor::from_index(0) };
@@ -75,7 +75,7 @@ impl CouldCompile for Function {
                     if body.0.is_empty() && is_main {
                         Ok(target.load_immediate(0, registers, stack))
                     } else {
-                        compile_block(stack, registers, &body, &target, &variables)
+                        compile_block(stack, registers, body, &target, &variables)
                     }
                 })
             })

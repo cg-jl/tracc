@@ -10,7 +10,7 @@ pub struct StackManager {
 
 pub fn with_stack<F, O>(cont: F) -> O
 where
-    F: Fn(&mut StackManager) -> O,
+    F: FnOnce(&mut StackManager) -> O,
     O: Try<Output = AssemblyOutput>,
 {
     let mut stack = StackManager::new();
@@ -26,9 +26,9 @@ impl StackManager {
         }
     }
 
-    pub fn with_alloc_bytes<F, T>(&mut self, amount: usize, mut cont: F) -> T
+    pub fn with_alloc_bytes<F, T>(&mut self, amount: usize, cont: F) -> T
     where
-        F: FnMut(&mut Self, Memory) -> T,
+        F: FnOnce(&mut Self, Memory) -> T,
     {
         let target_used = amount + self.currently_used;
         let last_used = self.currently_used;

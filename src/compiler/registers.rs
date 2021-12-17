@@ -7,9 +7,9 @@ use std::ops::Try;
 // both instructions and the register manager
 // NOTE: when this happens; have the register manager not let mutable access with read-only access.
 
-pub fn with_registers<F, O>(stack: &mut StackManager, mut cont: F) -> O
+pub fn with_registers<F, O>(stack: &mut StackManager, cont: F) -> O
 where
-    F: FnMut(&mut StackManager, &mut RegisterManager) -> O,
+    F: FnOnce(&mut StackManager, &mut RegisterManager) -> O,
     O: Try<Output = AssemblyOutput>,
 {
     let mut registers = RegisterManager::new();
@@ -17,11 +17,11 @@ where
     O::from_output(registers.finalize(stack, out))
 }
 
-fn saving_register<F>(stack: &mut StackManager, register: Register, mut cont: F) -> AssemblyOutput
+fn saving_register<F>(stack: &mut StackManager, register: Register, cont: F) -> AssemblyOutput
 where
-    F: FnMut(&mut StackManager) -> AssemblyOutput,
+    F: FnOnce(&mut StackManager) -> AssemblyOutput,
 {
-    stack.with_alloc_bytes(8, |stack, address| {
+    stack.with_alloc_bytes(8, move |stack, address| {
         let mut output = cont(stack);
         output.cons_instruction(Instruction::Str { register, address });
         output.push_instruction(Instruction::Ldr { register, address });
@@ -29,13 +29,9 @@ where
     })
 }
 
-fn saving_registers<F>(
-    stack: &mut StackManager,
-    registers: &[Register],
-    mut cont: F,
-) -> AssemblyOutput
+fn saving_registers<F>(stack: &mut StackManager, registers: &[Register], cont: F) -> AssemblyOutput
 where
-    F: FnMut() -> AssemblyOutput,
+    F: FnOnce() -> AssemblyOutput,
 {
     let reg_amt = registers.len();
     let size = reg_amt * 8;
@@ -97,10 +93,10 @@ impl RegisterManager {
         &mut self,
         stack: &mut StackManager,
         register_data: &[(RegisterDescriptor, BitSize)],
-        mut cont: F,
+        cont: F,
     ) -> AssemblyOutput
     where
-        F: FnMut(&[Register]) -> T,
+        F: FnOnce(&[Register]) -> T,
         T: Into<AssemblyOutput>,
     {
         let registers: Vec<_> = register_data
@@ -128,10 +124,10 @@ impl RegisterManager {
         stack: &mut StackManager,
         register: RegisterDescriptor,
         bit_size: BitSize,
-        mut cont: F,
+        cont: F,
     ) -> AssemblyOutput
     where
-        F: FnMut(&mut StackManager, &mut Self, Register) -> T,
+        F: FnOnce(&mut StackManager, &mut Self, Register) -> T,
         T: Into<AssemblyOutput>,
     {
         let RegisterDescriptor { register } = register;
@@ -141,16 +137,16 @@ impl RegisterManager {
         let real_register = RegisterDescriptor { register }.real_register(bit_size);
         let current = *self.register_usage.entry(register).or_insert(0);
         if current != 0 {
-            saving_register(stack, real_register, |stack| {
+            saving_register(stack, real_register, move |stack| {
                 cont(stack, self, real_register).into()
             })
         } else {
             cont(stack, self, real_register).into()
         }
     }
-    pub fn locking_register<F, T>(&mut self, register: RegisterDescriptor, mut cont: F) -> T
+    pub fn locking_register<F, T>(&mut self, register: RegisterDescriptor, cont: F) -> T
     where
-        F: FnMut(&mut Self) -> T,
+        F: FnOnce(&mut Self) -> T,
     {
         let RegisterDescriptor { register } = register;
         *self.register_usage.entry(register).or_insert(0) += 1;
