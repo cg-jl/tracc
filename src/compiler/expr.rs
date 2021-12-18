@@ -446,7 +446,7 @@ fn reduce_expr(expr: Expr) -> Expr {
                     // C-style operations
                     BinaryOp::Add => a.wrapping_add(b),
                     // don't know if this has been handled yet.
-                    // TODO: handle lvalue errors before getting into compilation
+                    // TODO(#6): handle lvalue errors before getting into compilation
                     BinaryOp::Assign => panic!("assign operator can't be between two constants"),
                     BinaryOp::Divide => {
                         if b == 0 {
