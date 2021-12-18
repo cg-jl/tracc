@@ -450,7 +450,7 @@ fn reduce_expr(expr: Expr) -> Expr {
                     BinaryOp::Assign => panic!("assign operator can't be between two constants"),
                     BinaryOp::Divide => {
                         if b == 0 {
-                            // TODO: add span tags on expressions for errors
+                            // TODO(#7): add span tags on expressions for errors
                             panic!("in constant expression: division by zero (`{} / {}`)", a, b)
                         } else {
                             a / b
