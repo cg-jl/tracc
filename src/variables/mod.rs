@@ -32,9 +32,12 @@ pub fn walk_block(Block(statements): Block) -> Result<(Block, usize), VarError> 
     // 1. Walk the statements looking for variables
     for st in statements.iter() {
         match st {
-            Statement::DeclareVar { name, .. } => {
+            Statement::DeclareVar { name, init } => {
                 if ctx.get(name).is_some() {
                     return Err(VarError::Redeclared(name.to_string()));
+                }
+                if let Some(init) = init.as_ref() {
+                    count_refs(init, &mut ctx)?;
                 }
                 ctx.insert(name.to_string(), 0);
             }
