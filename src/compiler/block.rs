@@ -1,8 +1,7 @@
 use super::{
     expr::{compile_expr, CompileExprError},
-    registers::RegisterManager,
+    registers::{RegisterDescriptor, RegisterManager},
     stack::StackManager,
-    target::Target,
     AssemblyOutput, Memory,
 };
 use crate::ast::{Block, Statement};
@@ -12,7 +11,7 @@ pub fn compile_block(
     stack: &mut StackManager,
     registers: &mut RegisterManager,
     block: Block,
-    bail_return_target: &Target,
+    bail_return_target: RegisterDescriptor,
     var_ctx: &[Memory],
 ) -> Result<AssemblyOutput, CompileExprError> {
     let mut out = AssemblyOutput::new();

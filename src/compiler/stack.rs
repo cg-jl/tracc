@@ -37,7 +37,7 @@ impl StackManager {
         let result = cont(
             self,
             Memory {
-                register: Register::StackPointer,
+                register: ImmutableRegister(Register::StackPointer),
                 offset: Offset::Undetermined(last_used),
             },
         );
@@ -85,15 +85,17 @@ impl StackManager {
             adjust_offset(asm);
         }
 
+        // SAFETY: this uses directly the registers without asking for permission, but the stack
+        // pointer is RESERVED for use in the stack
         if final_allocated_size != 0 {
             instructions.cons_instruction(Instruction::Sub {
-                target: Register::StackPointer,
-                lhs: Register::StackPointer,
+                target: MutableRegister(Register::StackPointer),
+                lhs: ImmutableRegister(Register::StackPointer),
                 rhs: Data::Immediate(final_allocated_size as u64),
             });
             instructions.push_instruction(Instruction::Add {
-                target: Register::StackPointer,
-                lhs: Register::StackPointer,
+                target: MutableRegister(Register::StackPointer),
+                lhs: ImmutableRegister(Register::StackPointer),
                 rhs: Data::Immediate(final_allocated_size as u64),
             });
         }

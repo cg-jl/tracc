@@ -2,26 +2,6 @@ use crate::{format_instr, format_instr_args, write_instruction};
 // use bitflags::bitflags;
 use std::fmt;
 
-// bitflags! {
-//     /// The ALU flags available to the assembly
-//     struct PState: u8 {
-//         /// Negative flag
-//         const N = 0b1000;
-//         /// Carry flag
-//         const C = 0b0100;
-//         /// Overflow flag
-//         const V = 0b0010;
-//         /// Zero flag
-//         const Z = 0b0001;
-//     }
-// }
-
-// impl PState {
-//     pub const fn to_immediate(self) -> Data {
-//         Data::Immediate(self.bits as u64)
-//     }
-// }
-
 // NOTE: could do something in the compiler to make
 // instructions that may modify state "adds", "subs" etc
 // and make decisions to modify or not the state.
@@ -93,62 +73,62 @@ pub enum Instruction {
     Ret,
     /// Move data to a register
     Mov {
-        target: Register,
+        target: MutableRegister,
         source: Data,
     },
     /// Move (with applied not) data to a register
     MvN {
-        target: Register,
+        target: MutableRegister,
         source: Data,
     },
     /// Compare a register with some data
     Cmp {
-        register: Register,
+        register: ImmutableRegister,
         data: Data,
     },
     /// Sets register 1 or 0 depending on condition
     Cset {
-        target: Register,
+        target: MutableRegister,
         condition: Condition,
     },
     /// Negate a register
     Neg {
-        target: Register,
-        source: Register,
+        target: MutableRegister,
+        source: ImmutableRegister,
     },
     /// Add a register and a source of data into a register
     Add {
-        target: Register,
-        lhs: Register,
+        target: MutableRegister,
+        lhs: ImmutableRegister,
         rhs: Data,
     },
     /// subtract the contents of a register from some data into a register
     Sub {
-        target: Register,
-        lhs: Register,
+        target: MutableRegister,
+        lhs: ImmutableRegister,
         rhs: Data,
     },
     /// Multiply two numbers (currently not u/s/l)
     Mul {
-        target: Register,
-        lhs: Register,
+        target: MutableRegister,
+        lhs: ImmutableRegister,
         rhs: Data,
     },
     /// Divide two signed numbers
     Div {
-        target: Register,
-        lhs: Register,
+        target: MutableRegister,
+        lhs: ImmutableRegister,
         rhs: Data,
         signed: bool,
     },
     /// Store a register into memory
     Str {
-        register: Register,
+        register: ImmutableRegister,
         address: Memory,
     },
     /// Load a register from memory
     Ldr {
-        register: Register,
+        register: MutableRegister,
         address: Memory,
     },
     // /// Branch for different situations
@@ -159,7 +139,7 @@ pub enum Instruction {
 pub enum Branch {
     /// normal (unconditional) branch, always executed
     Unconditional {
-        register: Option<Register>,
+        register: Option<ImmutableRegister>,
         label: Label,
     },
     /// branch with link (aka call)
@@ -298,10 +278,11 @@ impl Instruction {
     }
 }
 
+/// Data is something that isn't going to be modified
 #[derive(Debug, Clone, Copy)]
 pub enum Data {
     /// Take data from register
-    Register(Register),
+    Register(ImmutableRegister),
     /// Take data from an immediate value
     Immediate(u64),
     /// Stack offset
@@ -321,7 +302,7 @@ impl fmt::Display for Data {
 impl Data {
     pub const fn immediate(immediate: u64, bit_size: BitSize) -> Self {
         if immediate == 0 {
-            Self::Register(Register::ZeroRegister { bit_size })
+            Self::Register(ImmutableRegister(Register::ZeroRegister { bit_size }))
         } else {
             Self::Immediate(immediate)
         }
@@ -353,13 +334,66 @@ impl fmt::Display for Condition {
     }
 }
 
+/// The only writable registers are zero registers and gp registers (and SSE registers which are
+/// yet to come)
+#[derive(Debug, Clone, Copy)]
+#[repr(transparent)]
+pub struct MutableRegister(pub Register);
+
+/// We can check the contents of *any* register, including registers that are not present currently
+#[derive(Debug, Clone, Copy)]
+#[repr(transparent)]
+pub struct ImmutableRegister(pub Register);
+
+// #[derive(Debug, Clone, Copy)]
+// pub enum Register {
+//     /// Unnamed general purpose register
+//     GeneralPurpose { index: u8, bit_size: BitSize },
+//     /// Register which ignores writes and gives zero when read
+//     ZeroRegister { bit_size: BitSize },
+//     /// The stack pointer
+//     StackPointer,
+// }
+
+// little trait to accomodate getting the bitsize from registers
+pub trait HasBitSize {
+    fn get_bit_size(&self) -> BitSize;
+}
+
+impl const HasBitSize for MutableRegister {
+    fn get_bit_size(&self) -> BitSize {
+        self.0.bit_size()
+    }
+}
+impl const HasBitSize for ImmutableRegister {
+    fn get_bit_size(&self) -> BitSize {
+        self.0.bit_size()
+    }
+}
+
+// there is a way to use a mutable register as immutable once you got access to it!
+impl const From<MutableRegister> for ImmutableRegister {
+    fn from(m: MutableRegister) -> Self {
+        Self(m.0)
+    }
+}
+
+impl fmt::Display for ImmutableRegister {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl fmt::Display for MutableRegister {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Register {
-    /// Unnamed general purpose register
     GeneralPurpose { index: u8, bit_size: BitSize },
-    /// Register which ignores writes and gives zero when read
     ZeroRegister { bit_size: BitSize },
-    /// The stack pointer
     StackPointer,
 }
 
@@ -401,7 +435,7 @@ impl BitSize {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Memory {
-    pub register: Register,
+    pub register: ImmutableRegister,
     pub offset: Offset,
 }
 

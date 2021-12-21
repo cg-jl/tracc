@@ -1,14 +1,13 @@
 use super::block::compile_block;
 use super::expr::CompileExprError;
+use super::load_immediate;
 use super::registers::with_registers;
 use super::registers::RegisterDescriptor;
 use super::stack::with_stack;
 use super::AssemblyOutput;
 use super::CouldCompile;
-use crate::assembly::BitSize;
 use crate::assembly::{Assembly, Directive, Instruction};
 use crate::ast::{Function, Identifier};
-use crate::compiler::target::Target;
 use crate::variables::walk_block;
 use crate::variables::VarError;
 use std::fmt;
@@ -67,15 +66,11 @@ impl CouldCompile for Function {
                 // UNSAFE: safe, the register 0 is callee-saved
                 let r0 = unsafe { RegisterDescriptor::from_index(0) };
                 with_registers(stack, |stack, registers| {
-                    let target = Target::Register {
-                        rd: r0,
-                        bits: BitSize::Bit32,
-                    };
                     // if body is empty (no returns) and it is main then just return 0.
                     if body.0.is_empty() && is_main {
-                        Ok(target.load_immediate(0, registers, stack))
+                        Ok(load_immediate(stack, registers, r0, 0))
                     } else {
-                        compile_block(stack, registers, body, &target, &variables)
+                        compile_block(stack, registers, body, r0, &variables)
                     }
                 })
             })

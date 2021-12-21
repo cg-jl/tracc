@@ -3,9 +3,9 @@ use crate::assembly::*;
 use std::collections::{HashMap, HashSet};
 use std::ops::Try;
 
-// TODO: differentiate between mutable and non-mutable access in
-// both instructions and the register manager
 // NOTE: when this happens; have the register manager not let mutable access with read-only access.
+//
+// TODO: use static arrays for register maps since the amount of registers available is already known
 
 pub fn with_registers<F, O>(stack: &mut StackManager, cont: F) -> O
 where
@@ -17,29 +17,43 @@ where
     O::from_output(registers.finalize(stack, out))
 }
 
-fn saving_register<F>(stack: &mut StackManager, register: Register, cont: F) -> AssemblyOutput
+fn saving_register<F>(
+    stack: &mut StackManager,
+    register: MutableRegister,
+    cont: F,
+) -> AssemblyOutput
 where
     F: FnOnce(&mut StackManager) -> AssemblyOutput,
 {
     stack.with_alloc_bytes(8, move |stack, address| {
         let mut output = cont(stack);
-        output.cons_instruction(Instruction::Str { register, address });
+        output.cons_instruction(Instruction::Str {
+            register: register.into(),
+            address,
+        });
         output.push_instruction(Instruction::Ldr { register, address });
         output
     })
 }
 
-fn saving_registers<F>(stack: &mut StackManager, registers: &[Register], cont: F) -> AssemblyOutput
+fn saving_registers<F>(
+    stack: &mut StackManager,
+    registers: &[MutableRegister],
+    cont: F,
+) -> AssemblyOutput
 where
-    F: FnOnce() -> AssemblyOutput,
+    F: FnOnce(&mut StackManager) -> AssemblyOutput,
 {
     let reg_amt = registers.len();
     let size = reg_amt * 8;
-    stack.with_alloc_bytes(size, |_stack, addr| {
-        let mut output = cont();
+    stack.with_alloc_bytes(size, |stack, addr| {
+        let mut output = cont(stack);
         let addresses = addr.partition(8).take(reg_amt);
         for (register, address) in registers.iter().copied().zip(addresses) {
-            output.cons_instruction(Instruction::Str { register, address });
+            output.cons_instruction(Instruction::Str {
+                register: register.into(),
+                address,
+            });
             output.push_instruction(Instruction::Ldr { register, address });
         }
         output
@@ -89,61 +103,74 @@ impl RegisterManager {
         };
         RegisterDescriptor { register }
     }
-    pub fn using_registers<F, T>(
+    /// Given a set of registers, give that set of registers back in a `MutableRegister` so they
+    /// can be used in assembly output.
+    ///
+    /// # Safety
+    /// This function has the same caveats that [`using_register_mutably`] but with all of its
+    /// registers
+    pub fn using_registers_mutably<T: Into<AssemblyOutput>>(
         &mut self,
         stack: &mut StackManager,
-        register_data: &[(RegisterDescriptor, BitSize)],
-        cont: F,
-    ) -> AssemblyOutput
-    where
-        F: FnOnce(&[Register]) -> T,
-        T: Into<AssemblyOutput>,
-    {
-        let registers: Vec<_> = register_data
+        query: &[(RegisterDescriptor, BitSize)],
+        user: impl FnOnce(&mut StackManager, &mut Self, &[MutableRegister]) -> T,
+    ) -> AssemblyOutput {
+        let all_usable_registers: Vec<_> = query
             .iter()
             .copied()
-            .map(|(reg, bs)| reg.real_register(bs))
+            .map(|(reg, bs)| reg.as_mutable(bs))
             .collect();
-        let registers_need_saving: Vec<_> = register_data
+        let registers_need_saving: Vec<_> = query
             .iter()
             .copied()
-            .filter_map(|(reg, bs)| {
-                let RegisterDescriptor { register } = reg;
-                if *self.register_usage.entry(register).or_insert(0) != 0 {
-                    Some(reg.real_register(bs))
+            .filter_map(|(rd, bs)| {
+                if *self.register_usage.entry(rd.register).or_insert(0) != 0 {
+                    Some(rd.as_mutable(bs))
                 } else {
                     None
                 }
             })
             .collect();
-
-        saving_registers(stack, &registers_need_saving, || cont(&registers).into())
+        saving_registers(stack, &registers_need_saving, |stack| {
+            user(stack, self, &all_usable_registers).into()
+        })
     }
-    pub fn using_register<F, T>(
+    /// Given a function, gives a mutable register to it, saving it if needed.
+    ///
+    /// # Safety
+    /// This currently only works well when the given `MutableRegister` is not moved out of the
+    /// called function.
+    ///  TODO: make `MutableRegister` not clonable so it prohibits moves out of not allowed spaces
+    /// although I don't know if not being able to copy it "just to be safe" is going to affect
+    /// anything else.
+    pub fn using_register_mutably<T: Into<AssemblyOutput>>(
         &mut self,
         stack: &mut StackManager,
         register: RegisterDescriptor,
         bit_size: BitSize,
-        cont: F,
-    ) -> AssemblyOutput
-    where
-        F: FnOnce(&mut StackManager, &mut Self, Register) -> T,
-        T: Into<AssemblyOutput>,
-    {
-        let RegisterDescriptor { register } = register;
-        if (9..=15).contains(&register) {
-            self.presaved_registers.insert(register);
+        user: impl FnOnce(&mut StackManager, &mut Self, MutableRegister) -> T,
+    ) -> AssemblyOutput {
+        // first, ensure that the register is saved, if it is one of the callee-saved registers
+        {
+            let RegisterDescriptor { register } = register;
+            if (9..=15).contains(&register) {
+                self.presaved_registers.insert(register);
+            }
         }
-        let real_register = RegisterDescriptor { register }.real_register(bit_size);
-        let current = *self.register_usage.entry(register).or_insert(0);
-        if current != 0 {
-            saving_register(stack, real_register, move |stack| {
-                cont(stack, self, real_register).into()
+        let usable_register = register.as_mutable(bit_size);
+
+        // if (rare case since we've got 9 registers to play with plus presaved ones) it has at least one use, then
+        // save it so that the other use can continue, otherwise the register can be used freely.
+        let current_uses = *self.register_usage.entry(register.register).or_insert(0);
+        if current_uses != 0 {
+            saving_register(stack, usable_register, move |stack| {
+                user(stack, self, usable_register).into()
             })
         } else {
-            cont(stack, self, real_register).into()
+            user(stack, self, usable_register).into()
         }
     }
+    // TODO: eliminate `locking_register` by adding a set of not wanted registers to `get_suitable_registers`
     pub fn locking_register<F, T>(&mut self, register: RegisterDescriptor, cont: F) -> T
     where
         F: FnOnce(&mut Self) -> T,
@@ -163,13 +190,18 @@ impl RegisterManager {
         let needed_size = total_registers * 8;
 
         stack.with_alloc_bytes(needed_size, |_stack, start| {
+            // for each of the presaved registers, add a safeguard to make sure that they are saved
+            // and later restored
             let registers = self
                 .presaved_registers
                 .drain()
-                .map(|register| RegisterDescriptor { register }.real_register(BitSize::Bit64));
+                .map(|register| RegisterDescriptor { register }.as_mutable(BitSize::Bit64));
             let addresses = start.partition(8).take(total_registers);
             for (register, address) in registers.zip(addresses) {
-                output.cons_instruction(Instruction::Str { register, address });
+                output.cons_instruction(Instruction::Str {
+                    register: register.into(),
+                    address,
+                });
                 output.push_instruction(Instruction::Ldr { register, address });
             }
         });
@@ -207,11 +239,23 @@ pub struct RegisterDescriptor {
 }
 
 impl RegisterDescriptor {
-    const fn real_register(self, bit_size: BitSize) -> Register {
-        Register::GeneralPurpose {
+    /// Obtain the mutable version of the register. For obvious reasons
+    /// it is only accessible by the `RegisterManager` to only give mutable registers to
+    #[inline]
+    const fn as_mutable(self, bit_size: BitSize) -> MutableRegister {
+        MutableRegister(Register::GeneralPurpose {
             index: self.register,
             bit_size,
-        }
+        })
+    }
+    /// Obtain the immutable version of the register. This is safe as long as `from_index`
+    /// had a valid register index
+    #[inline]
+    pub const fn as_immutable(self, bit_size: BitSize) -> ImmutableRegister {
+        ImmutableRegister(Register::GeneralPurpose {
+            index: self.register,
+            bit_size,
+        })
     }
     /// Obtain a register descriptor from an index
     ///

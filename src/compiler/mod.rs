@@ -4,13 +4,25 @@ mod function;
 mod labels;
 use std::iter::FromIterator;
 mod program;
-pub mod registers;
-pub mod stack;
+mod registers;
+mod stack;
 use crate::assembly::*;
 use core::convert::Infallible;
 use std::collections::vec_deque::IterMut;
 use std::collections::VecDeque;
-mod target;
+pub fn load_immediate(
+    stack: &mut stack::StackManager,
+    registers: &mut registers::RegisterManager,
+    target: registers::RegisterDescriptor,
+    value: i32,
+) -> AssemblyOutput {
+    registers.using_register_mutably(stack, target, BitSize::Bit32, |_, _, target| {
+        Instruction::Mov {
+            target,
+            source: Data::Immediate(value as u64),
+        }
+    })
+}
 
 pub trait CouldCompile {
     type Error: std::error::Error;
