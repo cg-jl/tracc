@@ -5,7 +5,7 @@ use std::ops::Try;
 
 // NOTE: when this happens; have the register manager not let mutable access with read-only access.
 //
-// TODO: use static arrays for register maps since the amount of registers available is already known
+// TODO(#10): use static arrays for register maps since the amount of registers available is already known
 
 pub fn with_registers<F, O>(stack: &mut StackManager, cont: F) -> O
 where
