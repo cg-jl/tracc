@@ -1,6 +1,5 @@
 use super::{stack::StackManager, AssemblyOutput, CompileWith};
 use crate::assembly::*;
-use std::collections::{HashMap, HashSet};
 use std::ops::Try;
 
 // NOTE: when this happens; have the register manager not let mutable access with read-only access.
@@ -60,32 +59,79 @@ where
     })
 }
 
+// presaved registers are 9 to 15 (included), therefore we can use u8
+
+#[derive(Default)]
+#[repr(transparent)]
+struct PresavedRegisters(u8);
+
+impl PresavedRegisters {
+    // raw set with index
+    #[inline]
+    fn set(&mut self, register_id: u8) {
+        let index = register_id - 9;
+        self.0 |= 1 << index;
+    }
+    #[inline]
+    const fn get(&self, register_id: u8) -> bool {
+        let index = register_id - 9;
+        self.0 >> index != 0
+    }
+}
+
+impl const IntoIterator for PresavedRegisters {
+    type Item = u8;
+
+    type IntoIter = PresavedRegistersIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        PresavedRegistersIter(self, 0u8)
+    }
+}
+
+struct PresavedRegistersIter(PresavedRegisters, u8);
+
+impl Iterator for PresavedRegistersIter {
+    type Item = u8;
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.1 < 31 {
+            if self.0.get(self.1) {
+                return Some(self.1);
+            }
+            self.1 += 1
+        }
+        None
+    }
+}
+
 pub struct RegisterManager {
-    register_usage: HashMap<u8, usize>,
-    presaved_registers: HashSet<u8>,
+    register_usage: [usize; 31],
+    // 31 values? that's a u32
+    presaved_registers: PresavedRegisters,
 }
 
 impl RegisterManager {
     pub fn new() -> Self {
         Self {
-            register_usage: HashMap::new(),
-            presaved_registers: HashSet::new(),
+            register_usage: [0usize; 31],
+            presaved_registers: PresavedRegisters::default(),
         }
     }
     fn find_unused_register(&self, range: std::ops::RangeInclusive<u8>) -> Option<u8> {
         for x in range {
-            if self.register_usage.get(&x).filter(|x| **x != 0).is_none() {
+            if self.register_usage[x as usize] == 0 {
                 return Some(x);
             }
         }
         None
     }
     fn find_min_usage_register(&self, range: std::ops::RangeInclusive<u8>) -> Option<u8> {
-        self.register_usage
+        self.register_usage[*range.start() as usize..=*range.end() as usize]
             .iter()
-            .filter(|(k, _)| range.contains(k))
-            .min_by(|(_, usesa), (_, usesb)| usesa.cmp(usesb))
-            .map(|(id, _)| *id)
+            .copied()
+            .enumerate()
+            .min_by(|(_id_a, usesa), (_id_b, usesb)| usesa.cmp(usesb))
+            .map(|(id, _)| id as u8)
     }
     fn find_register(&self, range: std::ops::RangeInclusive<u8>) -> Option<u8> {
         self.find_unused_register(range.clone())
@@ -124,7 +170,7 @@ impl RegisterManager {
             .iter()
             .copied()
             .filter_map(|(rd, bs)| {
-                if *self.register_usage.entry(rd.register).or_insert(0) != 0 {
+                if self.register_usage[rd.register as usize] != 0 {
                     Some(rd.as_mutable(bs))
                 } else {
                     None
@@ -154,14 +200,14 @@ impl RegisterManager {
         {
             let RegisterDescriptor { register } = register;
             if (9..=15).contains(&register) {
-                self.presaved_registers.insert(register);
+                self.presaved_registers.set(register);
             }
         }
         let usable_register = register.as_mutable(bit_size);
 
         // if (rare case since we've got 9 registers to play with plus presaved ones) it has at least one use, then
         // save it so that the other use can continue, otherwise the register can be used freely.
-        let current_uses = *self.register_usage.entry(register.register).or_insert(0);
+        let current_uses = self.register_usage[register.register as usize];
         if current_uses != 0 {
             saving_register(stack, usable_register, move |stack| {
                 user(stack, self, usable_register).into()
@@ -176,25 +222,21 @@ impl RegisterManager {
         F: FnOnce(&mut Self) -> T,
     {
         let RegisterDescriptor { register } = register;
-        *self.register_usage.entry(register).or_insert(0) += 1;
+        self.register_usage[register as usize] += 1;
         let result = cont(self);
-        self.register_usage.entry(register).and_modify(|x| *x -= 1);
+        self.register_usage[register as usize] -= 1;
         result
     }
-    pub fn finalize(
-        mut self,
-        stack: &mut StackManager,
-        mut output: AssemblyOutput,
-    ) -> AssemblyOutput {
-        let total_registers = self.presaved_registers.len();
+    pub fn finalize(self, stack: &mut StackManager, mut output: AssemblyOutput) -> AssemblyOutput {
+        let presaved_registers: Vec<_> = self.presaved_registers.into_iter().collect();
+        let total_registers = presaved_registers.len();
         let needed_size = total_registers * 8;
 
-        stack.with_alloc_bytes(needed_size, |_stack, start| {
+        stack.with_alloc_bytes(needed_size, move |_stack, start| {
             // for each of the presaved registers, add a safeguard to make sure that they are saved
             // and later restored
-            let registers = self
-                .presaved_registers
-                .drain()
+            let registers = presaved_registers
+                .into_iter()
                 .map(|register| RegisterDescriptor { register }.as_mutable(BitSize::Bit64));
             let addresses = start.partition(8).take(total_registers);
             for (register, address) in registers.zip(addresses) {
@@ -204,8 +246,8 @@ impl RegisterManager {
                 });
                 output.push_instruction(Instruction::Ldr { register, address });
             }
-        });
-        output
+            output
+        })
     }
 }
 
