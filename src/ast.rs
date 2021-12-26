@@ -56,6 +56,8 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
+    /// Dummy that signifies that the expression you want to compile is already in the target
+    AlreadyInTarget,
 }
 
 impl Expr {
@@ -149,7 +151,6 @@ pub enum BinaryOp {
     Logic(LogicOp),
     Bit(BitOp),
     Relational(Relational),
-    Equality(Equality),
     Assignment { op: Option<AssignmentEnabledOp> },
 }
 
@@ -159,6 +160,16 @@ pub enum AssignmentEnabledOp {
     Arithmetic(ArithmeticOp),
     Logic(LogicOp),
     Bit(BitOp),
+}
+
+impl const From<AssignmentEnabledOp> for BinaryOp {
+    fn from(op: AssignmentEnabledOp) -> Self {
+        match op {
+            AssignmentEnabledOp::Arithmetic(a) => Self::Arithmetic(a),
+            AssignmentEnabledOp::Bit(b) => Self::Bit(b),
+            AssignmentEnabledOp::Logic(l) => Self::Logic(l),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -173,6 +184,8 @@ pub enum Relational {
     LessEqual,
     Greater,
     GreaterEqual,
+    Equals,
+    NotEquals,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,10 +209,10 @@ impl const From<LogicOp> for AssignmentEnabledOp {
     }
 }
 
-impl const From<BitOp> for AssignmentEnabledOp {
+impl const Into<AssignmentEnabledOp> for BitOp {
     #[inline]
-    fn from(b: BitOp) -> Self {
-        Self::Bit(b)
+    fn into(self) -> AssignmentEnabledOp {
+        AssignmentEnabledOp::Bit(self)
     }
 }
 
@@ -221,11 +234,22 @@ impl Relational {
             Self::LessEqual => Condition::LessEqual,
             Self::Greater => Condition::GreaterThan,
             Self::GreaterEqual => Condition::GreaterEqual,
+            Self::Equals => Condition::Equals,
+            Self::NotEquals => Condition::NotEquals,
+        }
+    }
+    pub const fn precedence(self) -> u8 {
+        match self {
+            Self::Less | Self::LessEqual | Self::Greater | Self::GreaterEqual => 15 - 6,
+            Self::Equals | Self::NotEquals => 15 - 7,
         }
     }
 }
 
 impl BitOp {
+    pub const fn is_commutative(self) -> bool {
+        matches!(self, Self::And | Self::Or | Self::Xor)
+    }
     pub const fn precedence(self) -> u8 {
         match self {
             Self::LeftShift | Self::RightShift => 15 - 5,
@@ -243,6 +267,11 @@ impl ArithmeticOp {
             Self::Multiply | Self::Divide | Self::Modulo => 15 - 3,
         }
     }
+    /// if the operation is commutative, then the constants can be swapped around and use
+    /// immediates. If not.... well, we can't :)
+    pub const fn supports_commutativity(self) -> bool {
+        matches!(self, Self::Add | Self::Multiply)
+    }
 }
 
 impl LogicOp {
@@ -257,11 +286,9 @@ impl LogicOp {
 impl BinaryOp {
     pub const fn associativity(self) -> Associativity {
         match self {
-            Self::Arithmetic(_)
-            | Self::Logic(_)
-            | Self::Bit(_)
-            | Self::Relational(_)
-            | Self::Equality(_) => Associativity::Left,
+            Self::Arithmetic(_) | Self::Logic(_) | Self::Bit(_) | Self::Relational(_) => {
+                Associativity::Left
+            }
             Self::Assignment { .. } => Associativity::Right,
         }
     }
@@ -270,10 +297,7 @@ impl BinaryOp {
             Self::Arithmetic(arithm) => arithm.precedence(),
             Self::Logic(logic) => logic.precedence(),
             Self::Bit(bit) => bit.precedence(),
-            // all relational operators have the same precedence
-            Self::Relational(_) => 15 - 6,
-            // all equality operators have the same precedence
-            Self::Equality(_) => 15 - 7,
+            Self::Relational(relation) => relation.precedence(),
             // all assignments have the same precedence, regardless of the operator it might come
             // with
             Self::Assignment { .. } => 15 - 14,
@@ -306,7 +330,7 @@ impl BinaryOp {
                 if !has_equal {
                     return None;
                 } else {
-                    Self::Equality(Equality::Equals)
+                    Self::Relational(Relational::NotEquals)
                 }
             }
             Operator::Tilde => return None, // tilde is a unary operator
@@ -393,7 +417,7 @@ impl BinaryOp {
             }
             Operator::Equals => {
                 if has_equal {
-                    Self::Equality(Equality::Equals)
+                    Self::Relational(Relational::Equals)
                 } else {
                     Self::Assignment { op: None }
                 }

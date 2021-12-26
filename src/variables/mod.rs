@@ -94,6 +94,7 @@ pub fn walk_block(Block(statements): Block) -> Result<(Block, usize), VarError> 
 
 fn assign_indices(expr: Expr, vars: &HashMap<String, usize>) -> Expr {
     match expr {
+        Expr::AlreadyInTarget => expr,
         Expr::Binary { lhs, rhs, operator } => Expr::Binary {
             operator,
             lhs: Box::new(assign_indices(*lhs, vars)),

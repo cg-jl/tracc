@@ -1,6 +1,6 @@
 use super::{stack::StackManager, AssemblyOutput, CompileWith};
 use crate::assembly::*;
-use std::ops::Try;
+use std::ops::{RangeInclusive, Try};
 
 pub fn with_registers<F, O>(stack: &mut StackManager, cont: F) -> O
 where
@@ -81,20 +81,19 @@ impl const IntoIterator for PresavedRegisters {
     type IntoIter = PresavedRegistersIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        PresavedRegistersIter(self, 0u8)
+        PresavedRegistersIter(self, 9..=15)
     }
 }
 
-struct PresavedRegistersIter(PresavedRegisters, u8);
+struct PresavedRegistersIter(PresavedRegisters, RangeInclusive<u8>);
 
 impl Iterator for PresavedRegistersIter {
     type Item = u8;
     fn next(&mut self) -> Option<Self::Item> {
-        while self.1 < 31 {
-            if self.0.get(self.1) {
-                return Some(self.1);
+        while let Some(i) = self.1.next() {
+            if self.0.get(i) {
+                return Some(i);
             }
-            self.1 += 1
         }
         None
     }

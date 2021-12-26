@@ -1,4 +1,4 @@
-use crate::{format_instr, format_instr_args, write_instruction};
+use crate::{compiler::RegisterDescriptor, format_instr, format_instr_args, write_instruction};
 // use bitflags::bitflags;
 use std::fmt;
 
@@ -108,6 +108,13 @@ pub enum Instruction {
         lhs: ImmutableRegister,
         rhs: Data,
     },
+    /// Multiply/sub
+    MSub {
+        target: MutableRegister,
+        multiplicand: ImmutableRegister,
+        multiplier: ImmutableRegister,
+        minuend: ImmutableRegister,
+    },
     /// Multiply two numbers (currently not u/s/l)
     Mul {
         target: MutableRegister,
@@ -121,6 +128,22 @@ pub enum Instruction {
         rhs: Data,
         signed: bool,
     },
+    /// Logical shift left
+    // NOTE: `s` suffix is available
+    Lsl {
+        target: MutableRegister,
+        lhs: ImmutableRegister,
+        // if it is a register, only the lsbyte is used
+        // if it is an immediate, range of values permitted is 0-31
+        rhs: Data,
+    },
+    /// Logical shift right
+    // NOTE: `s` suffix is available
+    Lsr {
+        target: MutableRegister,
+        lhs: ImmutableRegister,
+        rhs: Data,
+    },
     /// Store a register into memory
     Str {
         register: ImmutableRegister,
@@ -131,7 +154,31 @@ pub enum Instruction {
         register: MutableRegister,
         address: Memory,
     },
-    // /// Branch for different situations
+    /// Bitwise AND
+    // NOTE: `s` suffix is available
+    // NOTE: register and immediate controlled LS(R|L)/ROR/ASR is available
+    And {
+        target: MutableRegister,
+        lhs: ImmutableRegister,
+        rhs: Data,
+    },
+
+    /// Bitwise OR
+    Orr {
+        target: MutableRegister,
+        lhs: ImmutableRegister,
+        rhs: Data,
+    },
+
+    /// Exclusive OR
+    Eor {
+        target: MutableRegister,
+        lhs: ImmutableRegister,
+        rhs: Data,
+        bitmask: u64,
+    },
+
+    /// Branch for different situations
     Branch(Branch),
 }
 
@@ -173,6 +220,22 @@ impl Label {
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Eor {
+                target,
+                lhs,
+                rhs,
+                bitmask,
+            } => write_instruction!(f, "eor", target, lhs, rhs, Data::Immediate(*bitmask)),
+            Self::Orr { target, lhs, rhs } => write_instruction!(f, "orr", target, lhs, rhs),
+            Self::And { target, lhs, rhs } => write_instruction!(f, "and", target, lhs, rhs),
+            Self::Lsr { target, lhs, rhs } => write_instruction!(f, "lsr", target, lhs, rhs),
+            Self::Lsl { target, lhs, rhs } => write_instruction!(f, "lsl", target, lhs, rhs),
+            Self::MSub {
+                target,
+                multiplicand,
+                multiplier,
+                minuend,
+            } => write_instruction!(f, "msub", target, multiplicand, multiplier, minuend),
             Self::Ret => write_instruction!(f, "ret"),
             Self::Mov { target, source } => write_instruction!(f, "mov", target, source),
             Self::MvN { target, source } => write_instruction!(f, "mvn", target, source),
@@ -264,6 +327,12 @@ impl Instruction {
                 ref mut address, ..
             } => mapper(address),
             Self::Add { .. }
+            | Self::And { .. }
+            | Self::Orr { .. }
+            | Self::Eor { .. }
+            | Self::Lsl { .. }
+            | Self::Lsr { .. }
+            | Self::MSub { .. }
             | Self::Mov { .. }
             | Self::Sub { .. }
             | Self::Neg { .. }
@@ -408,6 +477,16 @@ impl fmt::Display for Register {
 }
 
 impl Register {
+    pub const fn as_register_descriptor(self) -> Option<RegisterDescriptor> {
+        match self {
+            Self::GeneralPurpose { index, .. } => {
+                // UNSAFE: index is already valid at this point
+                Some(unsafe { RegisterDescriptor::from_index(index) })
+            }
+            // it is not writable, so there's no register descriptor needed
+            _ => None,
+        }
+    }
     pub const fn bit_size(self) -> BitSize {
         match self {
             Self::GeneralPurpose { bit_size, .. } => bit_size,
@@ -425,7 +504,13 @@ pub enum BitSize {
 }
 
 impl BitSize {
-    fn char(&self) -> char {
+    pub const fn full_bits(self) -> u64 {
+        match self {
+            Self::Bit32 => 0xFFFFFFFF,
+            Self::Bit64 => 0xFFFFFFFFFFFFFFFF,
+        }
+    }
+    const fn char(&self) -> char {
         match self {
             Self::Bit32 => 'w',
             Self::Bit64 => 'x',

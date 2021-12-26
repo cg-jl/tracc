@@ -8,6 +8,7 @@ mod registers;
 mod stack;
 use crate::assembly::*;
 use core::convert::Infallible;
+pub use registers::RegisterDescriptor;
 use std::collections::vec_deque::IterMut;
 use std::collections::VecDeque;
 pub fn load_immediate(
