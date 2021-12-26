@@ -148,6 +148,7 @@ impl TokenKind {
         }
     }
 }
+// TODO: test that all operators are working from the lexer
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operator {
@@ -157,13 +158,17 @@ pub enum Operator {
     Tilde,
     Star,
     Slash,
+    Percentage,
+    And,
+    Pipe,
+    Hat,
     DoubleAnd,
     DoublePipe,
+    DoubleAngleRight,
+    DoubleAngleLeft,
     AngleRight,
     AngleLeft,
-    DoubleEquals,
     Equals,
-    ExclamationEquals,
 }
 
 #[derive(Debug)]
@@ -251,8 +256,6 @@ impl<'a> Lexer<'a> {
         let op: Operator = self.choice::<Operator>(&[
             &|lexer: &mut Self| lexer.eat_char('+').map(|_| Operator::Plus),
             &|lexer: &mut Self| lexer.eat_char('-').map(|_| Operator::Minus),
-            &|lexer: &mut Self| lexer.eat_str("!=").map(|_| Operator::ExclamationEquals),
-            &|lexer: &mut Self| lexer.eat_str("==").map(|_| Operator::DoubleEquals),
             &|lexer: &mut Self| lexer.eat_char('=').map(|_| Operator::Equals),
             &|lexer: &mut Self| lexer.eat_char('!').map(|_| Operator::ExclamationMark),
             &|lexer: &mut Self| lexer.eat_char('~').map(|_| Operator::Tilde),

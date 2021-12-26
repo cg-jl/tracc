@@ -70,6 +70,8 @@ pub enum VariableKind {
     Processed { index: usize }, // NOTE: currently all variables are ints.
 }
 
+// NOTE: unary operators also have different predecences (14 or 13, depending on them), it's just
+// that all the ones that we have are on the same group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Negate,
@@ -86,29 +88,77 @@ impl UnaryOp {
             // NOTE: star operator will have to be enabled for pointer access
             Operator::Plus
             | Operator::Star
+            | Operator::And
+            | Operator::DoubleAngleLeft
+            | Operator::DoubleAngleRight
+            | Operator::Hat
+            | Operator::Pipe
             | Operator::Slash
             | Operator::DoubleAnd
             | Operator::DoublePipe
             | Operator::AngleLeft
             | Operator::AngleRight
-            | Operator::ExclamationEquals
-            | Operator::Equals
-            | Operator::DoubleEquals => return None,
+            | Operator::Percentage
+            | Operator::Equals => return None,
         })
     }
 }
 
+/// Includes anything that is related to basic arithmetic
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArithmeticOp {
+    /// `+` operator
+    Add,
+    /// `-` (binary) operator
+    Subtract,
+    /// '*' (binary) operator
+    Multiply,
+    /// `/` operator
+    Divide,
+    /// `%` operator
+    Modulo,
+}
+
+/// Includes all bit operations that can be done with simple registers (not SSE for the moment)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BitOp {
+    /// `&` operator
+    And,
+    /// `|` operator
+    Or,
+    /// `^` operator
+    Xor,
+    /// `>>` operator
+    RightShift,
+    /// `<<` operator
+    LeftShift,
+}
+
+/// Includes the classic shortcuts for if statements: `&&` and `||`. These operate based on
+/// equality to 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogicOp {
+    And,
+    Or,
+}
+
+/// Includes any kind of operator that needs two values
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    LogicAnd,
-    LogicOr,
+    Arithmetic(ArithmeticOp),
+    Logic(LogicOp),
+    Bit(BitOp),
     Relational(Relational),
     Equality(Equality),
-    Assign,
+    Assignment { op: Option<AssignmentEnabledOp> },
+}
+
+/// Includes all the operators that are accepted by assignment
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssignmentEnabledOp {
+    Arithmetic(ArithmeticOp),
+    Logic(LogicOp),
+    Bit(BitOp),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -129,6 +179,28 @@ pub enum Relational {
 pub enum Equality {
     Equals,
     NotEquals,
+}
+
+// convert easily to AssignmentEnabledOp
+impl const From<ArithmeticOp> for AssignmentEnabledOp {
+    #[inline]
+    fn from(a: ArithmeticOp) -> Self {
+        Self::Arithmetic(a)
+    }
+}
+
+impl const From<LogicOp> for AssignmentEnabledOp {
+    #[inline]
+    fn from(l: LogicOp) -> Self {
+        Self::Logic(l)
+    }
+}
+
+impl const From<BitOp> for AssignmentEnabledOp {
+    #[inline]
+    fn from(b: BitOp) -> Self {
+        Self::Bit(b)
+    }
 }
 
 impl Equality {
@@ -153,131 +225,233 @@ impl Relational {
     }
 }
 
+impl BitOp {
+    pub const fn precedence(self) -> u8 {
+        match self {
+            Self::LeftShift | Self::RightShift => 15 - 5,
+            Self::And => 15 - 8,
+            Self::Or => 15 - 10,
+            Self::Xor => 15 - 9,
+        }
+    }
+}
+
+impl ArithmeticOp {
+    pub const fn precedence(self) -> u8 {
+        match self {
+            Self::Add | Self::Subtract => 15 - 4,
+            Self::Multiply | Self::Divide | Self::Modulo => 15 - 3,
+        }
+    }
+}
+
+impl LogicOp {
+    pub const fn precedence(self) -> u8 {
+        match self {
+            Self::And => 15 - 11,
+            Self::Or => 15 - 12,
+        }
+    }
+}
+
 impl BinaryOp {
     pub const fn associativity(self) -> Associativity {
         match self {
-            Self::LogicAnd
-            | Self::LogicOr
-            | Self::Add
-            | Self::Subtract
-            | Self::Multiply
-            | Self::Divide
+            Self::Arithmetic(_)
+            | Self::Logic(_)
+            | Self::Bit(_)
             | Self::Relational(_)
             | Self::Equality(_) => Associativity::Left,
-            Self::Assign => Associativity::Right,
+            Self::Assignment { .. } => Associativity::Right,
         }
     }
     pub const fn precedence(self) -> u8 {
         match self {
-            Self::LogicAnd => 4,
-            Self::LogicOr => 3,
-            Self::Add | Self::Subtract => 11,
-            Self::Multiply | Self::Divide => 12,
-            Self::Relational(_) => 9,
-            Self::Assign => 14, // NOTE: assignment is RTL!
-            Self::Equality(_) => 8,
+            Self::Arithmetic(arithm) => arithm.precedence(),
+            Self::Logic(logic) => logic.precedence(),
+            Self::Bit(bit) => bit.precedence(),
+            // all relational operators have the same precedence
+            Self::Relational(_) => 15 - 6,
+            // all equality operators have the same precedence
+            Self::Equality(_) => 15 - 7,
+            // all assignments have the same precedence, regardless of the operator it might come
+            // with
+            Self::Assignment { .. } => 15 - 14,
         }
     }
     pub const fn from_operator((op, has_equal): (Operator, bool)) -> Option<Self> {
         Some(match op {
-            Operator::Minus => Self::Subtract,
-            Operator::Plus => Self::Add,
-            Operator::Star => Self::Multiply,
-            Operator::Slash => Self::Divide,
-            Operator::DoubleAnd => Self::LogicAnd,
-            Operator::DoublePipe => Self::LogicOr,
-            Operator::AngleLeft => {
+            Operator::Plus => {
+                let op = ArithmeticOp::Add;
                 if has_equal {
-                    Self::Relational(Relational::LessEqual)
+                    Self::Assignment {
+                        op: Some(op.into()),
+                    }
                 } else {
-                    Self::Relational(Relational::Less)
+                    Self::Arithmetic(op)
                 }
             }
-            Operator::AngleRight => {
+            Operator::Minus => {
+                let op = ArithmeticOp::Subtract;
                 if has_equal {
-                    Self::Relational(Relational::GreaterEqual)
+                    Self::Assignment {
+                        op: Some(op.into()),
+                    }
                 } else {
-                    Self::Relational(Relational::Greater)
+                    Self::Arithmetic(op)
                 }
             }
-            Operator::Equals => Self::Assign,
-            Operator::DoubleEquals => Self::Equality(Equality::Equals),
-            Operator::ExclamationEquals => Self::Equality(Equality::NotEquals),
-            Operator::Tilde | Operator::ExclamationMark => return None,
+            Operator::ExclamationMark => {
+                // that is a unary not
+                if !has_equal {
+                    return None;
+                } else {
+                    Self::Equality(Equality::Equals)
+                }
+            }
+            Operator::Tilde => return None, // tilde is a unary operator
+            // a star when a binary operator is needed is clearly a multiplication
+            Operator::Star => {
+                let op = ArithmeticOp::Multiply;
+                if has_equal {
+                    Self::Assignment {
+                        op: Some(op.into()),
+                    }
+                } else {
+                    Self::Arithmetic(op)
+                }
+            }
+            Operator::Slash => {
+                let op = ArithmeticOp::Divide;
+                if has_equal {
+                    Self::Assignment {
+                        op: Some(op.into()),
+                    }
+                } else {
+                    Self::Arithmetic(op)
+                }
+            }
+            Operator::DoubleAnd => {
+                let op = LogicOp::And;
+                if has_equal {
+                    Self::Assignment {
+                        op: Some(op.into()),
+                    }
+                } else {
+                    Self::Logic(op)
+                }
+            }
+            Operator::DoublePipe => {
+                let op = LogicOp::Or;
+                if has_equal {
+                    Self::Assignment {
+                        op: Some(op.into()),
+                    }
+                } else {
+                    Self::Logic(op)
+                }
+            }
+            Operator::DoubleAngleRight => {
+                let op = BitOp::RightShift;
+                if has_equal {
+                    Self::Assignment {
+                        op: Some(op.into()),
+                    }
+                } else {
+                    Self::Bit(op)
+                }
+            }
+            Operator::DoubleAngleLeft => {
+                let op = BitOp::LeftShift;
+                if has_equal {
+                    Self::Assignment {
+                        op: Some(op.into()),
+                    }
+                } else {
+                    Self::Bit(op)
+                }
+            }
+            Operator::AngleRight => Self::Relational(if has_equal {
+                Relational::GreaterEqual
+            } else {
+                Relational::Greater
+            }),
+            Operator::AngleLeft => Self::Relational(if has_equal {
+                Relational::LessEqual
+            } else {
+                Relational::Less
+            }),
+            Operator::Percentage => {
+                let op = ArithmeticOp::Modulo;
+                if has_equal {
+                    Self::Assignment {
+                        op: Some(op.into()),
+                    }
+                } else {
+                    Self::Arithmetic(op)
+                }
+            }
+            Operator::Equals => {
+                if has_equal {
+                    Self::Equality(Equality::Equals)
+                } else {
+                    Self::Assignment { op: None }
+                }
+            }
+            Operator::And => {
+                let op = BitOp::And;
+                if has_equal {
+                    Self::Assignment {
+                        op: Some(op.into()),
+                    }
+                } else {
+                    Self::Bit(op)
+                }
+            },
+            Operator::Pipe => {
+                let op = BitOp::Or;
+                if has_equal {
+                    Self::Assignment {
+                        op: Some(op.into()),
+                    }
+                } else {
+                    Self::Bit(op)
+                }
+            },
+            Operator::Hat => {
+                let op = BitOp::Xor;
+                if has_equal {
+                    Self::Assignment {
+                        op: Some(op.into()),
+                    }
+                } else {
+                    Self::Bit(op)
+                }
+            }
+            // Operator::Minus => Self::Subtract,
+            // Operator::Plus => Self::Add,
+            // Operator::Star => Self::Multiply,
+            // Operator::Slash => Self::Divide,
+            // Operator::DoubleAnd => Self::LogicAnd,
+            // Operator::DoublePipe => Self::LogicOr,
+            // Operator::AngleLeft => {
+            //     if has_equal {
+            //         Self::Relational(Relational::LessEqual)
+            //     } else {
+            //         Self::Relational(Relational::Less)
+            //     }
+            // }
+            // Operator::AngleRight => {
+            //     if has_equal {
+            //         Self::Relational(Relational::GreaterEqual)
+            //     } else {
+            //         Self::Relational(Relational::Greater)
+            //     }
+            // }
+            // Operator::Equals => Self::Assign,
+            // Operator::DoubleEquals => Self::Equality(Equality::Equals),
+            // Operator::ExclamationEquals => Self::Equality(Equality::NotEquals),
+            // Operator::Tilde | Operator::ExclamationMark => return None,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::parser::{Parse, ParseRes, Parser};
-
-    use super::*;
-
-    fn parse_test<T: Parse>(source: &str) -> ParseRes<T> {
-        use crate::error::SourceMetadata;
-        let meta = SourceMetadata::new(source).with_file(std::path::PathBuf::from("<test input>"));
-        let mut parser = Parser::new(&meta);
-        parser.parse()
-    }
-
-    fn parse_ok<T: Parse>(source: &str) -> T {
-        parse_test(source).expect("expected no failure")
-    }
-
-    mod expression {
-        use super::*;
-        #[test]
-        fn number() {
-            assert_eq!(parse_ok::<Expr>("12"), Expr::Constant(12));
-            assert_eq!(parse_ok::<Expr>("0"), Expr::Constant(0));
-        }
-        #[test]
-        fn unary_op() {
-            assert_eq!(
-                parse_ok::<Expr>("-1"),
-                Expr::Unary {
-                    operator: UnaryOp::Negate,
-                    expr: Box::new(Expr::Constant(1))
-                }
-            )
-        }
-        #[test]
-        fn binary_op() {
-            assert_eq!(
-                parse_ok::<Expr>("1 + 2"),
-                Expr::Binary {
-                    operator: BinaryOp::Add,
-                    lhs: Box::new(Expr::Constant(1)),
-                    rhs: Box::new(Expr::Constant(2))
-                }
-            );
-            assert_eq!(
-                parse_ok::<Expr>("1 - 2"),
-                Expr::Binary {
-                    operator: BinaryOp::Subtract,
-                    lhs: Box::new(Expr::Constant(1)),
-                    rhs: Box::new(Expr::Constant(2))
-                }
-            );
-        }
-        #[test]
-        fn compound() {
-            assert_eq!(
-                parse_ok::<Expr>("10 + ~(5 - 4)"),
-                Expr::Binary {
-                    operator: BinaryOp::Add,
-                    lhs: Box::new(Expr::Constant(10)),
-                    rhs: Box::new(Expr::Unary {
-                        operator: UnaryOp::BitNot,
-                        expr: Box::new(Expr::Binary {
-                            operator: BinaryOp::Subtract,
-                            lhs: Box::new(Expr::Constant(5)),
-                            rhs: Box::new(Expr::Constant(4)),
-                        })
-                    })
-                }
-            );
-        }
     }
 }
