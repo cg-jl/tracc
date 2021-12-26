@@ -74,7 +74,7 @@ pub fn walk_block(Block(statements): Block) -> Result<(Block, usize), VarError> 
             .filter_map(|st| match st {
                 Statement::DeclareVar { init, name } => init.map(|init| {
                     Statement::SingleExpr(Expr::Binary {
-                        operator: BinaryOp::Assign,
+                        operator: BinaryOp::Assignment { op: None },
                         lhs: Box::new(Expr::Variable(VariableKind::Processed {
                             index: vars[&name],
                         })),
