@@ -27,21 +27,25 @@ impl fmt::Display for TokenKind {
 
 impl fmt::Display for Operator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Equals => write!(f, "="),
-            Self::ExclamationMark => write!(f, "!"),
-            Self::Minus => write!(f, "-"),
-            Self::Plus => write!(f, "+"),
-            Self::Tilde => write!(f, "~"),
-            Self::Star => write!(f, "*"),
-            Self::Slash => write!(f, "/"),
-            Self::DoubleAnd => write!(f, "&&"),
-            Self::DoublePipe => write!(f, "||"),
-            Self::AngleRight => write!(f, ">"),
-            Self::AngleLeft => write!(f, "<"),
-            Self::ExclamationEquals => write!(f, "!="),
-            Self::DoubleEquals => write!(f, "=="),
-        }
+        f.write_str(match self {
+            Operator::Plus => "+",
+            Operator::Minus => "=",
+            Operator::ExclamationMark => "!",
+            Operator::Tilde => "~",
+            Operator::Star => "*",
+            Operator::Slash => "/",
+            Operator::Percentage => "%",
+            Operator::And => "&",
+            Operator::Pipe => "|",
+            Operator::Hat => "^",
+            Operator::DoubleAnd => "&&",
+            Operator::DoublePipe => "||",
+            Operator::DoubleAngleRight => ">>",
+            Operator::DoubleAngleLeft => "<<",
+            Operator::AngleRight => ">",
+            Operator::AngleLeft => "<",
+            Operator::Equals => "=",
+        })
     }
 }
 
@@ -251,6 +255,7 @@ impl<'a> Lexer<'a> {
         None
     }
 
+    // NOTE: this should be reworked so it matches more efficiently
     fn operator(&mut self) -> Option<(usize, Operator)> {
         let start = self.current_offset();
         let op: Operator = self.choice::<Operator>(&[
@@ -261,10 +266,16 @@ impl<'a> Lexer<'a> {
             &|lexer: &mut Self| lexer.eat_char('~').map(|_| Operator::Tilde),
             &|lexer: &mut Self| lexer.eat_char('*').map(|_| Operator::Star),
             &|lexer: &mut Self| lexer.eat_char('/').map(|_| Operator::Slash),
+            &|lexer: &mut Self| lexer.eat_char('^').map(|_| Operator::Hat),
+            &|lexer: &mut Self| lexer.eat_char('%').map(|_| Operator::Percentage),
+            &|lexer: &mut Self| lexer.eat_str(">>").map(|_| Operator::DoubleAngleRight),
+            &|lexer: &mut Self| lexer.eat_str("<<").map(|_| Operator::DoubleAngleLeft),
             &|lexer: &mut Self| lexer.eat_char('<').map(|_| Operator::AngleLeft),
             &|lexer: &mut Self| lexer.eat_char('>').map(|_| Operator::AngleRight),
             &|lexer: &mut Self| lexer.eat_str("&&").map(|_| Operator::DoubleAnd),
             &|lexer: &mut Self| lexer.eat_str("||").map(|_| Operator::DoublePipe),
+            &|lexer: &mut Self| lexer.eat_char('|').map(|_| Operator::Pipe),
+            &|lexer: &mut Self| lexer.eat_char('&').map(|_| Operator::And),
         ])?;
         self.advance();
         Some((start, op))
