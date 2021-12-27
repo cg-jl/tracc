@@ -1,5 +1,5 @@
 [package]
-name = "comp-rs"
+name = "tracc"
 version = "0.5.1"
 edition = "2018"
 
@@ -12,5 +12,5 @@ lazy_static = "1.4.0"
 
 
 [lib]
-name = "comp"
+name = "tracc"
 path = "src/lib.rs"

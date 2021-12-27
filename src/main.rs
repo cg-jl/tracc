@@ -1,10 +1,10 @@
 #![feature(try_trait_v2)]
-use comp::ast::Program;
-use comp::compiler::CouldCompile;
-use comp::error::SourceMetadata;
-use comp::parser::Parser;
 use std::error::Error;
 use structopt::StructOpt;
+use tracc::ast::Program;
+use tracc::compiler::CouldCompile;
+use tracc::error::SourceMetadata;
+use tracc::parser::Parser;
 
 // TODO(#3): structured formatting lib (error,warning,note,help, etc)
 // TODO(#4): create test crate
