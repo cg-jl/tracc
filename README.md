@@ -13,13 +13,19 @@ declarations, some [expressions](#expressions-supported) and return statements.
 
 ### Expressions supported
 - **Binary**:
-  - **Basic**:
+  - **Arithmetic/Logic/Bitwise**:
   - `+`: Add
   - `-`: Subtract
   - `*`: Multiply
   - `/`: Divide
+  - `%`: Modulo (unsigned division remainder)
   - `&&`: Logic and gate (logic means that it is reduced to 1/0)
   - `||`: Logic or gate
+  - `>>`: shift right
+  - `<<`: shift left
+  - `|` : bitwise or
+  - `&` : bitwise and
+  - `^` : bitwise exclusive or
   - Relational: `<=`, `<`, `>`, `>=`
   - Equality: `==`, `!=`
 
@@ -28,15 +34,9 @@ declarations, some [expressions](#expressions-supported) and return statements.
   - `~`: Bitwise not
   - `-`: Negate (`* -1`)
 
-**NOTE** that no assignment shorthands exist, e.g:
-```c
-a *= b
-```
-is not expanded to 
-```c
-a = a * b
-```
-but rather seen as an unknown operator.
+All combined assignment-operator operations are implemented, including all arithmetic, logic, and bitwise operators.
+
+
 
 
 
