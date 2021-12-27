@@ -10,13 +10,13 @@ mod statement;
 
 // TODO(#5): add measureme to the parser
 
-pub struct Parser<'a> {
-    lexer: Lexer<'a>,
-    current_tok: Option<Token<'a>>,
+pub struct Parser<'source> {
+    lexer: Lexer<'source>,
+    current_tok: Option<Token<'source>>,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(source: &'a SourceMetadata<'a>) -> Self {
+impl<'source> Parser<'source> {
+    pub fn new(source: &'source SourceMetadata<'source>) -> Self {
         Self {
             lexer: Lexer::new(source),
             current_tok: None,
@@ -38,7 +38,7 @@ impl<'a> Parser<'a> {
             .map(|x| x.source.span)
             .expect("called current_token_span with no token")
     }
-    pub fn current_token_source(&self) -> &'a str {
+    pub fn current_token_source(&self) -> &'source str {
         self.current_tok
             .as_ref()
             .map(|x| x.source.source)
@@ -90,7 +90,7 @@ impl<'a> Parser<'a> {
     }
     pub fn parse<T>(&mut self) -> ParseRes<T>
     where
-        T: Parse,
+        T: Parse<'source>,
     {
         T::parse(self)
     }
@@ -103,7 +103,7 @@ impl<'a> Parser<'a> {
 
     /// Iterates the same parser until a failure happens. The [`Err`] variant
     /// is used only for lexing errors, the rest will only trigger a [`None`]
-    pub fn iterate<T: Parse>(&mut self) -> ParseRes<Vec<T>> {
+    pub fn iterate<T: Parse<'source>>(&mut self) -> ParseRes<Vec<T>> {
         let mut result = Vec::new();
 
         loop {
@@ -139,8 +139,8 @@ impl ParseErrorKind {
     }
 }
 
-pub trait Parse: Sized {
-    fn parse(parser: &mut Parser) -> ParseRes<Self>;
+pub trait Parse<'source>: Sized {
+    fn parse(parser: &mut Parser<'source>) -> ParseRes<Self>;
 }
 
 use std::error;

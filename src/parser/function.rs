@@ -2,7 +2,7 @@ use super::{Parse, ParseRes, Parser};
 use crate::ast::Function;
 use crate::lexer::TokenKind;
 
-impl Parse for Function {
+impl<'source> Parse<'source> for Function {
     fn parse(parser: &mut Parser) -> ParseRes<Self> {
         parser.with_context("parsing function", |parser| {
             parser.keyword("int")?;

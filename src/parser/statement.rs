@@ -4,8 +4,8 @@ use crate::ast::Statement;
 use crate::lexer::Operator;
 use crate::lexer::TokenKind;
 
-impl Parse for Statement {
-    fn parse(parser: &mut Parser) -> ParseRes<Self> {
+impl<'source> Parse<'source> for Statement {
+    fn parse(parser: &mut Parser<'source>) -> ParseRes<Self> {
         parser.with_context("parsing statement", |parser| {
             Ok(match parser.peek_token()? {
                 // TODO: add better description of what is expected

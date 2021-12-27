@@ -6,7 +6,7 @@ use crate::ast::UnaryOp;
 use crate::ast::VariableKind;
 use crate::lexer::TokenKind;
 
-impl Parse for Expr {
+impl Parse<'_> for Expr {
     fn parse(parser: &mut Parser) -> ParseRes<Self> {
         parse_primary(parser)
             .and_then(|lhs| {
