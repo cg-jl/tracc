@@ -1,5 +1,6 @@
 //! Internal representation of the AST without source information
 use crate::lexer::Operator;
+
 use std::fmt;
 
 // TODO: spans
@@ -111,7 +112,7 @@ impl UnaryOp {
 }
 
 /// Includes anything that is related to basic arithmetic
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum ArithmeticOp {
     /// `+` operator
     Add,
@@ -125,8 +126,25 @@ pub enum ArithmeticOp {
     Modulo,
 }
 
+impl const Eq for ArithmeticOp {
+    fn assert_receiver_is_total_eq(&self) {}
+}
+
+impl const PartialEq for ArithmeticOp {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (Self::Add, Self::Add)
+                | (Self::Subtract, Self::Subtract)
+                | (Self::Multiply, Self::Multiply)
+                | (Self::Divide, Self::Divide)
+                | (Self::Modulo, Self::Modulo)
+        )
+    }
+}
+
 /// Includes all bit operations that can be done with simple registers (not SSE for the moment)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum BitOp {
     /// `&` operator
     And,
@@ -140,12 +158,39 @@ pub enum BitOp {
     LeftShift,
 }
 
+impl const Eq for BitOp {
+    fn assert_receiver_is_total_eq(&self) {}
+}
+
+impl const PartialEq for BitOp {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (Self::And, Self::And)
+                | (Self::Or, Self::Or)
+                | (Self::Xor, Self::Xor)
+                | (Self::RightShift, Self::RightShift)
+                | (Self::LeftShift, Self::LeftShift)
+        )
+    }
+}
+
 /// Includes the classic shortcuts for if statements: `&&` and `||`. These operate based on
 /// equality to 0.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum LogicOp {
     And,
     Or,
+}
+
+impl const Eq for LogicOp {
+    fn assert_receiver_is_total_eq(&self) {}
+}
+
+impl const PartialEq for LogicOp {
+    fn eq(&self, other: &Self) -> bool {
+        matches!((self, other), (Self::And, Self::And) | (Self::Or, Self::Or))
+    }
 }
 
 /// Includes any kind of operator that needs two values
@@ -156,6 +201,36 @@ pub enum BinaryOp {
     Bit(BitOp),
     Relational(Relational),
     Assignment { op: Option<AssignmentEnabledOp> },
+}
+
+impl const PartialEq<BinaryOp> for ArithmeticOp {
+    fn eq(&self, other: &BinaryOp) -> bool {
+        if let BinaryOp::Arithmetic(a) = other {
+            self.eq(a)
+        } else {
+            false
+        }
+    }
+}
+
+impl const PartialEq<BinaryOp> for LogicOp {
+    fn eq(&self, other: &BinaryOp) -> bool {
+        if let BinaryOp::Logic(l) = other {
+            self.eq(l)
+        } else {
+            false
+        }
+    }
+}
+
+impl const PartialEq<BinaryOp> for BitOp {
+    fn eq(&self, other: &BinaryOp) -> bool {
+        if let BinaryOp::Bit(bit) = other {
+            self.eq(bit)
+        } else {
+            false
+        }
+    }
 }
 
 /// Includes all the operators that are accepted by assignment
@@ -213,10 +288,10 @@ impl const From<LogicOp> for AssignmentEnabledOp {
     }
 }
 
-impl const Into<AssignmentEnabledOp> for BitOp {
+impl const From<BitOp> for AssignmentEnabledOp {
     #[inline]
-    fn into(self) -> AssignmentEnabledOp {
-        AssignmentEnabledOp::Bit(self)
+    fn from(val: BitOp) -> Self {
+        AssignmentEnabledOp::Bit(val)
     }
 }
 
@@ -264,6 +339,11 @@ impl BitOp {
     }
 }
 
+pub trait OpFlags {
+    fn is_commutative(&self) -> bool;
+    fn is_associative(&self) -> bool;
+}
+
 impl ArithmeticOp {
     pub const fn precedence(self) -> u8 {
         match self {
@@ -271,10 +351,25 @@ impl ArithmeticOp {
             Self::Multiply | Self::Divide | Self::Modulo => 15 - 3,
         }
     }
-    /// if the operation is commutative, then the constants can be swapped around and use
-    /// immediates. If not.... well, we can't :)
-    pub const fn supports_commutativity(self) -> bool {
-        matches!(self, Self::Add | Self::Multiply)
+}
+
+impl const OpFlags for BitOp {
+    fn is_commutative(&self) -> bool {
+        matches!(self, Self::Or | Self::And | Self::Xor)
+    }
+
+    fn is_associative(&self) -> bool {
+        matches!(self, Self::Or | Self::And | Self::Xor)
+    }
+}
+
+impl const OpFlags for ArithmeticOp {
+    fn is_commutative(&self) -> bool {
+        matches!(self, Self::Add | Self::Subtract)
+    }
+
+    fn is_associative(&self) -> bool {
+        matches!(self, Self::Add | Self::Subtract)
     }
 }
 

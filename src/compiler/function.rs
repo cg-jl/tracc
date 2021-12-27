@@ -23,7 +23,8 @@ impl Compile for Function<'_> {
         output.extend(with_stack(move |stack| {
             // register all the variables in the stack
             stack.with_alloc_bytes(var_amt * 4, move |stack, memory| {
-                let variables: Vec<_> = memory.partition(4).skip(1).take(var_amt).collect();
+                let mut variables: Vec<_> = memory.partition(4).skip(1).take(var_amt).collect();
+                variables.reverse();
                 // UNSAFE: safe, the register 0 is callee-saved
                 let r0 = unsafe { RegisterDescriptor::from_index(0) };
                 with_registers(stack, move |stack, registers| {
