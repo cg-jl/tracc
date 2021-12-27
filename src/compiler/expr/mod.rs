@@ -14,22 +14,6 @@ use crate::{
     },
     ast::{ArithmeticOp, BinaryOp, BitOp, Expr, LogicOp, UnaryOp, VariableKind},
 };
-use std::fmt;
-
-#[derive(Debug)]
-pub enum CompileExprError {
-    ExprNotAssignable(String),
-}
-
-impl std::error::Error for CompileExprError {}
-
-impl fmt::Display for CompileExprError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ExprNotAssignable(expr) => write!(f, "expression is not assignable: {:?}", expr),
-        }
-    }
-}
 
 /// NOTE: when adding pointers, I may need to lock-in the registers used for the pointers
 
@@ -107,16 +91,16 @@ pub fn compile_expr(
     stack: &mut StackManager,
     var_ctx: &[Memory],
     is_ignored: bool,
-) -> Result<AssemblyOutput, CompileExprError> {
+) -> AssemblyOutput {
     match reduce_expr(expr) {
-        Expr::AlreadyInTarget => Ok(AssemblyOutput::new()),
+        Expr::AlreadyInTarget => AssemblyOutput::new(),
         Expr::Variable(VariableKind::Unprocessed(name)) => {
             unreachable!(&format!("unprocessed variable: {}", name))
         }
         Expr::Variable(VariableKind::Processed { index }) => {
             let mem = var_ctx[index];
             // bit32 as all variables are currently bit32
-            Ok(registers.using_register_mutably(
+            registers.using_register_mutably(
                 stack,
                 target,
                 BitSize::Bit32,
@@ -124,14 +108,16 @@ pub fn compile_expr(
                     register: target,
                     address: mem,
                 },
-            ))
+            )
         }
-        Expr::Constant(value) => Ok(if !is_ignored {
-            load_immediate(stack, registers, target, value)
-        } else {
-            AssemblyOutput::new()
-        }),
-        Expr::Binary { operator, lhs, rhs } => Ok(match operator {
+        Expr::Constant(value) => {
+            if !is_ignored {
+                load_immediate(stack, registers, target, value)
+            } else {
+                AssemblyOutput::new()
+            }
+        }
+        Expr::Binary { operator, lhs, rhs } => match operator {
             BinaryOp::Arithmetic(arithm) => arithmetic::compile_arithmetic_op(
                 arithm, target, *lhs, *rhs, registers, stack, var_ctx, is_ignored,
             ),
@@ -143,13 +129,12 @@ pub fn compile_expr(
             ),
             BinaryOp::Relational(relation) => {
                 // compute both, compare and cset. Simple, right?
-                let compute_lhs =
-                    compile_expr(*lhs, target, registers, stack, var_ctx, is_ignored).unwrap();
+                let compute_lhs = compile_expr(*lhs, target, registers, stack, var_ctx, is_ignored);
                 let (compute_rhs, rhs_target) = registers.locking_register(target, |registers| {
                     let rhs_target = registers.get_suitable_register(UsageContext::Normal);
                     let compute_rhs =
-                        compile_expr(*rhs, rhs_target, registers, stack, var_ctx, is_ignored)
-                            .unwrap();
+                        compile_expr(*rhs, rhs_target, registers, stack, var_ctx, is_ignored);
+
                     (compute_rhs, rhs_target)
                 });
                 compute_lhs
@@ -201,8 +186,8 @@ pub fn compile_expr(
                                 stack,
                                 var_ctx,
                                 false, // not ignored as it will be put into the memory
-                            )
-                            .unwrap();
+                            );
+
                             (get_value_down.chain(produce_value), value_target)
                         });
                     target_build
@@ -213,22 +198,22 @@ pub fn compile_expr(
                         })
                 } else {
                     // this one is easier. just compile rhs to `target` and then put it into the value
-                    compile_expr(*rhs, target, registers, stack, var_ctx, false)
-                        .unwrap()
-                        .chain(registers.locking_register(target, |registers| {
+                    compile_expr(*rhs, target, registers, stack, var_ctx, false).chain(
+                        registers.locking_register(target, |registers| {
                             let (target_mem, target_bitsize, build_target) =
                                 compile_as_pointer(*lhs, stack, registers, var_ctx);
                             build_target.chain_single(Instruction::Str {
                                 register: target.as_immutable(target_bitsize),
                                 address: target_mem,
                             })
-                        }))
+                        }),
+                    )
                 }
             }
-        }),
+        },
         Expr::Unary { operator, expr } => {
-            let expr = compile_expr(*expr, target, registers, stack, var_ctx, is_ignored)?;
-            Ok(if is_ignored {
+            let expr = compile_expr(*expr, target, registers, stack, var_ctx, is_ignored);
+            if is_ignored {
                 expr
             } else {
                 // NOTE: bit32 as everything is an int
@@ -238,7 +223,7 @@ pub fn compile_expr(
                     BitSize::Bit32,
                     |_, _, target| compile_unary(operator, target),
                 ))
-            })
+            }
         }
     }
 }

@@ -1,15 +1,15 @@
 use super::{stack::StackManager, AssemblyOutput, CompileWith};
 use crate::assembly::*;
-use std::ops::{RangeInclusive, Try};
+use std::ops::RangeInclusive;
 
-pub fn with_registers<F, O>(stack: &mut StackManager, cont: F) -> O
+pub fn with_registers<F, O>(stack: &mut StackManager, cont: F) -> AssemblyOutput
 where
     F: FnOnce(&mut StackManager, &mut RegisterManager) -> O,
-    O: Try<Output = AssemblyOutput>,
+    O: Into<AssemblyOutput>,
 {
     let mut registers = RegisterManager::new();
-    let out = cont(stack, &mut registers)?;
-    O::from_output(registers.finalize(stack, out))
+    let out = cont(stack, &mut registers);
+    registers.finalize(stack, out.into())
 }
 
 fn saving_register<F>(
@@ -90,6 +90,8 @@ struct PresavedRegistersIter(PresavedRegisters, RangeInclusive<u8>);
 impl Iterator for PresavedRegistersIter {
     type Item = u8;
     fn next(&mut self) -> Option<Self::Item> {
+        #[allow(clippy::while_let_on_iterator)]
+        // `for` loop moves the range out of here, I don't want that.
         while let Some(i) = self.1.next() {
             if self.0.get(i) {
                 return Some(i);

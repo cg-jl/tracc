@@ -2,8 +2,8 @@ use super::{Parse, ParseRes, Parser};
 use crate::ast::Block;
 use crate::lexer::TokenKind;
 
-impl<'source> Parse<'source> for Block {
-    fn parse(parser: &mut Parser) -> ParseRes<Self> {
+impl<'source> Parse<'source> for Block<'source> {
+    fn parse(parser: &mut Parser<'source>) -> ParseRes<Self> {
         parser.with_context("parsing statement block", |parser| {
             parser.expect_token(TokenKind::OpenBrace)?;
             parser.accept_current();

@@ -7,7 +7,6 @@ mod program;
 mod registers;
 mod stack;
 use crate::assembly::*;
-use core::convert::Infallible;
 pub use registers::RegisterDescriptor;
 use std::collections::vec_deque::IterMut;
 use std::collections::VecDeque;
@@ -23,20 +22,6 @@ pub fn load_immediate(
             source: Data::Immediate(value as u64),
         }
     })
-}
-
-pub trait CouldCompile {
-    type Error: std::error::Error;
-
-    fn could_compile(self) -> Result<AssemblyOutput, Self::Error>;
-}
-
-impl<A: Compile> CouldCompile for A {
-    type Error = Infallible;
-
-    fn could_compile(self) -> Result<AssemblyOutput, Self::Error> {
-        Ok(self.compile())
-    }
 }
 
 pub trait Compile {

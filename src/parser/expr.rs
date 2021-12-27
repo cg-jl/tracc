@@ -6,8 +6,8 @@ use crate::ast::UnaryOp;
 use crate::ast::VariableKind;
 use crate::lexer::TokenKind;
 
-impl Parse<'_> for Expr {
-    fn parse(parser: &mut Parser) -> ParseRes<Self> {
+impl<'source> Parse<'source> for Expr<'source> {
+    fn parse(parser: &mut Parser<'source>) -> ParseRes<Self> {
         parse_primary(parser)
             .and_then(|lhs| {
                 parse_binary_expression(parser, lhs, 0)
@@ -18,7 +18,7 @@ impl Parse<'_> for Expr {
 }
 
 // parse prefix, simple or parenthesis
-fn parse_primary(parser: &mut Parser) -> ParseRes<Expr> {
+fn parse_primary<'source>(parser: &mut Parser<'source>) -> ParseRes<Expr<'source>> {
     parser.with_context("parsing primary expression", |parser| {
         // collect all unary operators
         let mut ops: Vec<_> = {
@@ -49,7 +49,7 @@ fn parse_primary(parser: &mut Parser) -> ParseRes<Expr> {
                 Ok(Expr::Constant(num))
             }
             TokenKind::Identifier => {
-                let source = parser.current_token_source().to_string();
+                let source = parser.current_token_source();
                 parser.accept_current();
                 Ok(Expr::Variable(VariableKind::Unprocessed(source)))
             }
@@ -68,11 +68,11 @@ fn parse_primary(parser: &mut Parser) -> ParseRes<Expr> {
     })
 }
 
-fn parse_binary_expression(
-    parser: &mut Parser,
-    mut lhs: Expr,
+fn parse_binary_expression<'source>(
+    parser: &mut Parser<'source>,
+    mut lhs: Expr<'source>,
     min_precedence: u8,
-) -> ParseRes<Expr> {
+) -> ParseRes<Expr<'source>> {
     while let Some(op) = parser
         .peek_token()?
         .and_then(TokenKind::as_operator)

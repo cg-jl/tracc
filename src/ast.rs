@@ -5,18 +5,18 @@ use std::fmt;
 // TODO: spans
 
 #[derive(Debug)]
-pub struct Program(pub Function);
+pub struct Program<'source>(pub Function<'source>);
 
 #[derive(Debug)]
-pub struct Function {
-    pub name: Identifier,
-    pub body: Block,
+pub struct Function<'source> {
+    pub name: Identifier<'source>,
+    pub body: Block<'source>,
 }
 
 //#[derive(Debug)]
-pub struct Block(pub Vec<Statement>);
+pub struct Block<'source>(pub Vec<Statement<'source>>);
 
-impl fmt::Debug for Block {
+impl fmt::Debug for Block<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut dbg_struct = f.debug_struct("Block");
         for (i, stmt) in self.0.iter().enumerate() {
@@ -27,49 +27,52 @@ impl fmt::Debug for Block {
 }
 
 #[derive(Debug)]
-pub enum Statement {
-    Return(Expr),
-    SingleExpr(Expr),
-    DeclareVar { name: String, init: Option<Expr> }, // TODO: add multiple vars
+pub enum Statement<'source> {
+    Return(Expr<'source>),
+    SingleExpr(Expr<'source>),
+    DeclareVar {
+        name: &'source str,
+        init: Option<Expr<'source>>,
+    }, // TODO: add multiple vars
 }
 
-impl Default for Statement {
+impl Default for Statement<'_> {
     fn default() -> Self {
         Self::Return(Expr::Constant(0))
     }
 }
 
 #[derive(Debug)]
-pub struct Identifier(pub String);
+pub struct Identifier<'source>(pub &'source str);
 
 // NOTE: should I make a processed expr type?
 #[derive(Debug, PartialEq, Eq)]
-pub enum Expr {
+pub enum Expr<'source> {
     // TODO(#1): convert variables to &'source str instead of using strings (`Parse<'source>`)
-    Variable(VariableKind),
+    Variable(VariableKind<'source>),
     Constant(i32),
     Unary {
         operator: UnaryOp,
-        expr: Box<Expr>,
+        expr: Box<Expr<'source>>,
     },
     Binary {
         operator: BinaryOp,
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
+        lhs: Box<Expr<'source>>,
+        rhs: Box<Expr<'source>>,
     },
     /// Dummy that signifies that the expression you want to compile is already in the target
     AlreadyInTarget,
 }
 
-impl Expr {
+impl Expr<'_> {
     pub fn is_writable(&self) -> bool {
         matches!(self, Self::Variable(_))
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum VariableKind {
-    Unprocessed(String),        // TODO: this must be &'source str later
+pub enum VariableKind<'source> {
+    Unprocessed(&'source str),
     Processed { index: usize }, // NOTE: currently all variables are ints.
 }
 

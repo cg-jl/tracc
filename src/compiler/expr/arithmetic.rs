@@ -37,133 +37,130 @@ pub fn compile_arithmetic_op(
         (Expr::Constant(b), a) if arithmop.supports_commutativity() => (a, Expr::Constant(b)),
         other => other,
     };
-    compile_expr(lhs, target, registers, stack, var_ctx, is_ignored)
-        .unwrap()
-        .chain(if !is_ignored {
-            let (compute_rhs, rhs_data) = if let Expr::Constant(b) = rhs {
-                (AssemblyOutput::new(), Data::Immediate(b as u64))
-            } else {
-                registers.locking_register(target, |registers| {
-                    let rhs_target = registers.get_suitable_register(UsageContext::Normal);
-                    let compute_rhs =
-                        compile_expr(rhs, rhs_target, registers, stack, var_ctx, false).unwrap();
-                    (
-                        compute_rhs,
-                        Data::Register(rhs_target.as_immutable(BitSize::Bit32)),
-                    )
-                })
-            };
-            // now we have lhs in `target` and rhs in `rhs_target`
-            match arithmop {
-                ArithmeticOp::Add => compute_rhs.chain(registers.using_register_mutably(
-                    stack,
-                    target,
-                    BitSize::Bit32,
-                    |_stack, _regs, target| Instruction::Add {
-                        target,
-                        lhs: target.into(),
-                        rhs: rhs_data,
-                    },
-                )),
-                ArithmeticOp::Subtract => compute_rhs.chain(registers.using_register_mutably(
-                    stack,
-                    target,
-                    BitSize::Bit32,
-                    |_stack, _regs, target| Instruction::Sub {
-                        target,
-                        lhs: target.into(),
-                        rhs: rhs_data,
-                    },
-                )),
-                ArithmeticOp::Multiply => compute_rhs.chain(registers.using_register_mutably(
-                    stack,
-                    target,
-                    BitSize::Bit32,
-                    |_stack, _regs, target| Instruction::Sub {
-                        target,
-                        lhs: target.into(),
-                        rhs: rhs_data,
-                    },
-                )),
-                ArithmeticOp::Divide => compute_rhs.chain(registers.using_register_mutably(
-                    stack,
-                    target,
-                    BitSize::Bit32,
-                    |_stack, _regs, target| Instruction::Div {
-                        target,
-                        lhs: target.into(),
-                        rhs: rhs_data,
-                        signed: true,
-                    },
-                )),
-                // NOTE: here I have a use for a `get_suitable_register` function that accepts a
-                // "locked" range (apart from the already existing).
-                ArithmeticOp::Modulo => {
-                    compute_rhs.chain(registers.locking_register(target, |registers| {
-                        let helper = if let Data::Register(ImmutableRegister(reg)) = rhs_data {
-                            registers.locking_register(
-                                reg.as_register_descriptor().unwrap(),
-                                |registers| {
-                                    // this will be the quotient register, that I'm going to throw
-                                    registers.get_suitable_register(UsageContext::Normal)
-                                },
-                            )
-                        } else {
-                            registers.get_suitable_register(UsageContext::Normal)
-                        };
-                        // udiv helper, target (lhs), rhs_target
-                        // msub target, helper, rhs_target, target (lhs)
-                        registers
-                            .using_register_mutably(
-                                stack,
-                                helper,
-                                BitSize::Bit32,
-                                |_stack, _registers, helper| Instruction::Div {
-                                    signed: false,
-                                    target: helper,
-                                    lhs: target.as_immutable(BitSize::Bit32),
-                                    rhs: rhs_data,
-                                },
-                            )
-                            .chain(registers.using_register_mutably(
-                                stack,
-                                target,
-                                BitSize::Bit32,
-                                |stack, registers, target| {
-                                    let (rhs_reg, put_rhs_in_reg) =
-                                        if let Data::Register(ImmutableRegister(reg)) = rhs_data {
-                                            (
-                                                reg.as_register_descriptor().unwrap(),
-                                                AssemblyOutput::new(),
-                                            )
-                                        } else {
-                                            let reg = registers
-                                                .get_suitable_register(UsageContext::Normal);
-                                            (
-                                                reg,
-                                                registers.using_register_mutably(
-                                                    stack,
-                                                    reg,
-                                                    BitSize::Bit32,
-                                                    |_stack, _registers, reg| Instruction::Mov {
-                                                        target: reg,
-                                                        source: rhs_data,
-                                                    },
-                                                ),
-                                            )
-                                        };
-                                    put_rhs_in_reg.chain_single(Instruction::MSub {
-                                        target,
-                                        multiplicand: helper.as_immutable(BitSize::Bit32),
-                                        multiplier: rhs_reg.as_immutable(BitSize::Bit32),
-                                        minuend: target.into(),
-                                    })
-                                },
-                            ))
-                    }))
-                }
-            }
+    compile_expr(lhs, target, registers, stack, var_ctx, is_ignored).chain(if !is_ignored {
+        let (compute_rhs, rhs_data) = if let Expr::Constant(b) = rhs {
+            (AssemblyOutput::new(), Data::Immediate(b as u64))
         } else {
-            compile_expr(rhs, target, registers, stack, var_ctx, true).unwrap()
-        })
+            registers.locking_register(target, |registers| {
+                let rhs_target = registers.get_suitable_register(UsageContext::Normal);
+                let compute_rhs = compile_expr(rhs, rhs_target, registers, stack, var_ctx, false);
+                (
+                    compute_rhs,
+                    Data::Register(rhs_target.as_immutable(BitSize::Bit32)),
+                )
+            })
+        };
+        // now we have lhs in `target` and rhs in `rhs_target`
+        match arithmop {
+            ArithmeticOp::Add => compute_rhs.chain(registers.using_register_mutably(
+                stack,
+                target,
+                BitSize::Bit32,
+                |_stack, _regs, target| Instruction::Add {
+                    target,
+                    lhs: target.into(),
+                    rhs: rhs_data,
+                },
+            )),
+            ArithmeticOp::Subtract => compute_rhs.chain(registers.using_register_mutably(
+                stack,
+                target,
+                BitSize::Bit32,
+                |_stack, _regs, target| Instruction::Sub {
+                    target,
+                    lhs: target.into(),
+                    rhs: rhs_data,
+                },
+            )),
+            ArithmeticOp::Multiply => compute_rhs.chain(registers.using_register_mutably(
+                stack,
+                target,
+                BitSize::Bit32,
+                |_stack, _regs, target| Instruction::Sub {
+                    target,
+                    lhs: target.into(),
+                    rhs: rhs_data,
+                },
+            )),
+            ArithmeticOp::Divide => compute_rhs.chain(registers.using_register_mutably(
+                stack,
+                target,
+                BitSize::Bit32,
+                |_stack, _regs, target| Instruction::Div {
+                    target,
+                    lhs: target.into(),
+                    rhs: rhs_data,
+                    signed: true,
+                },
+            )),
+            // NOTE: here I have a use for a `get_suitable_register` function that accepts a
+            // "locked" range (apart from the already existing).
+            ArithmeticOp::Modulo => {
+                compute_rhs.chain(registers.locking_register(target, |registers| {
+                    let helper = if let Data::Register(ImmutableRegister(reg)) = rhs_data {
+                        registers.locking_register(
+                            reg.as_register_descriptor().unwrap(),
+                            |registers| {
+                                // this will be the quotient register, that I'm going to throw
+                                registers.get_suitable_register(UsageContext::Normal)
+                            },
+                        )
+                    } else {
+                        registers.get_suitable_register(UsageContext::Normal)
+                    };
+                    // udiv helper, target (lhs), rhs_target
+                    // msub target, helper, rhs_target, target (lhs)
+                    registers
+                        .using_register_mutably(
+                            stack,
+                            helper,
+                            BitSize::Bit32,
+                            |_stack, _registers, helper| Instruction::Div {
+                                signed: false,
+                                target: helper,
+                                lhs: target.as_immutable(BitSize::Bit32),
+                                rhs: rhs_data,
+                            },
+                        )
+                        .chain(registers.using_register_mutably(
+                            stack,
+                            target,
+                            BitSize::Bit32,
+                            |stack, registers, target| {
+                                let (rhs_reg, put_rhs_in_reg) =
+                                    if let Data::Register(ImmutableRegister(reg)) = rhs_data {
+                                        (
+                                            reg.as_register_descriptor().unwrap(),
+                                            AssemblyOutput::new(),
+                                        )
+                                    } else {
+                                        let reg =
+                                            registers.get_suitable_register(UsageContext::Normal);
+                                        (
+                                            reg,
+                                            registers.using_register_mutably(
+                                                stack,
+                                                reg,
+                                                BitSize::Bit32,
+                                                |_stack, _registers, reg| Instruction::Mov {
+                                                    target: reg,
+                                                    source: rhs_data,
+                                                },
+                                            ),
+                                        )
+                                    };
+                                put_rhs_in_reg.chain_single(Instruction::MSub {
+                                    target,
+                                    multiplicand: helper.as_immutable(BitSize::Bit32),
+                                    multiplier: rhs_reg.as_immutable(BitSize::Bit32),
+                                    minuend: target.into(),
+                                })
+                            },
+                        ))
+                }))
+            }
+        }
+    } else {
+        compile_expr(rhs, target, registers, stack, var_ctx, true)
+    })
 }

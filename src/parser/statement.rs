@@ -4,7 +4,7 @@ use crate::ast::Statement;
 use crate::lexer::Operator;
 use crate::lexer::TokenKind;
 
-impl<'source> Parse<'source> for Statement {
+impl<'source> Parse<'source> for Statement<'source> {
     fn parse(parser: &mut Parser<'source>) -> ParseRes<Self> {
         parser.with_context("parsing statement", |parser| {
             Ok(match parser.peek_token()? {
@@ -45,7 +45,7 @@ impl<'source> Parse<'source> for Statement {
     }
 }
 
-fn single_expr(parser: &mut Parser) -> ParseRes<Statement> {
+fn single_expr<'source>(parser: &mut Parser<'source>) -> ParseRes<Statement<'source>> {
     let expr = parser.parse()?;
     parser.expect_token(TokenKind::Semicolon)?;
     parser.accept_current();

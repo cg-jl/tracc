@@ -39,7 +39,7 @@ pub fn walk_block(Block(statements): Block) -> Result<(Block, usize), VarError> 
                 if let Some(init) = init.as_ref() {
                     count_refs(init, &mut ctx)?;
                 }
-                ctx.insert(name.to_string(), 0);
+                ctx.insert(name, 0);
             }
             Statement::Return(expr) => count_refs(expr, &mut ctx)?,
             Statement::SingleExpr(expr) => count_refs(expr, &mut ctx)?,
@@ -92,7 +92,10 @@ pub fn walk_block(Block(statements): Block) -> Result<(Block, usize), VarError> 
     Ok((block, vars.len()))
 }
 
-fn assign_indices(expr: Expr, vars: &HashMap<String, usize>) -> Expr {
+fn assign_indices<'source>(
+    expr: Expr<'source>,
+    vars: &HashMap<&'source str, usize>,
+) -> Expr<'source> {
     match expr {
         Expr::AlreadyInTarget => expr,
         Expr::Binary { lhs, rhs, operator } => Expr::Binary {
@@ -130,7 +133,10 @@ impl fmt::Display for VarError {
 
 impl std::error::Error for VarError {}
 
-fn count_refs(expr: &Expr, ctx: &mut HashMap<String, usize>) -> Result<(), VarError> {
+fn count_refs<'source>(
+    expr: &Expr<'source>,
+    ctx: &mut HashMap<&'source str, usize>,
+) -> Result<(), VarError> {
     match expr {
         Expr::Binary { lhs, rhs, .. } => {
             count_refs(lhs, ctx)?;
