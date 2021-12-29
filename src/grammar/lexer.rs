@@ -196,15 +196,15 @@ pub enum LexErrorKind {
     // TODO
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(input: &'a SourceMetadata<'a>) -> Self {
+impl<'source> Lexer<'source> {
+    pub fn new(input: &'source SourceMetadata<'source>) -> Self {
         Self {
             input: input.input().char_indices().peekable(),
             metadata: input,
         }
     }
 
-    pub fn next_token(&mut self) -> Result<Option<Token<'a>>, LexError> {
+    pub fn next_token(&mut self) -> Result<Option<Token<'source>>, LexError> {
         self.skip_whitespace();
         if let Some(pos) = self.eat_char('(') {
             self.advance();
@@ -246,48 +246,93 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn choice<T>(&mut self, choices: &[&dyn Fn(&mut Self) -> Option<T>]) -> Option<T> {
-        for x in choices {
-            if let Some(t) = x(self) {
-                return Some(t);
-            }
-        }
-        None
-    }
-
-    // NOTE: this should be reworked so it matches more efficiently
     fn operator(&mut self) -> Option<(usize, Operator)> {
         let start = self.current_offset();
-        let op: Operator = self.choice::<Operator>(&[
-            &|lexer: &mut Self| lexer.eat_char('+').map(|_| Operator::Plus),
-            &|lexer: &mut Self| lexer.eat_char('-').map(|_| Operator::Minus),
-            &|lexer: &mut Self| lexer.eat_char('=').map(|_| Operator::Equals),
-            &|lexer: &mut Self| lexer.eat_char('!').map(|_| Operator::ExclamationMark),
-            &|lexer: &mut Self| lexer.eat_char('~').map(|_| Operator::Tilde),
-            &|lexer: &mut Self| lexer.eat_char('*').map(|_| Operator::Star),
-            &|lexer: &mut Self| lexer.eat_char('/').map(|_| Operator::Slash),
-            &|lexer: &mut Self| lexer.eat_char('^').map(|_| Operator::Hat),
-            &|lexer: &mut Self| lexer.eat_char('%').map(|_| Operator::Percentage),
-            &|lexer: &mut Self| lexer.eat_str(">>").map(|_| Operator::DoubleAngleRight),
-            &|lexer: &mut Self| lexer.eat_str("<<").map(|_| Operator::DoubleAngleLeft),
-            &|lexer: &mut Self| lexer.eat_char('<').map(|_| Operator::AngleLeft),
-            &|lexer: &mut Self| lexer.eat_char('>').map(|_| Operator::AngleRight),
-            &|lexer: &mut Self| lexer.eat_str("&&").map(|_| Operator::DoubleAnd),
-            &|lexer: &mut Self| lexer.eat_str("||").map(|_| Operator::DoublePipe),
-            &|lexer: &mut Self| lexer.eat_char('|').map(|_| Operator::Pipe),
-            &|lexer: &mut Self| lexer.eat_char('&').map(|_| Operator::And),
-        ])?;
-        self.advance();
+        let op = match self.input.peek()?.1 {
+            '<' => {
+                self.advance();
+                if self.eat_char('<').is_some() {
+                    self.advance();
+                    Operator::DoubleAngleLeft
+                } else {
+                    Operator::AngleLeft
+                }
+            }
+            '>' => {
+                self.advance();
+                if self.eat_char('>').is_some() {
+                    self.advance();
+                    Operator::DoubleAngleRight
+                } else {
+                    Operator::AngleRight
+                }
+            }
+            '|' => {
+                self.advance();
+                if self.eat_char('|').is_some() {
+                    self.advance();
+                    Operator::DoublePipe
+                } else {
+                    Operator::Pipe
+                }
+            }
+            '&' => {
+                self.advance();
+                if self.eat_char('&').is_some() {
+                    self.advance();
+                    Operator::DoubleAnd
+                } else {
+                    Operator::And
+                }
+            }
+            '^' => {
+                self.advance();
+                Operator::Hat
+            }
+            '=' => {
+                self.advance();
+                Operator::Equals
+            }
+            '!' => {
+                self.advance();
+                Operator::ExclamationMark
+            }
+            '~' => {
+                self.advance();
+                Operator::Tilde
+            }
+            '+' => {
+                self.advance();
+                Operator::Plus
+            }
+            '-' => {
+                self.advance();
+                Operator::Minus
+            }
+            '/' => {
+                self.advance();
+                Operator::Slash
+            }
+            '*' => {
+                self.advance();
+                Operator::Star
+            }
+            '%' => {
+                self.advance();
+                Operator::Percentage
+            }
+            _ => return None,
+        };
         Some((start, op))
     }
 
-    fn identifier(&mut self) -> Option<Source<'a>> {
+    fn identifier(&mut self) -> Option<Source<'source>> {
         let (start, _) = self.skip_if(|c| c.is_ascii_alphabetic() || c == '_')?;
         self.skip_while(|c| c.is_ascii_alphanumeric() || c == '_');
         Some(self.source_until_current(start))
     }
 
-    fn number(&mut self) -> Result<Option<Source<'a>>, LexError> {
+    fn number(&mut self) -> Result<Option<Source<'source>>, LexError> {
         let start = match self.skip_if(|c| c.is_ascii_digit()) {
             Some((pos, _)) => pos,
             None => return Ok(None),
@@ -310,19 +355,7 @@ impl<'a> Lexer<'a> {
         Ok(Some(self.source_until_current(start)))
     }
 
-    fn eat_str(&mut self, str: &str) -> Option<usize> {
-        let current_offset = self.current_offset();
-        if self.metadata.input()[current_offset..].starts_with(str) {
-            for _ in str.chars() {
-                self.advance();
-            }
-            Some(current_offset)
-        } else {
-            None
-        }
-    }
-
-    fn skip_while<F>(&mut self, filter: F) -> Source<'a>
+    fn skip_while<F>(&mut self, filter: F) -> Source<'source>
     where
         F: Fn(char) -> bool,
     {
@@ -346,7 +379,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn skip_whitespace(&mut self) -> Option<Source<'a>> {
+    fn skip_whitespace(&mut self) -> Option<Source<'source>> {
         let current = self.current_offset();
         let mut last_pos = current;
         while let Some((pos, _)) = self
@@ -369,19 +402,19 @@ impl<'a> Lexer<'a> {
         self.input.next();
     }
 
-    fn source_until_current(&mut self, start: usize) -> Source<'a> {
+    fn source_until_current(&mut self, start: usize) -> Source<'source> {
         let current = self.current_offset();
         self.source_from(start, current)
     }
 
-    fn source_from(&self, start: usize, end: usize) -> Source<'a> {
+    fn source_from(&self, start: usize, end: usize) -> Source<'source> {
         Source {
             span: Span::new(start),
             source: &self.metadata.input()[start..end],
         }
     }
 
-    fn source_from_len(&self, start: usize, len: usize) -> Source<'a> {
+    fn source_from_len(&self, start: usize, len: usize) -> Source<'source> {
         self.source_from(start, start + len)
     }
 
