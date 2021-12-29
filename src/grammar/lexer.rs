@@ -176,9 +176,9 @@ pub enum Operator {
 }
 
 #[derive(Debug)]
-pub struct Source<'a> {
+pub struct Source<'source> {
     pub span: Span,
-    pub source: &'a str,
+    pub source: &'source str,
 }
 
 pub struct Lexer<'a> {
