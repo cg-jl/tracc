@@ -1,7 +1,7 @@
 use crate::{
-    assembly::{BitSize, Data, ImmutableRegister, Instruction, Memory},
     ast::{ArithmeticOp, Expr},
     codegen::{
+        assembly::{BitSize, Data, ImmutableRegister, Instruction, Memory},
         registers::{RegisterDescriptor, RegisterManager, UsageContext},
         stack::StackManager,
         AssemblyOutput,

@@ -1,4 +1,4 @@
-use crate::assembly::Label;
+use super::assembly::Label;
 
 static mut GENERATOR: LabelGenerator = LabelGenerator::new();
 

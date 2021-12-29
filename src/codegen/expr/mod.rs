@@ -3,17 +3,15 @@ mod bit;
 mod logic;
 
 use super::{
+    assembly::{
+        BitSize, Condition, Data, HasBitSize, ImmutableRegister, Instruction, MutableRegister,
+    },
     load_immediate,
     registers::{RegisterDescriptor, RegisterManager, UsageContext},
     stack::StackManager,
     AssemblyOutput, Memory,
 };
-use crate::{
-    assembly::{
-        BitSize, Condition, Data, HasBitSize, ImmutableRegister, Instruction, MutableRegister,
-    },
-    ast::{ArithmeticOp, BinaryOp, BitOp, Expr, LogicOp, OpFlags, UnaryOp, VariableKind},
-};
+use crate::ast::{ArithmeticOp, BinaryOp, BitOp, Expr, LogicOp, OpFlags, UnaryOp, VariableKind};
 
 /// NOTE: when adding pointers, I may need to lock-in the registers used for the pointers
 

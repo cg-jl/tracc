@@ -1,5 +1,5 @@
-use super::{stack::StackManager, AssemblyOutput, CompileWith};
-use crate::assembly::*;
+use super::{assembly::*, stack::StackManager, AssemblyOutput, CompileWith};
+
 use std::ops::RangeInclusive;
 
 pub fn with_registers<F, O>(stack: &mut StackManager, cont: F) -> AssemblyOutput

@@ -1,3 +1,4 @@
+pub mod assembly;
 mod block;
 mod expr;
 mod function;
@@ -6,7 +7,7 @@ use std::iter::FromIterator;
 mod program;
 mod registers;
 mod stack;
-use crate::assembly::*;
+use assembly::*;
 pub use registers::RegisterDescriptor;
 use std::collections::vec_deque::IterMut;
 use std::collections::VecDeque;

@@ -1,5 +1,5 @@
+use super::assembly::*;
 use super::{AssemblyOutput, Compile, CompileWith};
-use crate::assembly::*;
 
 pub struct StackManager {
     allocated_size: usize,

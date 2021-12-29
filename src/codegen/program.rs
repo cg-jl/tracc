@@ -1,4 +1,4 @@
-use crate::assembly::Directive;
+use super::assembly::Directive;
 use crate::ast::Program;
 
 use super::AssemblyOutput;

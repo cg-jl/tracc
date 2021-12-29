@@ -1,3 +1,4 @@
+use super::assembly::{Assembly, Directive, Instruction};
 use super::block::compile_block;
 use super::load_immediate;
 use super::registers::with_registers;
@@ -5,7 +6,6 @@ use super::registers::RegisterDescriptor;
 use super::stack::with_stack;
 use super::AssemblyOutput;
 use super::Compile;
-use crate::assembly::{Assembly, Directive, Instruction};
 use crate::ast::{Function, Identifier};
 use crate::variables::walk_block;
 
