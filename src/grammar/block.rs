@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use super::{lexer::TokenKind, Parse, ParseRes, Parser};
 use crate::ast::Block;
 
@@ -16,7 +18,10 @@ impl<'source> Parse<'source> for Block<'source> {
             parser.expect_token(TokenKind::CloseBrace)?;
             parser.accept_current();
 
-            Ok(Self(statements))
+            Ok(Self {
+                statements,
+                variables: MaybeUninit::uninit(),
+            })
         })
     }
 }

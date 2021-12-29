@@ -9,14 +9,15 @@ pub struct Error<T> {
     contexts: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     pub offset: usize,
+    pub len: usize,
 }
 
 impl Span {
     pub const fn new(offset: usize) -> Self {
-        Self { offset }
+        Self { offset, len: 1 }
     }
     pub fn snippet_from_source(&self, source: &SourceMetadata) -> Option<Snippet> {
         let mut offset = 0;
@@ -51,6 +52,7 @@ impl<'a> SourceMetadata<'a> {
     pub const fn new(source: &'a str) -> Self {
         Self { file: None, source }
     }
+    #[must_use]
     pub fn with_file(mut self, file: std::path::PathBuf) -> Self {
         self.file = Some(file);
         self
@@ -77,11 +79,13 @@ impl<T> Error<T> {
             contexts: self.contexts,
         }
     }
+    #[must_use]
     pub fn with_source(mut self, span: Span, source: &SourceMetadata) -> Self {
         self.file = source.file.clone();
         self.snippet = span.snippet_from_source(source);
         self
     }
+    #[must_use]
     pub fn add_context(mut self, ctx: &'static str) -> Self {
         self.contexts.push(ctx);
         self

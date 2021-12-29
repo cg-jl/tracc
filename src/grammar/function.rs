@@ -5,7 +5,7 @@ impl<'source> Parse<'source> for Function<'source> {
     fn parse(parser: &mut Parser<'source>) -> ParseRes<Self> {
         parser.with_context("parsing function", |parser| {
             parser.keyword("int")?;
-            let name = parser.parse()?;
+            let (name, _) = parser.parse()?;
             parser.expect_token(TokenKind::OpenParen)?;
             parser.accept_current();
             parser.expect_token(TokenKind::CloseParen)?;

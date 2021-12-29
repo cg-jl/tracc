@@ -1,11 +1,12 @@
+use super::lexer::Source;
 use super::{lexer::TokenKind, Parse, ParseErrorKind, ParseRes, Parser, WantedSpec};
 use crate::ast::Associativity;
 use crate::ast::BinaryOp;
 use crate::ast::Expr;
 use crate::ast::UnaryOp;
-use crate::ast::VariableKind;
+use crate::error::Span;
 
-impl<'source> Parse<'source> for Expr<'source> {
+impl<'source> Parse<'source> for (Expr<'source>, Span) {
     fn parse(parser: &mut Parser<'source>) -> ParseRes<Self> {
         parse_primary(parser)
             .and_then(|lhs| {
@@ -17,51 +18,72 @@ impl<'source> Parse<'source> for Expr<'source> {
 }
 
 // parse prefix, simple or parenthesis
-fn parse_primary<'source>(parser: &mut Parser<'source>) -> ParseRes<Expr<'source>> {
+fn parse_primary<'source>(parser: &mut Parser<'source>) -> ParseRes<(Expr<'source>, Span)> {
     parser.with_context("parsing primary expression", |parser| {
         // collect all unary operators
-        let mut ops: Vec<_> = {
+        let ops: Vec<_> = {
             let mut vec = Vec::new();
             while let Some(op) = parser
                 .peek_token()?
                 .and_then(TokenKind::as_operator)
                 .and_then(UnaryOp::from_operator)
             {
+                vec.push((op, parser.current_token_span()));
                 parser.accept_current();
-                vec.push(op);
             }
             Ok(vec)
         }?;
         let mut expr = match parser.expect_a_token(Some(WantedSpec::Description("expression")))? {
             TokenKind::OpenParen => {
+                let start = parser.current_position();
                 parser.accept_current();
-                let e = parser.parse()?;
+                let (e, _) = parser.parse()?;
                 parser
                     .expect_token(TokenKind::CloseParen)
                     .map_err(|x| x.add_context("as the end of the expression"))?;
+                let end = parser.current_position();
                 parser.accept_current();
-                Ok(e)
+                Ok((
+                    e,
+                    Span {
+                        offset: start,
+                        len: end - start,
+                    },
+                ))
             }
             TokenKind::Number => {
                 let num = parser.current_token_source().parse().unwrap();
+                let span = parser.current_token_span();
                 parser.accept_current();
-                Ok(Expr::Constant(num))
+                Ok((Expr::Constant(num), span))
             }
             TokenKind::Identifier => {
                 let source = parser.current_token_source();
+                let span = parser.current_token_span();
                 parser.accept_current();
-                Ok(Expr::Variable(VariableKind::Unprocessed(source)))
+                Ok((
+                    Expr::Variable {
+                        name: Source { span, source },
+                    },
+                    span,
+                ))
             }
             tok => parser.reject_current_token(ParseErrorKind::Expected {
                 found: tok,
                 wanted: WantedSpec::Description("open paren, identifier or number"),
             }),
         }?;
-        for operator in ops.drain(..).rev() {
-            expr = Expr::Unary {
-                operator,
-                expr: Box::new(expr),
-            }
+        for (operator, Span { offset, len }) in ops.into_iter().rev() {
+            expr = (
+                Expr::Unary {
+                    operator,
+                    expr: (Box::new(expr.0), expr.1),
+                },
+                Span {
+                    offset,
+                    len: expr.1.offset + expr.1.len + len,
+                },
+            );
         }
         Ok(expr)
     })
@@ -69,9 +91,9 @@ fn parse_primary<'source>(parser: &mut Parser<'source>) -> ParseRes<Expr<'source
 
 fn parse_binary_expression<'source>(
     parser: &mut Parser<'source>,
-    mut lhs: Expr<'source>,
+    mut lhs: (Expr<'source>, Span),
     min_precedence: u8,
-) -> ParseRes<Expr<'source>> {
+) -> ParseRes<(Expr<'source>, Span)> {
     while let Some(op) = parser
         .peek_token()?
         .and_then(TokenKind::as_operator)
@@ -100,11 +122,17 @@ fn parse_binary_expression<'source>(
         {
             rhs = parse_binary_expression(parser, rhs, min_precedence + 1)?;
         }
-        lhs = Expr::Binary {
-            operator: op,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-        };
+        lhs = (
+            Expr::Binary {
+                operator: op,
+                lhs: (Box::new(lhs.0), lhs.1),
+                rhs: (Box::new(rhs.0), rhs.1),
+            },
+            Span {
+                offset: lhs.1.offset,
+                len: rhs.1.offset + rhs.1.len - lhs.1.offset,
+            },
+        );
     }
     Ok(lhs)
 }

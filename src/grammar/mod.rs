@@ -1,5 +1,6 @@
 use crate::error::*;
 
+mod ast;
 mod block;
 mod expr;
 mod function;
@@ -23,6 +24,10 @@ impl<'source> Parser<'source> {
             current_tok: None,
         }
     }
+    pub fn current_position(&self) -> usize {
+        self.current_token_span().offset
+    }
+
     pub fn peek_token(&mut self) -> ParseRes<Option<TokenKind>> {
         if self.current_tok.is_none() {
             let next_tok_opt = self

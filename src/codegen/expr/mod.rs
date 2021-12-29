@@ -2,6 +2,8 @@ mod arithmetic;
 mod bit;
 mod logic;
 
+use std::collections::HashMap;
+
 use super::{
     assembly::{
         BitSize, Condition, Data, HasBitSize, ImmutableRegister, Instruction, MutableRegister,
@@ -11,7 +13,14 @@ use super::{
     stack::StackManager,
     AssemblyOutput, Memory,
 };
-use crate::ast::{ArithmeticOp, BinaryOp, BitOp, Expr, LogicOp, OpFlags, UnaryOp, VariableKind};
+use crate::{
+    ast::{ArithmeticOp, BinaryOp, BitOp, Expr, LogicOp, OpFlags, UnaryOp},
+    error::Span,
+    grammar::lexer::Source,
+};
+
+// TODO: make a span-free AST (call it codegen-ready AST) and convert from Program<'source> to
+// CodegenFunction(s)
 
 /// NOTE: when adding pointers, I may need to lock-in the registers used for the pointers
 
@@ -49,16 +58,21 @@ use crate::ast::{ArithmeticOp, BinaryOp, BitOp, Expr, LogicOp, OpFlags, UnaryOp,
 // interpet the expression as a pointer
 // NOTE: this might need a way to lock (mutable) registers used in `Memory` places
 // when more expression types are available as pointers
-fn compile_as_pointer(
+fn compile_as_pointer<'source>(
     expr: Expr,
     _stack: &mut StackManager,
     _registers: &mut RegisterManager,
+    var_idxs: &HashMap<&'source str, usize>,
     var_ctx: &[Memory],
 ) -> (Memory, BitSize, AssemblyOutput) {
     match expr {
-        Expr::Variable(VariableKind::Processed { index }) => {
-            (var_ctx[index], BitSize::Bit32, AssemblyOutput::new())
-        }
+        Expr::Variable {
+            name: Source { source: name, .. },
+        } => (
+            var_ctx[var_idxs[name]],
+            BitSize::Bit32,
+            AssemblyOutput::new(),
+        ),
         _ => {
             unreachable!("no other expressions than variables should be available as pointers yet")
         }
@@ -82,21 +96,21 @@ fn locking_memory_register<T>(
 }
 
 // compile expression to a register
-pub fn compile_expr(
-    expr: Expr,
+pub fn compile_expr<'source>(
+    expr: Expr<'source>,
     target: RegisterDescriptor,
     registers: &mut RegisterManager,
     stack: &mut StackManager,
+    var_idxs: &HashMap<&'source str, usize>,
     var_ctx: &[Memory],
     is_ignored: bool,
 ) -> AssemblyOutput {
     match reduce_expr(expr) {
         Expr::AlreadyInTarget => AssemblyOutput::new(),
-        Expr::Variable(VariableKind::Unprocessed(name)) => {
-            unreachable!(&format!("unprocessed variable: {}", name))
-        }
-        Expr::Variable(VariableKind::Processed { index }) => {
-            let mem = var_ctx[index];
+        Expr::Variable {
+            name: Source { source: name, .. },
+        } => {
+            let mem = var_ctx[var_idxs[name]];
             // bit32 as all variables are currently bit32
             registers.using_register_mutably(
                 stack,
@@ -115,23 +129,30 @@ pub fn compile_expr(
                 AssemblyOutput::new()
             }
         }
-        Expr::Binary { operator, lhs, rhs } => match operator {
+        Expr::Binary {
+            operator,
+            lhs: (lhs, _),
+            rhs: (rhs, rhs_span),
+        } => match operator {
             BinaryOp::Arithmetic(arithm) => arithmetic::compile_arithmetic_op(
-                arithm, target, *lhs, *rhs, registers, stack, var_ctx, is_ignored,
+                arithm, target, *lhs, *rhs, registers, stack, var_idxs, var_ctx, is_ignored,
             ),
             BinaryOp::Bit(bitop) => bit::compile_bit_op(
-                bitop, target, *lhs, *rhs, registers, stack, var_ctx, is_ignored,
+                bitop, target, *lhs, *rhs, registers, stack, var_idxs, var_ctx, is_ignored,
             ),
             BinaryOp::Logic(logicop) => logic::compile_logic_op(
-                logicop, target, *lhs, *rhs, registers, stack, var_ctx, is_ignored,
+                logicop, target, *lhs, *rhs, registers, stack, var_idxs, var_ctx, is_ignored,
             ),
             BinaryOp::Relational(relation) => {
                 // compute both, compare and cset. Simple, right?
-                let compute_lhs = compile_expr(*lhs, target, registers, stack, var_ctx, is_ignored);
+                let compute_lhs = compile_expr(
+                    *lhs, target, registers, stack, var_idxs, var_ctx, is_ignored,
+                );
                 let (compute_rhs, rhs_target) = registers.locking_register(target, |registers| {
                     let rhs_target = registers.get_suitable_register(UsageContext::Normal);
-                    let compute_rhs =
-                        compile_expr(*rhs, rhs_target, registers, stack, var_ctx, is_ignored);
+                    let compute_rhs = compile_expr(
+                        *rhs, rhs_target, registers, stack, var_idxs, var_ctx, is_ignored,
+                    );
 
                     (compute_rhs, rhs_target)
                 });
@@ -159,7 +180,7 @@ pub fn compile_expr(
                     //   compile the binary operation using a dummy as the lhs
                     //   #3 Put that register back in the memory controlled by `target`
                     let (target_mem, target_bitsize, target_build) =
-                        compile_as_pointer(*lhs, stack, registers, var_ctx);
+                        compile_as_pointer(*lhs, stack, registers, var_idxs, var_ctx);
                     let (produce_value, value_target) =
                         locking_memory_register(target_mem, registers, |registers| {
                             let value_target =
@@ -176,12 +197,13 @@ pub fn compile_expr(
                             let produce_value = compile_expr(
                                 Expr::Binary {
                                     operator: assignment_enabled.into(),
-                                    lhs: Box::new(Expr::AlreadyInTarget),
-                                    rhs,
+                                    lhs: (Box::new(Expr::AlreadyInTarget), Span::new(0)),
+                                    rhs: (rhs, rhs_span),
                                 },
                                 value_target,
                                 registers,
                                 stack,
+                                var_idxs,
                                 var_ctx,
                                 false, // not ignored as it will be put into the memory
                             );
@@ -196,10 +218,10 @@ pub fn compile_expr(
                         })
                 } else {
                     // this one is easier. just compile rhs to `target` and then put it into the value
-                    compile_expr(*rhs, target, registers, stack, var_ctx, false).chain(
+                    compile_expr(*rhs, target, registers, stack, var_idxs, var_ctx, false).chain(
                         registers.locking_register(target, |registers| {
                             let (target_mem, target_bitsize, build_target) =
-                                compile_as_pointer(*lhs, stack, registers, var_ctx);
+                                compile_as_pointer(*lhs, stack, registers, var_idxs, var_ctx);
                             build_target.chain_single(Instruction::Str {
                                 register: target.as_immutable(target_bitsize),
                                 address: target_mem,
@@ -209,8 +231,13 @@ pub fn compile_expr(
                 }
             }
         },
-        Expr::Unary { operator, expr } => {
-            let expr = compile_expr(*expr, target, registers, stack, var_ctx, is_ignored);
+        Expr::Unary {
+            operator,
+            expr: (expr, _),
+        } => {
+            let expr = compile_expr(
+                *expr, target, registers, stack, var_idxs, var_ctx, is_ignored,
+            );
             if is_ignored {
                 expr
             } else {
@@ -284,13 +311,13 @@ fn reorder_binary_expr<'source>(
         (
             Expr::Binary {
                 operator: op1,
-                lhs: a,
-                rhs: b,
+                lhs: (a, _),
+                rhs: (b, _),
             },
             Expr::Binary {
                 operator: op2,
-                lhs: c,
-                rhs: d,
+                lhs: (c, _),
+                rhs: (d, _),
             },
         ) if op == op1 && op == op2 => {
             let (a, b) = reorder_binary_expr(op, *a, *b);
@@ -312,8 +339,8 @@ fn reorder_binary_expr<'source>(
                     (
                         Expr::Binary {
                             operator: op1,
-                            lhs: Box::new(a),
-                            rhs: Box::new(b),
+                            lhs: (Box::new(a), Span::new(0)),
+                            rhs: (Box::new(b), Span::new(0)),
                         },
                         reduce_binary_expr(op1, k1, k2),
                     )
@@ -338,8 +365,8 @@ fn reorder_binary_expr<'source>(
                         (
                             Expr::Binary {
                                 operator: op1,
-                                lhs: Box::new(a),
-                                rhs: Box::new(b),
+                                lhs: (Box::new(a), Span::new(0)),
+                                rhs: (Box::new(b), Span::new(0)),
                             },
                             k,
                         )
@@ -349,8 +376,8 @@ fn reorder_binary_expr<'source>(
                             a,
                             Expr::Binary {
                                 operator: op1,
-                                lhs: Box::new(k),
-                                rhs: Box::new(b),
+                                lhs: (Box::new(k), Span::new(0)),
+                                rhs: (Box::new(b), Span::new(0)),
                             },
                         )
                     }
@@ -359,13 +386,13 @@ fn reorder_binary_expr<'source>(
                 (a, b, c, d) => (
                     Expr::Binary {
                         operator: op1,
-                        lhs: Box::new(a),
-                        rhs: Box::new(b),
+                        lhs: (Box::new(a), Span::new(0)),
+                        rhs: (Box::new(b), Span::new(0)),
                     },
                     Expr::Binary {
                         operator: op1,
-                        lhs: Box::new(c),
-                        rhs: Box::new(d),
+                        lhs: (Box::new(c), Span::new(0)),
+                        rhs: (Box::new(d), Span::new(0)),
                     },
                 ),
             }
@@ -374,8 +401,8 @@ fn reorder_binary_expr<'source>(
         (
             Expr::Binary {
                 operator: op1,
-                lhs: a,
-                rhs: b,
+                lhs: (a, _),
+                rhs: (b, _),
             },
             c,
         ) if op == op1 => {
@@ -408,8 +435,8 @@ fn reorder_binary_expr<'source>(
                 (a, b, c) => (
                     Expr::Binary {
                         operator: op1,
-                        lhs: Box::new(a),
-                        rhs: Box::new(b),
+                        lhs: (Box::new(a), Span::new(0)),
+                        rhs: (Box::new(b), Span::new(0)),
                     },
                     c,
                 ),
@@ -421,8 +448,8 @@ fn reorder_binary_expr<'source>(
             a,
             Expr::Binary {
                 operator: op1,
-                lhs: b,
-                rhs: c,
+                lhs: (b, _),
+                rhs: (c, _),
             },
         ) if op == op1 => {
             let (b, c) = reorder_binary_expr(op, *b, *c);
@@ -460,8 +487,8 @@ fn reorder_binary_expr<'source>(
                 (k @ Expr::Constant(_), a, b) if op.is_commutative() => (
                     Expr::Binary {
                         operator: op1,
-                        lhs: Box::new(a),
-                        rhs: Box::new(b),
+                        lhs: (Box::new(a), Span::new(0)),
+                        rhs: (Box::new(b), Span::new(0)),
                     },
                     k,
                 ),
@@ -470,8 +497,8 @@ fn reorder_binary_expr<'source>(
                     a,
                     Expr::Binary {
                         operator: op1,
-                        lhs: Box::new(b),
-                        rhs: Box::new(c),
+                        lhs: (Box::new(b), Span::new(0)),
+                        rhs: (Box::new(c), Span::new(0)),
                     },
                 ),
             }
@@ -507,8 +534,9 @@ fn reduce_binary_expr<'source>(
                 // C-style operations
                 ArithmeticOp::Add => a.wrapping_add(b),
                 ArithmeticOp::Divide => {
+                    // NOTE: I could just return the `Divide` operation to be compiled without
+                    // evaluating it if we're on integer division.
                     if b == 0 {
-                        // TODO(#7): add span tags on expressions for errors
                         panic!("in constant expression: division by zero (`{} / {}`)", a, b)
                     } else {
                         a / b
@@ -588,8 +616,8 @@ fn reduce_binary_expr<'source>(
         // otherwise, just pack them again
         (a, b) => Expr::Binary {
             operator,
-            lhs: Box::new(a),
-            rhs: Box::new(b),
+            lhs: (Box::new(a), Span::new(0)),
+            rhs: (Box::new(b), Span::new(0)),
         },
     }
 }
@@ -597,12 +625,19 @@ fn reduce_binary_expr<'source>(
 fn reduce_expr(expr: Expr) -> Expr {
     match expr {
         Expr::AlreadyInTarget => expr,
-        Expr::Variable(_) => expr, // cannot reduce a variable lookup
-        Expr::Constant(_) => expr, // cannot reduce a numeric constant further
-        Expr::Binary { operator, lhs, rhs } => reduce_binary_expr(operator, *lhs, *rhs),
+        Expr::Variable { .. } => expr, // cannot reduce a variable lookup
+        Expr::Constant(_) => expr,     // cannot reduce a numeric constant further
+        Expr::Binary {
+            operator,
+            lhs: (lhs, _),
+            rhs: (rhs, _),
+        } => reduce_binary_expr(operator, *lhs, *rhs),
         // again, if reducing the expression results in a number, we'll apply the unary operation,
         // otherwise we'll pack it again
-        Expr::Unary { operator, expr } => match reduce_expr(*expr) {
+        Expr::Unary {
+            operator,
+            expr: (expr, _),
+        } => match reduce_expr(*expr) {
             Expr::Constant(c) => Expr::Constant(match operator {
                 UnaryOp::Negate => -c,
                 UnaryOp::BitNot => !c,
@@ -616,7 +651,7 @@ fn reduce_expr(expr: Expr) -> Expr {
             }),
             e => Expr::Unary {
                 operator,
-                expr: Box::new(e),
+                expr: (Box::new(e), Span::new(0)),
             },
         },
     }

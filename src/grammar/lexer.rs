@@ -175,10 +175,16 @@ pub enum Operator {
     Equals,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Source<'source> {
     pub span: Span,
     pub source: &'source str,
+}
+
+impl const From<Source<'_>> for Span {
+    fn from(s: Source<'_>) -> Self {
+        s.span
+    }
 }
 
 pub struct Lexer<'a> {
@@ -409,7 +415,10 @@ impl<'source> Lexer<'source> {
 
     fn source_from(&self, start: usize, end: usize) -> Source<'source> {
         Source {
-            span: Span::new(start),
+            span: Span {
+                offset: start,
+                len: end - start,
+            },
             source: &self.metadata.input()[start..end],
         }
     }

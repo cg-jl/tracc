@@ -1,5 +1,8 @@
-//! Internal representation of the AST without source information
+use crate::error::Span;
 use crate::grammar::lexer::Operator;
+use crate::grammar::lexer::Source;
+use core::mem::MaybeUninit;
+use std::collections::HashMap;
 
 use std::fmt;
 
@@ -15,12 +18,15 @@ pub struct Function<'source> {
 }
 
 //#[derive(Debug)]
-pub struct Block<'source>(pub Vec<Statement<'source>>);
+pub struct Block<'source> {
+    pub statements: Vec<(Statement<'source>, Span)>,
+    pub variables: MaybeUninit<HashMap<&'source str, usize>>,
+}
 
 impl fmt::Debug for Block<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut dbg_struct = f.debug_struct("Block");
-        for (i, stmt) in self.0.iter().enumerate() {
+        for (i, stmt) in self.statements.iter().enumerate() {
             dbg_struct.field(&i.to_string(), stmt);
         }
         dbg_struct.finish()
@@ -29,18 +35,12 @@ impl fmt::Debug for Block<'_> {
 
 #[derive(Debug)]
 pub enum Statement<'source> {
-    Return(Expr<'source>),
-    SingleExpr(Expr<'source>),
+    Return((Expr<'source>, Span)),
+    SingleExpr((Expr<'source>, Span)),
     DeclareVar {
-        name: &'source str,
-        init: Option<Expr<'source>>,
-    }, // TODO: add multiple vars
-}
-
-impl Default for Statement<'_> {
-    fn default() -> Self {
-        Self::Return(Expr::Constant(0))
-    }
+        name: Source<'source>,
+        init: Option<(Expr<'source>, Span)>,
+    }, // TODO: add multiple var declarations
 }
 
 #[derive(Debug)]
@@ -49,17 +49,18 @@ pub struct Identifier<'source>(pub &'source str);
 // NOTE: should I make a processed expr type?
 #[derive(Debug, PartialEq, Eq)]
 pub enum Expr<'source> {
-    // TODO(#1): convert variables to &'source str instead of using strings (`Parse<'source>`)
-    Variable(VariableKind<'source>),
+    Variable {
+        name: Source<'source>,
+    },
     Constant(i32),
     Unary {
         operator: UnaryOp,
-        expr: Box<Expr<'source>>,
+        expr: (Box<Expr<'source>>, Span),
     },
     Binary {
         operator: BinaryOp,
-        lhs: Box<Expr<'source>>,
-        rhs: Box<Expr<'source>>,
+        lhs: (Box<Expr<'source>>, Span),
+        rhs: (Box<Expr<'source>>, Span),
     },
     /// Dummy that signifies that the expression you want to compile is already in the target
     AlreadyInTarget,
@@ -67,14 +68,8 @@ pub enum Expr<'source> {
 
 impl Expr<'_> {
     pub fn is_writable(&self) -> bool {
-        matches!(self, Self::Variable(_))
+        matches!(self, Self::Variable { .. })
     }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum VariableKind<'source> {
-    Unprocessed(&'source str),
-    Processed { index: usize }, // NOTE: currently all variables are ints.
 }
 
 // NOTE: unary operators also have different predecences (14 or 13, depending on them), it's just

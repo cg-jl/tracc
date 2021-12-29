@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     ast::{Expr, LogicOp},
     codegen::{
@@ -11,13 +13,14 @@ use crate::{
 
 use super::{compile_expr, reduce_expr};
 
-pub fn compile_logic_op(
+pub fn compile_logic_op<'source>(
     logicop: LogicOp,
     target: RegisterDescriptor,
-    lhs: Expr,
-    rhs: Expr,
+    lhs: Expr<'source>,
+    rhs: Expr<'source>,
     registers: &mut RegisterManager,
     stack: &mut StackManager,
+    var_idxs: &HashMap<&'source str, usize>,
     var_ctx: &[Memory],
     is_ignored: bool,
 ) -> AssemblyOutput {
@@ -52,30 +55,34 @@ pub fn compile_logic_op(
             }
             // if there is a non-zero constant on the left side, we use 1 && A = A and just
             // compile the right side.
-            Expr::Constant(_) => compile_expr(rhs, target, registers, stack, var_ctx, is_ignored),
+            Expr::Constant(_) => {
+                compile_expr(rhs, target, registers, stack, var_idxs, var_ctx, is_ignored)
+            }
             // otherwise, let's take a look at the right side
             lhs => match reduce_expr(rhs) {
                 // if there's a zero on the RIGHT side, we want to compile the left side
                 // knowing that the result of it will be ignored, since we will put a zero on
                 // the result no matter what the lhs results in.
-                Expr::Constant(0) => compile_expr(lhs, target, registers, stack, var_ctx, true)
-                    .chain(if !is_ignored {
-                        registers.using_register_mutably(
-                            stack,
+                Expr::Constant(0) => compile_expr(
+                    lhs, target, registers, stack, var_idxs, var_ctx, true,
+                )
+                .chain(if !is_ignored {
+                    registers.using_register_mutably(
+                        stack,
+                        target,
+                        BitSize::Bit32,
+                        |_stack, _regs, target| Instruction::Mov {
                             target,
-                            BitSize::Bit32,
-                            |_stack, _regs, target| Instruction::Mov {
-                                target,
-                                source: Data::Immediate(0),
-                            },
-                        )
-                    } else {
-                        AssemblyOutput::new()
-                    }),
+                            source: Data::Immediate(0),
+                        },
+                    )
+                } else {
+                    AssemblyOutput::new()
+                }),
                 // if there is a non-zero constant on the right side, we apply again A && 1 = A
                 // and just compile the left side.
                 Expr::Constant(_) => {
-                    compile_expr(lhs, target, registers, stack, var_ctx, is_ignored)
+                    compile_expr(lhs, target, registers, stack, var_idxs, var_ctx, is_ignored)
                 }
                 // otherwise, we'll let the processor decide at runtime.
                 rhs => {
@@ -86,7 +93,7 @@ pub fn compile_logic_op(
                     //  <rx <- rhs>
                     // end:
                     let end = LabelGenerator::global().new_label();
-                    compile_expr(lhs, target, registers, stack, var_ctx, false)
+                    compile_expr(lhs, target, registers, stack, var_idxs, var_ctx, false)
                         .chain_single(Instruction::Cmp {
                             register: target.as_immutable(BitSize::Bit32),
                             data: Data::Immediate(0),
@@ -95,7 +102,9 @@ pub fn compile_logic_op(
                             condition: Condition::Equals,
                             label: end,
                         }))
-                        .chain(compile_expr(rhs, target, registers, stack, var_ctx, false))
+                        .chain(compile_expr(
+                            rhs, target, registers, stack, var_idxs, var_ctx, false,
+                        ))
                         .chain_single(end)
                 }
             },
@@ -103,7 +112,9 @@ pub fn compile_logic_op(
 
         LogicOp::Or => match reduce_expr(lhs) {
             // if lhs is a zero: 0 || B = B, then just compile rhs
-            Expr::Constant(0) => compile_expr(rhs, target, registers, stack, var_ctx, is_ignored),
+            Expr::Constant(0) => {
+                compile_expr(rhs, target, registers, stack, var_idxs, var_ctx, is_ignored)
+            }
             // if lhs is non-zero, then we can forget about B as it is not going to be evaluated,
             // and just load the constant
             Expr::Constant(x) => {
@@ -125,25 +136,27 @@ pub fn compile_logic_op(
             lhs => match reduce_expr(rhs) {
                 // if rhs is zero, that means L || 0 == L and we just need the value of L
                 Expr::Constant(0) => {
-                    compile_expr(lhs, target, registers, stack, var_ctx, is_ignored)
+                    compile_expr(lhs, target, registers, stack, var_idxs, var_ctx, is_ignored)
                 }
                 // if rhs is non-zero, that means L || X == X, (X != 0) but we want to compile L if it's
                 // needed so we just add the ignored flag to it
-                Expr::Constant(x) => compile_expr(lhs, target, registers, stack, var_ctx, true)
-                    .chain(if !is_ignored {
-                        // NOTE: this bit size might be changed to the target's bit size
-                        registers.using_register_mutably(
-                            stack,
+                Expr::Constant(x) => compile_expr(
+                    lhs, target, registers, stack, var_idxs, var_ctx, true,
+                )
+                .chain(if !is_ignored {
+                    // NOTE: this bit size might be changed to the target's bit size
+                    registers.using_register_mutably(
+                        stack,
+                        target,
+                        BitSize::Bit32,
+                        |_stack, _regs, target| Instruction::Mov {
                             target,
-                            BitSize::Bit32,
-                            |_stack, _regs, target| Instruction::Mov {
-                                target,
-                                source: Data::Immediate(x as u64),
-                            },
-                        )
-                    } else {
-                        AssemblyOutput::new()
-                    }),
+                            source: Data::Immediate(x as u64),
+                        },
+                    )
+                } else {
+                    AssemblyOutput::new()
+                }),
                 // otherwise, we will compile the branch
                 rhs => {
                     // binary_logicor rx:
@@ -153,7 +166,7 @@ pub fn compile_logic_op(
                     //  <rx <- rhs>
                     //end:
                     let end = LabelGenerator::global().new_label();
-                    compile_expr(lhs, target, registers, stack, var_ctx, false)
+                    compile_expr(lhs, target, registers, stack, var_idxs, var_ctx, false)
                         .chain_single(Instruction::Cmp {
                             register: target.as_immutable(BitSize::Bit32),
                             data: Data::Immediate(0),
@@ -162,7 +175,9 @@ pub fn compile_logic_op(
                             condition: Condition::NotEquals,
                             label: end,
                         }))
-                        .chain(compile_expr(rhs, target, registers, stack, var_ctx, false))
+                        .chain(compile_expr(
+                            rhs, target, registers, stack, var_idxs, var_ctx, false,
+                        ))
                         .chain_single(end)
                 }
             },
