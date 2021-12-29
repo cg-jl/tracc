@@ -1,13 +1,14 @@
 use crate::error::*;
 
 mod block;
-use crate::lexer::*;
 mod expr;
 mod function;
 mod identifier;
+pub mod lexer;
 mod program;
 mod statement;
 
+use lexer::*;
 // TODO(#5): add measureme to the parser
 
 pub struct Parser<'source> {

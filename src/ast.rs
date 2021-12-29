@@ -1,5 +1,5 @@
 //! Internal representation of the AST without source information
-use crate::lexer::Operator;
+use crate::grammar::lexer::Operator;
 
 use std::fmt;
 

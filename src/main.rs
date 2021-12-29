@@ -4,7 +4,7 @@ use structopt::StructOpt;
 use tracc::ast::Program;
 use tracc::codegen::Compile;
 use tracc::error::SourceMetadata;
-use tracc::parser::Parser;
+use tracc::grammar::Parser;
 
 // TODO(#3): structured formatting lib (error,warning,note,help, etc)
 // TODO(#4): create test crate

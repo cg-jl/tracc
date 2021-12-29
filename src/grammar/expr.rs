@@ -1,10 +1,9 @@
-use super::{Parse, ParseErrorKind, ParseRes, Parser, WantedSpec};
+use super::{lexer::TokenKind, Parse, ParseErrorKind, ParseRes, Parser, WantedSpec};
 use crate::ast::Associativity;
 use crate::ast::BinaryOp;
 use crate::ast::Expr;
 use crate::ast::UnaryOp;
 use crate::ast::VariableKind;
-use crate::lexer::TokenKind;
 
 impl<'source> Parse<'source> for Expr<'source> {
     fn parse(parser: &mut Parser<'source>) -> ParseRes<Self> {

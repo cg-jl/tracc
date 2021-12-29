@@ -1,6 +1,5 @@
-use super::{Parse, ParseRes, Parser};
+use super::{lexer::TokenKind, Parse, ParseRes, Parser};
 use crate::ast::Identifier;
-use crate::lexer::TokenKind;
 
 impl<'source> Parse<'source> for Identifier<'source> {
     fn parse(parser: &mut Parser<'source>) -> ParseRes<Self> {

@@ -1,6 +1,5 @@
-use super::{Parse, ParseRes, Parser};
+use super::{lexer::TokenKind, Parse, ParseRes, Parser};
 use crate::ast::Block;
-use crate::lexer::TokenKind;
 
 impl<'source> Parse<'source> for Block<'source> {
     fn parse(parser: &mut Parser<'source>) -> ParseRes<Self> {
