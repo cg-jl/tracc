@@ -2,7 +2,7 @@
 use std::error::Error;
 use structopt::StructOpt;
 use tracc::ast::Program;
-use tracc::compiler::Compile;
+use tracc::codegen::Compile;
 use tracc::error::SourceMetadata;
 use tracc::parser::Parser;
 

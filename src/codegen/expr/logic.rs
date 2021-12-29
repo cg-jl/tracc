@@ -1,7 +1,7 @@
 use crate::{
     assembly::{BitSize, Branch, Condition, Data, Instruction, Memory},
     ast::{Expr, LogicOp},
-    compiler::{
+    codegen::{
         labels::LabelGenerator,
         registers::{RegisterDescriptor, RegisterManager},
         stack::StackManager,
