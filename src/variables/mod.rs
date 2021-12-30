@@ -1,8 +1,10 @@
-use super::ast::Block;
 use super::ast::Expr;
 use super::ast::Statement;
+use crate::ast::BinaryOp;
 use crate::ast::Function;
+use crate::ast::Identifier;
 use crate::ast::Program;
+use crate::codegen;
 use crate::error::SourceMetadata;
 use crate::error::{self, Span};
 use crate::grammar::lexer::Source;
@@ -16,31 +18,42 @@ use std::fmt;
 // the error is put through the pipeline before the data goes into the codegen unit.
 // now, the codegen unit has to know the number of variables in advance.
 
+// NOTE:maybe I should enable multiple-point errors, but that will have to wait for a better error
+// crate
 pub fn walk_program<'source>(
-    mut program: Program<'source>,
+    Program(function): Program<'source>,
     source_meta: &SourceMetadata,
-) -> Result<Program<'source>, error::Error<VarError>> {
-    walk_function(&mut program.0, source_meta)?;
-    Ok(program)
+) -> Result<codegen::ast::Program<'source>, error::Error<VarError>> {
+    let function = walk_function(function, source_meta)?;
+    Ok(codegen::ast::Program(function))
 }
 
-fn walk_function(
-    function: &mut Function,
+fn walk_function<'source>(
+    function: Function<'source>,
     source_meta: &SourceMetadata,
-) -> Result<(), error::Error<VarError>> {
-    walk_block(&mut function.body, source_meta)
+) -> Result<codegen::ast::Function<'source>, error::Error<VarError>> {
+    let Function {
+        name: Identifier(name),
+        body,
+    } = function;
+    let (body, var_amt) = walk_block(body.statements, source_meta)?;
+    Ok(codegen::ast::Function {
+        body,
+        name,
+        var_amt,
+    })
 }
 
 // core function that actually does the work for a block
-fn walk_block(
-    block: &mut Block,
+fn walk_block<'source>(
+    block: Vec<(Statement<'source>, Span)>,
     source_meta: &SourceMetadata,
-) -> Result<(), error::Error<VarError>> {
+) -> Result<(Vec<codegen::ast::Statement>, usize), error::Error<VarError>> {
     // #1. Build the variable set. NOTE: we  don't want a variable to be visible before it's
     // declared, that's why I'm doing everything in the same loop.
     let mut var_set = HashMap::new();
 
-    for (statement, _statement_span) in &block.statements {
+    for (statement, _statement_span) in &block {
         match statement {
             Statement::DeclareVar { name, init } => {
                 let Source { span, source: name } = name;
@@ -73,8 +86,66 @@ fn walk_block(
         .map(|(a, b)| (b, a))
         .collect();
 
-    block.variables.write(indices);
-    Ok(())
+    // #3. Map those indices to the new variables and create the new statements
+    Ok((
+        block
+            .into_iter()
+            .filter_map(|(stmt, _)| match stmt {
+                Statement::Return((expr, _)) => Some(codegen::ast::Statement::Return(
+                    convert_expr(expr, &indices),
+                )),
+                Statement::SingleExpr((expr, _)) => Some(codegen::ast::Statement::Single(
+                    convert_expr(expr, &indices),
+                )),
+                Statement::DeclareVar { name, init } => {
+                    // if there is no init expression, just don't do nothing, the declaration
+                    let init = init.map(|e| convert_expr(e.0, &indices))?;
+                    // if the variable is used, generate the code to initialise it
+                    Some(if let Some(&index) = indices.get(name.source) {
+                        codegen::ast::Statement::Single(codegen::ast::Expr::Binary {
+                            operator: BinaryOp::Assignment { op: None },
+                            lhs: Box::new(codegen::ast::Expr::Variable { index }),
+                            rhs: Box::new(init),
+                        })
+                    } else {
+                        codegen::ast::Statement::Single(init)
+                    })
+                }
+            })
+            .collect::<Vec<_>>(),
+        indices.len(),
+    ))
+}
+
+// NOTE: the variables might all be indexable at this point and we can use the unwrapping []
+fn convert_expr<'source>(
+    expr: Expr<'source>,
+    indices: &HashMap<&'source str, usize>,
+) -> codegen::ast::Expr {
+    match expr {
+        // all variables that are passed here already exist
+        Expr::Variable { name } => {
+            let index = indices[name.source];
+            codegen::ast::Expr::Variable { index }
+        }
+        Expr::Constant(c) => codegen::ast::Expr::Constant(c),
+        Expr::Unary { operator, expr } => {
+            let inner = convert_expr(*expr.0, indices);
+            codegen::ast::Expr::Unary {
+                operator,
+                inner: Box::new(inner),
+            }
+        }
+        Expr::Binary { operator, lhs, rhs } => {
+            let lhs = convert_expr(*lhs.0, indices);
+            let rhs = convert_expr(*rhs.0, indices);
+            codegen::ast::Expr::Binary {
+                operator,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        }
+    }
 }
 
 fn walk_expr<'source>(
@@ -103,7 +174,7 @@ fn walk_expr<'source>(
                 queue.push((&lhs.0, lhs.1));
                 queue.push((&rhs.0, rhs.1));
             }
-            Expr::Constant(_) | Expr::AlreadyInTarget => (),
+            Expr::Constant(_) => (),
         }
     }
 

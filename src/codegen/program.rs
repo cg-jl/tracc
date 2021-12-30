@@ -1,5 +1,5 @@
 use super::assembly::Directive;
-use crate::ast::Program;
+use super::ast::Program;
 
 use super::AssemblyOutput;
 use super::Compile;

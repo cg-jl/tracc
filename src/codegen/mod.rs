@@ -1,4 +1,5 @@
 pub mod assembly;
+pub mod ast;
 mod block;
 mod expr;
 mod function;

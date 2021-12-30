@@ -1,8 +1,6 @@
 use crate::error::Span;
 use crate::grammar::lexer::Operator;
 use crate::grammar::lexer::Source;
-use core::mem::MaybeUninit;
-use std::collections::HashMap;
 
 use std::fmt;
 
@@ -20,7 +18,6 @@ pub struct Function<'source> {
 //#[derive(Debug)]
 pub struct Block<'source> {
     pub statements: Vec<(Statement<'source>, Span)>,
-    pub variables: MaybeUninit<HashMap<&'source str, usize>>,
 }
 
 impl fmt::Debug for Block<'_> {
@@ -62,8 +59,6 @@ pub enum Expr<'source> {
         lhs: (Box<Expr<'source>>, Span),
         rhs: (Box<Expr<'source>>, Span),
     },
-    /// Dummy that signifies that the expression you want to compile is already in the target
-    AlreadyInTarget,
 }
 
 impl Expr<'_> {
