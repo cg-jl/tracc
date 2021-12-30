@@ -1,6 +1,5 @@
 use crate::error::*;
 
-mod ast;
 mod block;
 mod expr;
 mod function;
