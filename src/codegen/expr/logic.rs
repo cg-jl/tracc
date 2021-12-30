@@ -2,7 +2,7 @@ use crate::{
     ast::LogicOp,
     codegen::{
         assembly::{BitSize, Branch, Condition, Data, Instruction, Memory},
-        ast::Expr,
+        hlir::Expr,
         labels::LabelGenerator,
         registers::{RegisterDescriptor, RegisterManager},
         stack::StackManager,

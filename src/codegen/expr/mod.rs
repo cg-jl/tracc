@@ -6,7 +6,7 @@ use super::{
     assembly::{
         BitSize, Condition, Data, HasBitSize, ImmutableRegister, Instruction, MutableRegister,
     },
-    ast::Expr,
+    hlir::Expr,
     load_immediate,
     registers::{RegisterDescriptor, RegisterManager, UsageContext},
     stack::StackManager,

@@ -23,21 +23,21 @@ use std::fmt;
 pub fn walk_program<'source>(
     Program(function): Program<'source>,
     source_meta: &SourceMetadata,
-) -> Result<codegen::ast::Program<'source>, error::Error<VarError>> {
+) -> Result<codegen::hlir::Program<'source>, error::Error<VarError>> {
     let function = walk_function(function, source_meta)?;
-    Ok(codegen::ast::Program(function))
+    Ok(codegen::hlir::Program(function))
 }
 
 fn walk_function<'source>(
     function: Function<'source>,
     source_meta: &SourceMetadata,
-) -> Result<codegen::ast::Function<'source>, error::Error<VarError>> {
+) -> Result<codegen::hlir::Function<'source>, error::Error<VarError>> {
     let Function {
         name: Identifier(name),
         body,
     } = function;
     let (body, var_amt) = walk_block(body.statements, source_meta)?;
-    Ok(codegen::ast::Function {
+    Ok(codegen::hlir::Function {
         body,
         name,
         var_amt,
@@ -48,7 +48,7 @@ fn walk_function<'source>(
 fn walk_block<'source>(
     block: Vec<(Statement<'source>, Span)>,
     source_meta: &SourceMetadata,
-) -> Result<(Vec<codegen::ast::Statement>, usize), error::Error<VarError>> {
+) -> Result<(Vec<codegen::hlir::Statement>, usize), error::Error<VarError>> {
     // #1. Build the variable set. NOTE: we  don't want a variable to be visible before it's
     // declared, that's why I'm doing everything in the same loop.
     let mut var_set = HashMap::new();
@@ -91,10 +91,10 @@ fn walk_block<'source>(
         block
             .into_iter()
             .filter_map(|(stmt, _)| match stmt {
-                Statement::Return((expr, _)) => Some(codegen::ast::Statement::Return(
+                Statement::Return((expr, _)) => Some(codegen::hlir::Statement::Return(
                     convert_expr(expr, &indices),
                 )),
-                Statement::SingleExpr((expr, _)) => Some(codegen::ast::Statement::Single(
+                Statement::SingleExpr((expr, _)) => Some(codegen::hlir::Statement::Single(
                     convert_expr(expr, &indices),
                 )),
                 Statement::DeclareVar { name, init } => {
@@ -102,13 +102,13 @@ fn walk_block<'source>(
                     let init = init.map(|e| convert_expr(e.0, &indices))?;
                     // if the variable is used, generate the code to initialise it
                     Some(if let Some(&index) = indices.get(name.source) {
-                        codegen::ast::Statement::Single(codegen::ast::Expr::Binary {
+                        codegen::hlir::Statement::Single(codegen::hlir::Expr::Binary {
                             operator: BinaryOp::Assignment { op: None },
-                            lhs: Box::new(codegen::ast::Expr::Variable { index }),
+                            lhs: Box::new(codegen::hlir::Expr::Variable { index }),
                             rhs: Box::new(init),
                         })
                     } else {
-                        codegen::ast::Statement::Single(init)
+                        codegen::hlir::Statement::Single(init)
                     })
                 }
             })
@@ -121,17 +121,17 @@ fn walk_block<'source>(
 fn convert_expr<'source>(
     expr: Expr<'source>,
     indices: &HashMap<&'source str, usize>,
-) -> codegen::ast::Expr {
+) -> codegen::hlir::Expr {
     match expr {
         // all variables that are passed here already exist
         Expr::Variable { name } => {
             let index = indices[name.source];
-            codegen::ast::Expr::Variable { index }
+            codegen::hlir::Expr::Variable { index }
         }
-        Expr::Constant(c) => codegen::ast::Expr::Constant(c),
+        Expr::Constant(c) => codegen::hlir::Expr::Constant(c),
         Expr::Unary { operator, expr } => {
             let inner = convert_expr(*expr.0, indices);
-            codegen::ast::Expr::Unary {
+            codegen::hlir::Expr::Unary {
                 operator,
                 inner: Box::new(inner),
             }
@@ -139,7 +139,7 @@ fn convert_expr<'source>(
         Expr::Binary { operator, lhs, rhs } => {
             let lhs = convert_expr(*lhs.0, indices);
             let rhs = convert_expr(*rhs.0, indices);
-            codegen::ast::Expr::Binary {
+            codegen::hlir::Expr::Binary {
                 operator,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),

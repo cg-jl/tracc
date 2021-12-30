@@ -2,7 +2,7 @@ use crate::{
     ast::BitOp,
     codegen::{
         assembly::{BitSize, Data, Instruction, Memory},
-        ast::Expr,
+        hlir::Expr,
         registers::{RegisterDescriptor, RegisterManager, UsageContext},
         stack::StackManager,
         AssemblyOutput,

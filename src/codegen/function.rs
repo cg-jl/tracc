@@ -1,5 +1,5 @@
 use super::assembly::{Assembly, Directive, Instruction};
-use super::ast::Function;
+use super::hlir::Function;
 use super::block::compile_block;
 use super::load_immediate;
 use super::registers::with_registers;

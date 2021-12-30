@@ -1,5 +1,5 @@
 use super::{
-    ast::Statement,
+    hlir::Statement,
     expr::compile_expr,
     registers::{RegisterDescriptor, RegisterManager},
     stack::StackManager,

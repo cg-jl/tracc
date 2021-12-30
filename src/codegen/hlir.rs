@@ -1,4 +1,4 @@
-//! Internal AST used for codegen, once all the checks have passed
+//! High Level Intermediate Representation used for codegen, once all the checks have passed
 //! After this AST is generated, no more (user) errors can happen
 use crate::ast::{BinaryOp, UnaryOp};
 

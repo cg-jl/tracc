@@ -1,8 +1,8 @@
 pub mod assembly;
-pub mod ast;
 mod block;
 mod expr;
 mod function;
+pub mod hlir;
 mod labels;
 use std::iter::FromIterator;
 mod program;

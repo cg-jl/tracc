@@ -1,5 +1,5 @@
 use super::assembly::Directive;
-use super::ast::Program;
+use super::hlir::Program;
 
 use super::AssemblyOutput;
 use super::Compile;
