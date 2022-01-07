@@ -1,7 +1,6 @@
 use crate::error::Span;
 use crate::grammar::lexer::Operator;
 use crate::grammar::lexer::Source;
-use std::ops::Range;
 
 use std::fmt;
 
@@ -131,7 +130,12 @@ fn format_statement(
             )?;
             format_statement(&true_branch.0, true_branch.1, f, depth + 2)?;
             if let Some((false_branch, false_branch_span)) = false_branch {
-                write!(f, "{}  false branch:\n{}", spacing.clone(), spacing + "    ")?;
+                write!(
+                    f,
+                    "{}  false branch:\n{}",
+                    spacing.clone(),
+                    spacing + "    "
+                )?;
                 format_statement(false_branch, *false_branch_span, f, depth + 2)
             } else {
                 Ok(())
