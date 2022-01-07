@@ -79,6 +79,15 @@ impl<T> Error<T> {
             contexts: self.contexts,
         }
     }
+    /// The source given is only applied if there was no additional source
+    #[must_use]
+    pub fn with_backup_source(self, span: Span, source: &SourceMetadata) -> Self {
+        if self.file.is_some() {
+            self
+        } else {
+            self.with_source(span, source)
+        }
+    }
     #[must_use]
     pub fn with_source(mut self, span: Span, source: &SourceMetadata) -> Self {
         self.file = source.file.clone();

@@ -38,6 +38,12 @@ pub enum Statement<'source> {
         name: Source<'source>,
         init: Option<(Expr<'source>, Span)>,
     }, // TODO: add multiple var declarations
+    Block(Vec<(Statement<'source>, Span)>),
+    IfStatement {
+        condition: (Expr<'source>, Span),
+        true_branch: (Box<Statement<'source>>, Span),
+        false_branch: Option<(Box<Statement<'source>>, Span)>,
+    },
 }
 
 #[derive(Debug)]

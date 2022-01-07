@@ -22,6 +22,12 @@ pub enum Statement {
     Return(Expr),
     /// Just run it.
     Single(Expr),
+    /// Conditional statement, might have another `else` branch.
+    IfStatement {
+        condition: Expr,
+        true_branch: Vec<Statement>,
+        false_branch: Option<Vec<Statement>>,
+    },
 }
 
 #[derive(Debug)]
