@@ -1,18 +1,30 @@
 use crate::error::Span;
 use crate::grammar::lexer::Operator;
 use crate::grammar::lexer::Source;
+use std::ops::Range;
 
 use std::fmt;
 
 // TODO: spans
 
-#[derive(Debug)]
 pub struct Program<'source>(pub Function<'source>);
 
-#[derive(Debug)]
+impl fmt::Debug for Program<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 pub struct Function<'source> {
     pub name: Identifier<'source>,
     pub body: Block<'source>,
+}
+
+impl fmt::Debug for Function<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Function {:?}", self.name)?;
+        format_block(&self.body.statements, f, 1)
+    }
 }
 
 //#[derive(Debug)]
@@ -44,6 +56,115 @@ pub enum Statement<'source> {
         true_branch: (Box<Statement<'source>>, Span),
         false_branch: Option<(Box<Statement<'source>>, Span)>,
     },
+}
+
+fn format_block(block: &[(Statement, Span)], f: &mut fmt::Formatter, depth: usize) -> fmt::Result {
+    let spacing = " ".repeat(depth);
+    for (stmt, stmt_span) in block {
+        f.write_str(&spacing)?;
+        f.write_str("  - ")?;
+        format_statement(stmt, *stmt_span, f, depth + 2)?;
+    }
+    Ok(())
+}
+
+fn format_statement(
+    stmt: &Statement,
+    stmt_span: Span,
+    f: &mut fmt::Formatter,
+    depth: usize,
+) -> fmt::Result {
+    let spacing = " ".repeat(depth);
+    match stmt {
+        Statement::Return((expr, expr_span)) => {
+            write!(f, "Return@{:?}\n{}", stmt_span.as_range(), spacing + "    ")?;
+            format_expr(expr, *expr_span, f, depth + 1)
+        }
+        Statement::SingleExpr((expr, expr_span)) => {
+            write!(
+                f,
+                "SingleExpr@{:?}\n{}",
+                stmt_span.as_range(),
+                spacing + "  "
+            )?;
+            format_expr(expr, *expr_span, f, depth + 1)
+        }
+        Statement::DeclareVar {
+            name:
+                Source {
+                    source: name,
+                    span: name_span,
+                },
+            init,
+        } => {
+            writeln!(f, "DeclareVar@{:?}", stmt_span.as_range())?;
+            writeln!(f, "{}  name: {}@{:?}", spacing, name, name_span.as_range())?;
+            if let Some((init_expr, init_span)) = init {
+                write!(f, "{}  init: ", spacing)?;
+                format_expr(init_expr, *init_span, f, depth + 4)
+            } else {
+                Ok(())
+            }
+        }
+        Statement::Block(block) => {
+            writeln!(f, "Block@{:?}", stmt_span.as_range())?;
+            format_block(block, f, depth + 1)
+        }
+        Statement::IfStatement {
+            condition,
+            true_branch,
+            false_branch,
+        } => {
+            writeln!(f, "IfStatement@{:?}", stmt_span.as_range())?;
+            write!(
+                f,
+                "{}  condition:\n{}",
+                spacing.clone(),
+                spacing.clone() + "    "
+            )?;
+            format_expr(&condition.0, condition.1, f, depth + 4)?;
+            write!(
+                f,
+                "{}  true branch:\n{}",
+                spacing.clone(),
+                spacing.clone() + "    "
+            )?;
+            format_statement(&true_branch.0, true_branch.1, f, depth + 2)?;
+            if let Some((false_branch, false_branch_span)) = false_branch {
+                write!(f, "{}  false branch:\n{}", spacing.clone(), spacing + "    ")?;
+                format_statement(false_branch, *false_branch_span, f, depth + 2)
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+fn format_expr(expr: &Expr, expr_span: Span, f: &mut fmt::Formatter, depth: usize) -> fmt::Result {
+    let spacing = " ".repeat(depth);
+    match expr {
+        Expr::Variable {
+            name: Source { source: name, .. },
+        } => writeln!(f, "Variable@{:?} {:?}", expr_span.as_range(), name),
+        Expr::Constant(c) => writeln!(f, "Constant@{:?} {}", expr_span.as_range(), c),
+        Expr::Unary {
+            operator,
+            expr: (expr, expr_span),
+        } => {
+            writeln!(f, "UnaryExpression@{:?}", expr_span.as_range())?;
+            writeln!(f, "{}  operator: {:?}", spacing, operator)?;
+            writeln!(f, "{}  expr:", spacing)?;
+            format_expr(expr, *expr_span, f, depth + 2)
+        }
+        Expr::Binary { operator, lhs, rhs } => {
+            writeln!(f, "BinaryExpression@{:?}", expr_span.as_range())?;
+            writeln!(f, "{}  operator: {:?}", spacing, operator)?;
+            write!(f, "{}  lhs:\n{}", spacing.clone(), spacing.clone() + "    ")?;
+            format_expr(&lhs.0, lhs.1, f, depth + 2)?;
+            write!(f, "{}  rhs:\n{}", spacing.clone(), spacing.clone() + "    ")?;
+            format_expr(&rhs.0, rhs.1, f, depth + 2)
+        }
+    }
 }
 
 #[derive(Debug)]

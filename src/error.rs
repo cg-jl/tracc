@@ -19,6 +19,9 @@ impl Span {
     pub const fn new(offset: usize) -> Self {
         Self { offset, len: 1 }
     }
+    pub const fn as_range(&self) -> std::ops::Range<usize> {
+        self.offset..self.offset + self.len
+    }
     pub fn snippet_from_source(&self, source: &SourceMetadata) -> Option<Snippet> {
         let mut offset = 0;
         for (i, line) in source.input().split_terminator('\n').enumerate() {
