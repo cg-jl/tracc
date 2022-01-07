@@ -8,37 +8,15 @@ If you have an x86\_64 host (like I do), use `qemu-static`, compiling the code w
 
 ## Currently supported stuff
 
-The compiler currently expects an only function, with no parameters. Statements supported are variable
-declarations, some [expressions](#expressions-supported) and return statements.
-
-### Expressions supported
-- **Binary**:
-  - **Arithmetic/Logic/Bitwise**:
-  - `+`: Add
-  - `-`: Subtract
-  - `*`: Multiply
-  - `/`: Divide
-  - `%`: Modulo (unsigned division remainder)
-  - `&&`: Logic and gate (logic means that it is reduced to 1/0)
-  - `||`: Logic or gate
-  - `>>`: shift right
-  - `<<`: shift left
-  - `|` : bitwise or
-  - `&` : bitwise and
-  - `^` : bitwise exclusive or
-  - Relational: `<=`, `<`, `>`, `>=`
-  - Equality: `==`, `!=`
-
-- **Unary**:
-  - `!`: Logic not
-  - `~`: Bitwise not
-  - `-`: Negate (`* -1`)
-
-All combined assignment-operator operations are implemented, including all arithmetic, logic, and bitwise operators.
-
-
-
-
+The compiler currently expects an only function, with no parameters, with a list of the following:
+  - Variable declarations (only `int`s for the moment)
+  - Assignments (with their optional binary operators)
+  - if statements (with else-if chaining)
+  - blocks inside blocks for scoped variables
+  - The not supported operators are:
+    - Pre and post increment
+    - Comma operator
+    - Array accessing operator (compiler does not support pointers/arrays)
 
 Input file:
 
@@ -46,7 +24,11 @@ Input file:
 int foo() {
   int a = 1;
   int b = 2;
-  return a + b;
+  if (a > b) {
+    return a -b;
+  } else {
+    return a + b;
+  }
 }
 ```
 
@@ -57,14 +39,26 @@ Output assembly:
 	.global foo
 	.type foo, %function
 foo:
-	sub sp, sp, #16
+	sub sp, sp, #32
 	mov w0, #1
-	str w0, [sp, #12]
+	str w0, [sp, #16]
 	mov w0, #2
-	str w0, [sp, #8]
-	ldr w1, [sp, #12]
-	ldr w0, [sp, #8]
-	add w0, w1, w0
-	add sp, sp, #16
+	str w0, [sp, #20]
+	ldr w0, [sp, #16]
+	ldr w1, [sp, #20]
+	cmp w0, w1
+	cset w0, gt
+	cmp w0, wzr
+	beq .L0
+	ldr w0, [sp, #16]
+	ldr w1, [sp, #20]
+	sub w0, w0, w1
+	b   .L1
+.L0:
+	ldr w0, [sp, #16]
+	ldr w1, [sp, #20]
+	add w0, w0, w1
+.L1:
+	add sp, sp, #32
 	ret
 ```
