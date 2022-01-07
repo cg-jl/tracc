@@ -587,7 +587,7 @@ fn reduce_binary_expr(operator: BinaryOp, lhs: Expr, rhs: Expr) -> Expr {
     }
 }
 
-fn reduce_expr(expr: Expr) -> Expr {
+pub fn reduce_expr(expr: Expr) -> Expr {
     match expr {
         Expr::AlreadyInTarget => expr,
         Expr::Variable { .. } => expr, // cannot reduce a variable lookup
