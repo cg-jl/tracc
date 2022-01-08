@@ -41,22 +41,20 @@ Output assembly:
 foo:
 	sub sp, sp, #32
 	mov w0, #1
-	str w0, [sp, #16]
-	mov w0, #2
 	str w0, [sp, #20]
-	ldr w0, [sp, #16]
-	ldr w1, [sp, #20]
+	mov w0, #2
+	str w0, [sp, #16]
+	ldr w0, [sp, #20]
+	ldr w1, [sp, #16]
 	cmp w0, w1
-	cset w0, gt
-	cmp w0, wzr
-	beq .L0
-	ldr w0, [sp, #16]
-	ldr w1, [sp, #20]
+	ble .L0
+	ldr w0, [sp, #20]
+	ldr w1, [sp, #16]
 	sub w0, w0, w1
 	b   .L1
 .L0:
-	ldr w0, [sp, #16]
-	ldr w1, [sp, #20]
+	ldr w0, [sp, #20]
+	ldr w1, [sp, #16]
 	add w0, w0, w1
 .L1:
 	add sp, sp, #32

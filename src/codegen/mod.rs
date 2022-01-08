@@ -1,5 +1,6 @@
 pub mod assembly;
 mod block;
+mod constant_folding;
 mod expr;
 mod function;
 pub mod hlir;

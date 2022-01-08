@@ -44,7 +44,28 @@ pub enum Expr {
         operator: BinaryOp,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
+        // annotation to express whether there is a branch which depends on the expression
+        branch_depends_on_result: bool,
     },
     /// Dummy that signals that the expression to compile was served in the target
     AlreadyInTarget, // NOTE: make a better choice for this in order to ensure safety.
+}
+
+impl Expr {
+    // gives a relational operator if it is available. Used to avoid code repetition in branches
+    pub const fn relational_op(&self) -> Option<crate::ast::Relational> {
+        match self {
+            Self::Binary { operator, .. } => operator.as_relational(),
+            _ => None,
+        }
+    }
+    pub fn set_branch_depends_on_result(&mut self) {
+        if let Self::Binary {
+            branch_depends_on_result,
+            ..
+        } = self
+        {
+            *branch_depends_on_result = true
+        }
+    }
 }

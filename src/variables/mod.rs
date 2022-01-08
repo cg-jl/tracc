@@ -246,6 +246,7 @@ fn stmt_assign_indices<'code>(
                             operator: BinaryOp::Assignment { op: None },
                             lhs: Box::new(codegen::hlir::Expr::Variable { index }),
                             rhs: Box::new(init),
+                            branch_depends_on_result: false,
                         }
                     } else {
                         init
@@ -332,6 +333,7 @@ fn expr_assign_indices<'code>(
                 operator,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
+                branch_depends_on_result: false,
             })
         }
     }

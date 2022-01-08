@@ -10,9 +10,9 @@ use crate::{
     },
 };
 
-use super::{compile_expr, reduce_expr};
+use super::compile_expr;
 
-pub fn compile_logic_op<'source>(
+pub fn compile_logic_op(
     logicop: LogicOp,
     target: RegisterDescriptor,
     lhs: Expr,
@@ -33,7 +33,7 @@ pub fn compile_logic_op<'source>(
     // simplicity, I've omitted this optimization and I'm ignoring the
     // `is_ignored` flag and compiling as if that flag was `false`.
     match logicop {
-        LogicOp::And => match reduce_expr(lhs) {
+        LogicOp::And => match lhs {
             // if there is a zero on the left side, we won't even bother checking the right
             // side, we know it's never going to happen.
             Expr::Constant(0) => {
@@ -55,7 +55,7 @@ pub fn compile_logic_op<'source>(
             // compile the right side.
             Expr::Constant(_) => compile_expr(rhs, target, registers, stack, var_ctx, is_ignored),
             // otherwise, let's take a look at the right side
-            lhs => match reduce_expr(rhs) {
+            lhs => match rhs {
                 // if there's a zero on the RIGHT side, we want to compile the left side
                 // knowing that the result of it will be ignored, since we will put a zero on
                 // the result no matter what the lhs results in.
@@ -102,7 +102,7 @@ pub fn compile_logic_op<'source>(
             },
         },
 
-        LogicOp::Or => match reduce_expr(lhs) {
+        LogicOp::Or => match lhs {
             // if lhs is a zero: 0 || B = B, then just compile rhs
             Expr::Constant(0) => compile_expr(rhs, target, registers, stack, var_ctx, is_ignored),
             // if lhs is non-zero, then we can forget about B as it is not going to be evaluated,
@@ -123,7 +123,7 @@ pub fn compile_logic_op<'source>(
                 }
             }
             // otherwise, take a look at the right hand side
-            lhs => match reduce_expr(rhs) {
+            lhs => match rhs {
                 // if rhs is zero, that means L || 0 == L and we just need the value of L
                 Expr::Constant(0) => {
                     compile_expr(lhs, target, registers, stack, var_ctx, is_ignored)

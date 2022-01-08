@@ -427,6 +427,17 @@ impl Equality {
 }
 
 impl Relational {
+    // gives the operator that will fail every time that the current operator succeeds
+    pub const fn antidote(self) -> Self {
+        match self {
+            Self::Equals => Self::NotEquals,
+            Self::NotEquals => Self::Equals,
+            Self::Less => Self::GreaterEqual,
+            Self::LessEqual => Self::Greater,
+            Self::Greater => Self::LessEqual,
+            Self::GreaterEqual => Self::Less,
+        }
+    }
     pub const fn to_condition(self) -> crate::codegen::assembly::Condition {
         use crate::codegen::assembly::Condition;
         match self {
@@ -474,6 +485,48 @@ impl ArithmeticOp {
     }
 }
 
+impl const OpFlags for BinaryOp {
+    fn is_commutative(&self) -> bool {
+        match self {
+            BinaryOp::Arithmetic(a) => a.is_commutative(),
+            BinaryOp::Logic(_) => false,
+            BinaryOp::Bit(b) => b.is_commutative(),
+            BinaryOp::Relational(_) => false,
+            BinaryOp::Assignment { op } => {
+                if let Some(op) = op {
+                    match op {
+                        AssignmentEnabledOp::Arithmetic(a) => a.is_commutative(),
+                        AssignmentEnabledOp::Logic(_) => false,
+                        AssignmentEnabledOp::Bit(b) => b.is_commutative(),
+                    }
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    fn is_associative(&self) -> bool {
+        match self {
+            BinaryOp::Arithmetic(a) => a.is_associative(),
+            BinaryOp::Logic(_) => false,
+            BinaryOp::Bit(b) => b.is_associative(),
+            BinaryOp::Relational(_) => false,
+            BinaryOp::Assignment { op } => {
+                if let Some(op) = op {
+                    match op {
+                        AssignmentEnabledOp::Arithmetic(a) => a.is_associative(),
+                        AssignmentEnabledOp::Logic(_) => false,
+                        AssignmentEnabledOp::Bit(b) => b.is_associative(),
+                    }
+                } else {
+                    false
+                }
+            }
+        }
+    }
+}
+
 impl const OpFlags for BitOp {
     fn is_commutative(&self) -> bool {
         matches!(self, Self::Or | Self::And | Self::Xor)
@@ -504,6 +557,13 @@ impl LogicOp {
 }
 
 impl BinaryOp {
+    pub const fn as_relational(self) -> Option<Relational> {
+        if let Self::Relational(relation) = self {
+            Some(relation)
+        } else {
+            None
+        }
+    }
     pub const fn associativity(self) -> Associativity {
         match self {
             Self::Arithmetic(_) | Self::Logic(_) | Self::Bit(_) | Self::Relational(_) => {

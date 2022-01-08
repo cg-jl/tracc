@@ -1,6 +1,6 @@
 use super::{
     assembly::{BitSize, Branch, Condition, Data, Instruction},
-    expr::{compile_expr, reduce_expr},
+    expr::compile_expr,
     hlir::{Expr, Statement},
     labels::LabelGenerator,
     registers::{RegisterDescriptor, RegisterManager},
@@ -16,7 +16,8 @@ pub fn compile_block(
     var_ctx: &[Memory],
 ) -> AssemblyOutput {
     let mut out = AssemblyOutput::new();
-    for statement in block {
+    // I'll stick this here for the moment
+    for statement in super::constant_folding::reorder_and_fold_block(block) {
         out.extend(match statement {
             Statement::Return(expr) => {
                 compile_expr(expr, bail_return_target, registers, stack, var_ctx, false)
@@ -29,7 +30,7 @@ pub fn compile_block(
                 true_branch,
                 false_branch,
             } => {
-                match reduce_expr(condition) {
+                match condition {
                     // I can predict the branch and say that it's only going to execute the false
                     // branch
                     Expr::Constant(0) => false_branch
@@ -47,8 +48,10 @@ pub fn compile_block(
                     Expr::Constant(_) => {
                         compile_block(stack, registers, true_branch, bail_return_target, var_ctx)
                     }
-                    condition => {
+                    mut condition => {
                         let else_label = LabelGenerator::global().new_label();
+                        condition.set_branch_depends_on_result();
+                        let opt_relational_op = condition.relational_op();
                         // compute the expression into the register
                         let unchanged_part = compile_expr(
                             condition,
@@ -58,14 +61,24 @@ pub fn compile_block(
                             var_ctx,
                             false,
                         )
-                        // if it results in a zero, jump to the else label
-                        .chain_single(Instruction::Cmp {
-                            register: bail_return_target.as_immutable(BitSize::Bit32),
-                            data: Data::immediate(0, BitSize::Bit32),
-                        })
-                        .chain_single(Branch::Conditional {
-                            condition: Condition::Equals,
-                            label: else_label,
+                        // if the comparison fails, jump to the else label
+                        .chain(if let Some(constraint) = opt_relational_op {
+                            // if the condition we just computed is a relational operation, then we
+                            // can do the conditional jump directly
+                            AssemblyOutput::singleton(Branch::Conditional {
+                                condition: constraint.antidote().to_condition(),
+                                label: else_label,
+                            })
+                        } else {
+                            // otherwise we want to emit a compare instruction first
+                            AssemblyOutput::singleton(Instruction::Cmp {
+                                register: bail_return_target.as_immutable(BitSize::Bit32),
+                                data: Data::Immediate(0),
+                            })
+                            .chain_single(Branch::Conditional {
+                                condition: Condition::Equals,
+                                label: else_label,
+                            })
                         })
                         .chain(compile_block(
                             stack,

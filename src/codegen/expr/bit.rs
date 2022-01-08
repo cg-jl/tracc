@@ -22,7 +22,6 @@ pub fn compile_bit_op(
     is_ignored: bool,
 ) -> AssemblyOutput {
     // kind of same stuff as arithmetic operations
-    let (lhs, rhs) = super::reorder_binary_expr(bitop, lhs, rhs);
     compile_expr(lhs, target, registers, stack, var_ctx, is_ignored).chain(if !is_ignored {
         let (compute_rhs, rhs_data) = if let Expr::Constant(b) = rhs {
             (AssemblyOutput::new(), Data::Immediate(b as u64))
