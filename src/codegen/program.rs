@@ -8,7 +8,7 @@ impl Compile for Program<'_> {
     fn compile(self) -> AssemblyOutput {
         let Program(function) = self;
         let mut out = function.compile();
-        out.cons_directive(Directive::Architecture(String::from("armv8-a")));
+        out.cons(Directive::Architecture(String::from("armv8-a")));
         out
     }
 }

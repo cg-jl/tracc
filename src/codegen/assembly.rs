@@ -57,6 +57,12 @@ pub enum Directive {
     Architecture(String),
 }
 
+impl const From<Directive> for Assembly {
+    fn from(d: Directive) -> Self {
+        Self::Directive(d)
+    }
+}
+
 impl fmt::Display for Directive {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

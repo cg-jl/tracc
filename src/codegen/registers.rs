@@ -22,11 +22,11 @@ where
 {
     stack.with_alloc_bytes(8, move |stack, address| {
         let mut output = cont(stack);
-        output.cons_instruction(Instruction::Str {
+        output.cons(Instruction::Str {
             register: register.into(),
             address,
         });
-        output.push_instruction(Instruction::Ldr { register, address });
+        output.push(Instruction::Ldr { register, address });
         output
     })
 }
@@ -45,11 +45,11 @@ where
         let mut output = cont(stack);
         let addresses = addr.partition(8).take(reg_amt);
         for (register, address) in registers.iter().copied().zip(addresses) {
-            output.cons_instruction(Instruction::Str {
+            output.cons(Instruction::Str {
                 register: register.into(),
                 address,
             });
-            output.push_instruction(Instruction::Ldr { register, address });
+            output.push(Instruction::Ldr { register, address });
         }
         output
     })
@@ -237,11 +237,11 @@ impl RegisterManager {
                 .map(|register| RegisterDescriptor { register }.as_mutable(BitSize::Bit64));
             let addresses = start.partition(8).take(total_registers);
             for (register, address) in registers.zip(addresses) {
-                output.cons_instruction(Instruction::Str {
+                output.cons(Instruction::Str {
                     register: register.into(),
                     address,
                 });
-                output.push_instruction(Instruction::Ldr { register, address });
+                output.cons(Instruction::Ldr { register, address });
             }
             output
         })

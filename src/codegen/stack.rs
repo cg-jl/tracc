@@ -86,12 +86,12 @@ impl StackManager {
         // SAFETY: this uses directly the registers without asking for permission, but the stack
         // pointer is RESERVED for use in the stack
         if final_allocated_size != 0 {
-            instructions.cons_instruction(Instruction::Sub {
+            instructions.cons(Instruction::Sub {
                 target: MutableRegister(Register::StackPointer),
                 lhs: ImmutableRegister(Register::StackPointer),
                 rhs: Data::Immediate(final_allocated_size as u64),
             });
-            instructions.push_instruction(Instruction::Add {
+            instructions.push(Instruction::Add {
                 target: MutableRegister(Register::StackPointer),
                 lhs: ImmutableRegister(Register::StackPointer),
                 rhs: Data::Immediate(final_allocated_size as u64),

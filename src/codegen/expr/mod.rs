@@ -249,11 +249,11 @@ fn into_bool(register: MutableRegister, output: &mut AssemblyOutput, expect_zero
     } else {
         Condition::NotEquals
     };
-    output.push_instruction(Instruction::Cmp {
+    output.push(Instruction::Cmp {
         register: register.into(),
         data: Data::immediate(0, register.get_bit_size()),
     });
-    output.push_instruction(Instruction::Cset {
+    output.push(Instruction::Cset {
         target: register,
         condition,
     });
@@ -262,12 +262,12 @@ fn into_bool(register: MutableRegister, output: &mut AssemblyOutput, expect_zero
 fn compile_unary(op: UnaryOp, target: MutableRegister) -> AssemblyOutput {
     let mut output = AssemblyOutput::new();
     match op {
-        UnaryOp::BitNot => output.push_instruction(Instruction::MvN {
+        UnaryOp::BitNot => output.push(Instruction::MvN {
             target,
             source: Data::Register(target.into()),
         }),
         UnaryOp::LogicNot => into_bool(target, &mut output, true),
-        UnaryOp::Negate => output.push_instruction(Instruction::Neg {
+        UnaryOp::Negate => output.push(Instruction::Neg {
             target,
             source: target.into(),
         }),

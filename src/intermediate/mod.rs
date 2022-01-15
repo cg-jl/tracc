@@ -1,5 +1,6 @@
 use crate::{format_instr, format_instr_args, write_instruction};
 use std::fmt;
+mod generate;
 // IR: everything is divided into basic blocks
 
 pub type IR = Vec<BasicBlock>;
@@ -34,6 +35,10 @@ pub enum Statement {
 
 // phi, cmp, add, sub, neg.... all operations
 pub enum Value {
+    // allocate memory
+    Allocate {
+        size: usize,
+    },
     Phi {
         nodes: Vec<PhiDescriptor>,
     },
@@ -236,6 +241,7 @@ impl fmt::Display for Value {
             Value::Or { lhs, rhs } => write_instruction!(f, "or", lhs, rhs),
             Value::Xor { lhs, rhs } => write_instruction!(f, "xor", lhs, rhs),
             Value::Multiply { lhs, rhs } => write_instruction!(f, "mul", lhs, rhs),
+            Value::Allocate { size } => write_instruction!(f, "alloca", size),
         }
     }
 }
