@@ -358,7 +358,6 @@ impl const PartialEq<BinaryOp> for BitOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssignmentEnabledOp {
     Arithmetic(ArithmeticOp),
-    Logic(LogicOp),
     Bit(BitOp),
 }
 
@@ -367,7 +366,6 @@ impl const From<AssignmentEnabledOp> for BinaryOp {
         match op {
             AssignmentEnabledOp::Arithmetic(a) => Self::Arithmetic(a),
             AssignmentEnabledOp::Bit(b) => Self::Bit(b),
-            AssignmentEnabledOp::Logic(l) => Self::Logic(l),
         }
     }
 }
@@ -399,13 +397,6 @@ impl const From<ArithmeticOp> for AssignmentEnabledOp {
     #[inline]
     fn from(a: ArithmeticOp) -> Self {
         Self::Arithmetic(a)
-    }
-}
-
-impl const From<LogicOp> for AssignmentEnabledOp {
-    #[inline]
-    fn from(l: LogicOp) -> Self {
-        Self::Logic(l)
     }
 }
 
@@ -496,7 +487,6 @@ impl const OpFlags for BinaryOp {
                 if let Some(op) = op {
                     match op {
                         AssignmentEnabledOp::Arithmetic(a) => a.is_commutative(),
-                        AssignmentEnabledOp::Logic(_) => false,
                         AssignmentEnabledOp::Bit(b) => b.is_commutative(),
                     }
                 } else {
@@ -516,7 +506,6 @@ impl const OpFlags for BinaryOp {
                 if let Some(op) = op {
                     match op {
                         AssignmentEnabledOp::Arithmetic(a) => a.is_associative(),
-                        AssignmentEnabledOp::Logic(_) => false,
                         AssignmentEnabledOp::Bit(b) => b.is_associative(),
                     }
                 } else {
@@ -637,23 +626,11 @@ impl BinaryOp {
             }
             Operator::DoubleAnd => {
                 let op = LogicOp::And;
-                if has_equal {
-                    Self::Assignment {
-                        op: Some(op.into()),
-                    }
-                } else {
                     Self::Logic(op)
-                }
             }
             Operator::DoublePipe => {
                 let op = LogicOp::Or;
-                if has_equal {
-                    Self::Assignment {
-                        op: Some(op.into()),
-                    }
-                } else {
                     Self::Logic(op)
-                }
             }
             Operator::DoubleAngleRight => {
                 let op = BitOp::RightShift;

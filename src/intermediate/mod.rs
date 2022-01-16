@@ -1,3 +1,4 @@
+use crate::codegen::assembly::Condition;
 use crate::{format_instr, format_instr_args, write_instruction};
 use std::fmt;
 mod generate;
@@ -5,18 +6,22 @@ mod generate;
 
 pub type IR = Vec<BasicBlock>;
 
+#[derive(Default)]
 pub struct BasicBlock {
     pub statements: Vec<Statement>,
-    pub end: BlockEnd,
+    pub end: Option<BlockEnd>,
 }
 
+#[derive(Clone, Copy)]
 pub struct BlockBinding(pub usize);
 
+#[derive(Clone, Copy)]
 pub enum BlockEnd {
     Branch(Branch),
     Return { index: Binding },
 }
 
+#[derive(Clone, Copy)]
 pub enum Branch {
     Unconditional {
         target: BlockBinding,
@@ -30,7 +35,15 @@ pub enum Branch {
 
 // assign, store, load, alloc, free
 pub enum Statement {
-    Assign { index: Binding, value: Value },
+    Assign {
+        index: Binding,
+        value: Value,
+    },
+    Store {
+        mem_binding: Binding,
+        binding: Binding,
+        byte_size: ByteSize,
+    },
 }
 
 // phi, cmp, add, sub, neg.... all operations
@@ -45,18 +58,12 @@ pub enum Value {
     Cmp {
         condition: Condition,
         lhs: Binding,
-        rhs: Binding,
+        rhs: CouldBeConstant,
     },
     // load from memory 1-4-8 bytes
     Load {
         mem_binding: Binding,
-        binding: Binding,
-        byte_size: Binding,
-    },
-    Store {
-        mem_binding: Binding,
-        binding: Binding,
-        byte_size: Binding,
+        byte_size: ByteSize,
     },
     // -x
     Negate {
@@ -108,53 +115,32 @@ pub enum Value {
         lhs: Binding,
         rhs: CouldBeConstant,
     },
+    // Constant value
+    Constant(u64),
+    // Other binding. Used by frontend, then cleaned up by next stage
+    Binding(Binding),
 }
 
+#[derive(Clone, Copy)]
 pub struct Binding(pub usize);
 
+#[derive(Clone, Copy)]
 pub enum CouldBeConstant {
     Binding(Binding),
     Constant(u64),
 }
 
+#[derive(Clone, Copy)]
 pub enum ByteSize {
     U8,
     U32,
     U64,
 }
 
+#[derive(Clone, Copy)]
 pub struct PhiDescriptor {
     pub variable: Binding,
     pub block_from: BlockBinding,
-}
-
-#[derive(Clone, Copy)]
-pub enum Condition {
-    Equals,
-    NotEquals,
-    GreaterThan,
-    LessThan,
-    GreaterEquals,
-    LessEquals,
-}
-
-impl Condition {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Condition::Equals => "eq",
-            Condition::NotEquals => "ne",
-            Condition::GreaterThan => "gt",
-            Condition::LessThan => "lt",
-            Condition::GreaterEquals => "ge",
-            Condition::LessEquals => "le",
-        }
-    }
-}
-
-impl fmt::Display for Condition {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
 }
 
 impl fmt::Display for Binding {
@@ -213,19 +199,8 @@ impl fmt::Display for Value {
             } => write_instruction!(f, "cmp", condition, lhs, rhs),
             Value::Load {
                 mem_binding,
-                binding,
                 byte_size,
-            } => write_instruction!(f, "load", mem_binding, format!("{} {}", byte_size, binding)),
-            Value::Store {
-                mem_binding,
-                binding,
-                byte_size,
-            } => write_instruction!(
-                f,
-                "store",
-                format!("{} {}", byte_size, binding),
-                mem_binding
-            ),
+            } => write_instruction!(f, "load", mem_binding, byte_size),
             Value::Negate { binding } => write_instruction!(f, "neg", binding),
             Value::FlipBits { binding } => write_instruction!(f, "flip_bits", binding),
             Value::Add { lhs, rhs } => write_instruction!(f, "add", lhs, rhs),
@@ -242,6 +217,26 @@ impl fmt::Display for Value {
             Value::Xor { lhs, rhs } => write_instruction!(f, "xor", lhs, rhs),
             Value::Multiply { lhs, rhs } => write_instruction!(f, "mul", lhs, rhs),
             Value::Allocate { size } => write_instruction!(f, "alloca", size),
+            Value::Constant(constant) => constant.fmt(f),
+            Value::Binding(binding) => binding.fmt(f),
+        }
+    }
+}
+
+impl fmt::Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Statement::Assign { index, value } => write!(f, "{} = {}", index, value),
+            Statement::Store {
+                mem_binding,
+                binding,
+                byte_size,
+            } => write_instruction!(
+                f,
+                "store",
+                mem_binding,
+                format!("{} {}", byte_size, binding)
+            ),
         }
     }
 }
