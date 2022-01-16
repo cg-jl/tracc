@@ -310,7 +310,7 @@ fn compile_arithmetic(
         ),
         ast::ArithmeticOp::Subtract => builder.assign(
             target,
-            Value::Add {
+            Value::Subtract {
                 lhs,
                 rhs: rhs.into(),
             },
