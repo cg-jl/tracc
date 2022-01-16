@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::mem::MaybeUninit;
 
 use super::{
-    BasicBlock, Binding, BlockBinding, ByteSize, Condition, CouldBeConstant, Statement, Value,
+    BasicBlock, Binding, BlockBinding, ByteSize, Condition, CouldBeConstant, Statement, Value, IR,
 };
 use crate::error::SourceMetadata;
 use crate::grammar::lexer::Source;
@@ -14,6 +14,30 @@ mod block;
 mod expr;
 mod statement;
 use thiserror::Error;
+
+pub fn compile_program<'code>(
+    p: ast::Program<'code>,
+    source_meta: &SourceMetadata<'code>,
+) -> Result<(&'code str, IR), VarE> {
+    let ast::Program(ast::Function {
+        name: ast::Identifier(name),
+        body: ast::Block { statements },
+    }) = p;
+    let mut state = IRGenState::default();
+    let mut binding_counter = BindingCounter::default();
+    let mut env = VariableTracker::default();
+    let entry = state.new_block();
+    block::compile_block(
+        &mut state,
+        entry,
+        statements,
+        &mut binding_counter,
+        &mut env,
+        0,
+        source_meta,
+    )?;
+    Ok((name, state.release().collect()))
+}
 
 // TODO: make block builder struct
 // TODO: make generators accept the current (unfinished) block as BlockBinding and return a
@@ -85,7 +109,7 @@ impl BlockBuilder {
 #[derive(Default)]
 pub struct IRGenState {
     blocks: Vec<MaybeUninit<BasicBlock>>,
-    pushed_blocks: usize,
+    given_builders: usize,
 }
 
 #[repr(transparent)]
@@ -108,13 +132,26 @@ impl IRGenState {
         // note: joining blocks so that they have always an end mark is done after everything has
         // been generated
         self.blocks[block_id].write(block);
+        self.given_builders -= 1;
         BlockBinding(block_id)
     }
     // get a new block and a reference to it
     fn new_block(&mut self) -> BlockBuilder {
         let index = self.blocks.len();
         self.blocks.push(MaybeUninit::uninit());
+        self.given_builders += 1;
         BlockBuilder::new(index)
+    }
+
+    fn release(self) -> impl Iterator<Item = BasicBlock> {
+        debug_assert_eq!(
+            self.given_builders, 0,
+            "Thrown builders away without initialising their respective block"
+        );
+        self.blocks
+            .into_iter()
+            // UNSAFE: at this point I know all the blocks have been inserted correctly
+            .map(|bb| unsafe { bb.assume_init() })
     }
 }
 
