@@ -213,7 +213,7 @@ pub fn compile_expr<'code>(
                     flag,
                     Value::Cmp {
                         condition: bail_condition,
-                        lhs: flag,
+                        lhs,
                         rhs: 0.into(),
                     },
                 );
