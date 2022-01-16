@@ -300,7 +300,7 @@ macro_rules! format_instr_args {
     () => { "" };
     ($arg:expr) => { "{}" };
     ($first:expr, $($rest:expr),+) => {
-        concat!("{}, ", format_instr_args!($($rest),+))
+        concat!("{}, ", $crate::format_instr_args!($($rest),+))
     }
 }
 
@@ -308,16 +308,16 @@ macro_rules! format_instr_args {
 macro_rules! format_instr {
     ($name:expr) => { format_args!("{}", $name) };
     ($name:expr, $($args:expr),+) => {
-        format_args!(concat!("{:3} ", format_instr_args!($($args),+)), $name, $($args),+)
+        format_args!(concat!("{:3} ", $crate::format_instr_args!($($args),+)), $name, $($args),+)
     };
 }
 
 #[macro_export]
 macro_rules! write_instruction {
     ($formatter:expr, $name:expr) => {
-        $formatter.write_fmt(format_instr!($name))
+        $formatter.write_fmt($crate::format_instr!($name))
     };
-    ($formatter:expr, $name:expr, $($args:expr),+) => { $formatter.write_fmt(format_instr!($name, $($args),+)) }
+    ($formatter:expr, $name:expr, $($args:expr),+) => { $formatter.write_fmt($crate::format_instr!($name, $($args),+)) }
 }
 
 impl Instruction {
