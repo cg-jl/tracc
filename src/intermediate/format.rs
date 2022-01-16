@@ -74,7 +74,7 @@ impl fmt::Display for Value {
                 lhs,
                 rhs,
                 is_signed,
-            } => write_instruction!(f, if *is_signed { 'u' } else { 's' }, lhs, rhs),
+            } => write_instruction!(f, if *is_signed { "idiv" } else { "udiv" }, lhs, rhs),
             Value::Lsl { lhs, rhs } => write_instruction!(f, "lsl", lhs, rhs),
             Value::Lsr { lhs, rhs } => write_instruction!(f, "lsr", lhs, rhs),
             Value::And { lhs, rhs } => write_instruction!(f, "and", lhs, rhs),
