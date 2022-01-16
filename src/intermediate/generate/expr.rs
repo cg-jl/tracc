@@ -259,6 +259,7 @@ pub fn compile_expr<'code>(
                 } else {
                     builder.assign(target, rhs)
                 }
+                builder.store(target, lhs_mem, lhs_size);
                 Ok(builder)
             }
         },

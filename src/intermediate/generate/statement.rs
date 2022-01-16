@@ -107,8 +107,8 @@ pub fn compile_statement<'code>(
             builder.assign(
                 flag,
                 Value::Cmp {
-                    condition: Condition::Equals,
-                    lhs: flag,
+                    condition: Condition::NotEquals,
+                    lhs: condition,
                     rhs: 0.into(),
                 },
             );
@@ -137,7 +137,7 @@ pub fn compile_statement<'code>(
             let false_block = if let Some((false_stmt, false_span)) = false_branch {
                 let block = state.new_block();
                 let start = block.block();
-                let end_false_block = compile_statement(
+                compile_statement(
                     state,
                     block,
                     bindings,

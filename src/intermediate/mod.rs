@@ -3,7 +3,7 @@ use crate::{format_instr, format_instr_args, write_instruction};
 use std::fmt;
 mod convert;
 mod format;
-mod generate;
+pub mod generate;
 // IR: everything is divided into basic blocks
 
 pub type IR = Vec<BasicBlock>;

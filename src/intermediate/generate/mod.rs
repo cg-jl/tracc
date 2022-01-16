@@ -27,7 +27,7 @@ pub fn compile_program<'code>(
     let mut binding_counter = BindingCounter::default();
     let mut env = VariableTracker::default();
     let entry = state.new_block();
-    block::compile_block(
+    let mut end = block::compile_block(
         &mut state,
         entry,
         statements,
@@ -36,6 +36,9 @@ pub fn compile_program<'code>(
         0,
         source_meta,
     )?;
+    let ret = binding_counter.next_binding();
+    end.assign(ret, 0);
+    end.finish_block(&mut state, ret);
     Ok((name, state.release().collect()))
 }
 
@@ -176,7 +179,7 @@ impl<'code> VariableTracker<'code> {
     pub fn variables_at_depth(&mut self, depth: usize) -> &mut VariableMemories<'code> {
         // depth is not going to be an arbitrary amount longer, this just has
         // to cover the case when we increment the depth of the blocks
-        if depth > self.memories.len() {
+        if depth == self.memories.len() {
             self.memories.push(VariableMemories::default())
         }
         &mut self.memories[depth]
