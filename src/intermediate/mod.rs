@@ -1,6 +1,4 @@
 use crate::codegen::assembly::Condition;
-use crate::{format_instr, format_instr_args, write_instruction};
-use std::fmt;
 mod convert;
 mod format;
 pub mod generate;

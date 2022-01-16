@@ -1,4 +1,3 @@
-use std::fmt;
 use std::{collections::vec_deque::VecDeque, iter::FromIterator};
 
 #[repr(transparent)]

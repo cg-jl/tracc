@@ -2,7 +2,7 @@
 use std::error::Error;
 use structopt::StructOpt;
 use tracc::ast::Program;
-use tracc::codegen::Compile;
+
 use tracc::error::SourceMetadata;
 use tracc::grammar::Parser;
 
@@ -18,11 +18,11 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     use std::fs;
-    use std::io::Write;
+
     let opt = Opt::from_args();
     let filename = opt.file;
     let file = fs::read_to_string(&filename)?;
-    let out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
+    let _out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
     let (name, ir) = tracc::intermediate::generate::compile_program(program, &meta)?;

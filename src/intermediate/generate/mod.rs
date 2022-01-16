@@ -1,14 +1,10 @@
 use std::collections::HashMap;
 use std::mem::MaybeUninit;
 
-use super::{
-    BasicBlock, Binding, BlockBinding, ByteSize, Condition, CouldBeConstant, Statement, Value, IR,
-};
+use super::{BasicBlock, Binding, BlockBinding, ByteSize, Condition, Statement, Value, IR};
 use crate::error::SourceMetadata;
 use crate::grammar::lexer::Source;
 use crate::intermediate::{BlockEnd, Branch, PhiDescriptor};
-use crate::output::Output;
-use crate::output_impl_From;
 use crate::{ast, error};
 mod block;
 mod expr;

@@ -10,7 +10,6 @@ pub fn compile_statement<'code>(
     block_depth: usize,
     source_meta: &SourceMetadata,
 ) -> Result<BlockBuilder, VarE> {
-    let start = builder.block();
     match statement {
         ast::Statement::Return((expr, expr_span)) => {
             let ret_value = bindings.next_binding();

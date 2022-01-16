@@ -1,4 +1,4 @@
-use crate::{codegen::RegisterDescriptor, format_instr, format_instr_args, write_instruction};
+use crate::{codegen::RegisterDescriptor, write_instruction};
 // use bitflags::bitflags;
 use std::fmt;
 
