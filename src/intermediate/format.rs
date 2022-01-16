@@ -110,7 +110,7 @@ impl fmt::Display for BlockEnd {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             BlockEnd::Branch(br) => br.fmt(f),
-            BlockEnd::Return { index } => write_instruction!(f, "ret", index),
+            BlockEnd::Return(index) => write_instruction!(f, "ret", index),
         }
     }
 }

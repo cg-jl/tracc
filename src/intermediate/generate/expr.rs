@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    Binding, BindingCounter, BlockBuilder, Branch, ByteSize, Condition, IRGenState, PhiDescriptor,
+    Source, SourceMetadata, Value, VarE, VarError, VariableTracker,
+};
 use crate::ast;
 
 pub fn compile_expr<'code>(
@@ -159,19 +162,23 @@ pub fn compile_expr<'code>(
                     source_info,
                 )
                 .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
-                let rhs_builder = {
+                let (rhs_builder, compute_rhs) = {
                     let block = state.new_block();
-                    compile_expr(
-                        state,
-                        block,
-                        rhs,
-                        *rhs_expr,
-                        bindings,
-                        variables,
-                        source_info,
+                    let start = block.block(); // make sure that lhs jumps to the *start* of rhs's computation
+                    (
+                        compile_expr(
+                            state,
+                            block,
+                            rhs,
+                            *rhs_expr,
+                            bindings,
+                            variables,
+                            source_info,
+                        )
+                        .map_err(|e| e.with_backup_source(rhs_span, source_info))?,
+                        start,
                     )
-                    .map_err(|e| e.with_backup_source(rhs_span, source_info))
-                }?;
+                };
                 // create the new block that will start with a phi node to merge the two branches
                 let mut end_builder = state.new_block();
                 end_builder.assign(
@@ -190,7 +197,7 @@ pub fn compile_expr<'code>(
                     },
                 );
                 // finish rhs by telling it to jump directly to the end
-                let compute_rhs = rhs_builder.finish_block(
+                rhs_builder.finish_block(
                     state,
                     Branch::Unconditional {
                         target: end_builder.block(),

@@ -1,9 +1,9 @@
 use crate::codegen::assembly::Condition;
 use crate::{format_instr, format_instr_args, write_instruction};
 use std::fmt;
+mod convert;
 mod format;
 mod generate;
-mod convert;
 // IR: everything is divided into basic blocks
 
 pub type IR = Vec<BasicBlock>;
@@ -19,7 +19,7 @@ pub struct BlockBinding(pub usize);
 #[derive(Clone, Copy)]
 pub enum BlockEnd {
     Branch(Branch),
-    Return { index: Binding },
+    Return(Binding),
 }
 
 #[derive(Clone, Copy)]
@@ -143,5 +143,3 @@ pub struct PhiDescriptor {
     pub value: CouldBeConstant,
     pub block_from: BlockBinding,
 }
-
-

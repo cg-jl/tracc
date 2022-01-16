@@ -6,6 +6,12 @@ impl const From<Branch> for BlockEnd {
     }
 }
 
+impl const From<Binding> for BlockEnd {
+    fn from(ret_value: Binding) -> Self {
+        Self::Return(ret_value)
+    }
+}
+
 impl const From<Binding> for CouldBeConstant {
     fn from(binding: Binding) -> Self {
         Self::Binding(binding)

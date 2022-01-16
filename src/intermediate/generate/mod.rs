@@ -10,7 +10,9 @@ use crate::intermediate::{BlockEnd, Branch, PhiDescriptor};
 use crate::output::Output;
 use crate::output_impl_From;
 use crate::{ast, error};
+mod block;
 mod expr;
+mod statement;
 use thiserror::Error;
 
 // TODO: make block builder struct
@@ -34,6 +36,9 @@ impl BlockBuilder {
             index: binding,
             value: value.into(),
         })
+    }
+    pub fn allocate(&mut self, target: Binding, size: usize) {
+        self.assign(target, Value::Allocate { size })
     }
     pub fn load(&mut self, target: Binding, from_mem: Binding, size: ByteSize) {
         self.assign(
@@ -131,7 +136,7 @@ impl<'code> VariableTracker<'code> {
             .rev()
             .fold(None, |acc, next| acc.or_else(|| next.get(name)))
     }
-    pub fn memory_at_depth(&mut self, depth: usize) -> &mut VariableMemories<'code> {
+    pub fn variables_at_depth(&mut self, depth: usize) -> &mut VariableMemories<'code> {
         // depth is not going to be an arbitrary amount longer, this just has
         // to cover the case when we increment the depth of the blocks
         if depth > self.memories.len() {
