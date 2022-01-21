@@ -384,7 +384,7 @@ impl Data {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Condition {
     /// Previous comparison resulted in equal
     Equals,
@@ -584,6 +584,19 @@ impl Offset {
         match self {
             Self::Determined(det) => *det,
             _ => unreachable!(),
+        }
+    }
+}
+
+impl Condition {
+    pub fn opposite(self) -> Condition {
+        match self {
+            Condition::Equals => Condition::NotEquals,
+            Condition::NotEquals => Condition::Equals,
+            Condition::GreaterThan => Condition::LessEqual,
+            Condition::GreaterEqual => Condition::LessThan,
+            Condition::LessThan => Condition::GreaterEqual,
+            Condition::LessEqual => Condition::GreaterThan,
         }
     }
 }
