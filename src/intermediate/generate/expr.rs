@@ -6,13 +6,12 @@ use crate::ast;
 
 pub fn compile_expr<'code>(
     state: &mut IRGenState,
-    mut builder: BlockBuilder,
-    target: Binding,
+    builder: BlockBuilder,
     expr: ast::Expr<'code>,
     bindings: &mut BindingCounter,
     variables: &VariableTracker<'code>,
     source_info: &SourceMetadata<'code>,
-) -> Result<BlockBuilder, VarE> {
+) -> Result<(BlockBuilder, Value), VarE> {
     match expr {
         // TODO: use a different strategy if the type is a structure
         ast::Expr::Variable {
@@ -21,30 +20,26 @@ pub fn compile_expr<'code>(
             let (variable_mem, variable_size) = *variables
                 .get(name)
                 .ok_or_else(|| VarE::new(VarError::UnknownVariable(name.to_string())))?;
-            builder.load(target, variable_mem, variable_size);
-            Ok(builder) // give back the same block builder since we didn't have to finish the block
+            Ok((
+                builder,
+                Value::Load {
+                    mem_binding: variable_mem,
+                    byte_size: variable_size,
+                },
+            ))
         }
-        ast::Expr::Constant(constant) => {
-            builder.assign(target, constant as u64);
-            Ok(builder)
-        }
+        ast::Expr::Constant(constant) => Ok((builder, Value::Constant(constant as u64))),
         ast::Expr::Unary {
             operator,
             expr: (expr, expr_span),
         } => {
             let expr_target = bindings.next_binding();
-            let mut end = compile_expr(
-                state,
-                builder,
-                expr_target,
-                *expr,
-                bindings,
-                variables,
-                source_info,
-            )
-            .map_err(|e| e.with_backup_source(expr_span, source_info))?;
-            end.assign(
-                target,
+            let (mut end, expr_value) =
+                compile_expr(state, builder, *expr, bindings, variables, source_info)
+                    .map_err(|e| e.with_backup_source(expr_span, source_info))?;
+            end.assign(expr_target, expr_value);
+            Ok((
+                end,
                 match operator {
                     ast::UnaryOp::Negate => Value::Negate {
                         binding: expr_target,
@@ -58,9 +53,7 @@ pub fn compile_expr<'code>(
                         rhs: 0.into(),
                     },
                 },
-            );
-
-            Ok(end)
+            ))
         }
         ast::Expr::Binary {
             operator,
@@ -68,136 +61,81 @@ pub fn compile_expr<'code>(
             rhs: (rhs_expr, rhs_span),
         } => match operator {
             ast::BinaryOp::Arithmetic(arithmop) => {
-                let lhs = bindings.next_binding();
-                let rhs = bindings.next_binding();
                 // compute first lhs, then rhs
-                let builder = compile_expr(
-                    state,
-                    builder,
-                    lhs,
-                    *lhs_expr,
-                    bindings,
-                    variables,
-                    source_info,
-                )
-                .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
-                let mut builder = compile_expr(
-                    state,
-                    builder,
-                    rhs,
-                    *rhs_expr,
-                    bindings,
-                    variables,
-                    source_info,
-                )
-                .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
-                compile_arithmetic(&mut builder, bindings, arithmop, target, lhs, rhs);
-                Ok(builder)
+                let (mut builder, lhs_result) =
+                    compile_expr(state, builder, *lhs_expr, bindings, variables, source_info)
+                        .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
+                let lhs = bindings.next_binding();
+                builder.assign(lhs, lhs_result);
+
+                let (mut builder, rhs_result) =
+                    compile_expr(state, builder, *rhs_expr, bindings, variables, source_info)
+                        .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
+                let rhs = bindings.next_binding();
+                builder.assign(rhs, rhs_result);
+                let result = compile_arithmetic(&mut builder, bindings, arithmop, lhs, rhs);
+                Ok((builder, result))
             }
             ast::BinaryOp::Bit(bitop) => {
-                let lhs = bindings.next_binding();
-                let rhs = bindings.next_binding();
                 // compute first lhs, then rhs
-                let builder = compile_expr(
-                    state,
-                    builder,
-                    lhs,
-                    *lhs_expr,
-                    bindings,
-                    variables,
-                    source_info,
-                )
-                .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
-                let mut builder = compile_expr(
-                    state,
-                    builder,
-                    rhs,
-                    *rhs_expr,
-                    bindings,
-                    variables,
-                    source_info,
-                )
-                .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
-                compile_bitop(&mut builder, bitop, target, lhs, rhs);
-                Ok(builder)
+                let (mut builder, lhs_result) =
+                    compile_expr(state, builder, *lhs_expr, bindings, variables, source_info)
+                        .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
+                let lhs = bindings.next_binding();
+                builder.assign(lhs, lhs_result);
+
+                let (mut builder, rhs_result) =
+                    compile_expr(state, builder, *rhs_expr, bindings, variables, source_info)
+                        .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
+
+                let rhs = bindings.next_binding();
+                builder.assign(rhs, rhs_result);
+
+                let result = compile_bitop(bitop, lhs, rhs);
+                Ok((builder, result))
             }
             ast::BinaryOp::Relational(relational) => {
-                let lhs = bindings.next_binding();
-                let rhs = bindings.next_binding();
                 // compute first lhs, then rhs
-                let builder = compile_expr(
-                    state,
-                    builder,
-                    lhs,
-                    *lhs_expr,
-                    bindings,
-                    variables,
-                    source_info,
-                )
-                .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
-                let mut builder = compile_expr(
-                    state,
-                    builder,
-                    rhs,
-                    *rhs_expr,
-                    bindings,
-                    variables,
-                    source_info,
-                )
-                .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
-                builder.assign(target, relational_as_value(relational, lhs, rhs));
-                Ok(builder)
+                let (mut builder, lhs_result) =
+                    compile_expr(state, builder, *lhs_expr, bindings, variables, source_info)
+                        .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
+
+                let lhs = bindings.next_binding();
+                builder.assign(lhs, lhs_result);
+
+                let (mut builder, rhs_result) =
+                    compile_expr(state, builder, *rhs_expr, bindings, variables, source_info)
+                        .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
+                let rhs = bindings.next_binding();
+                builder.assign(rhs, rhs_result);
+                let result = relational_as_value(relational, lhs, rhs);
+                Ok((builder, result))
             }
             ast::BinaryOp::Logic(logicop) => {
                 // lhs is going to be computed straight ahead
+                let (mut lhs_builder, lhs_result) =
+                    compile_expr(state, builder, *lhs_expr, bindings, variables, source_info)
+                        .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
+
                 let lhs = bindings.next_binding();
-                let rhs = bindings.next_binding();
-                let mut lhs_builder = compile_expr(
-                    state,
-                    builder,
-                    lhs,
-                    *lhs_expr,
-                    bindings,
-                    variables,
-                    source_info,
-                )
-                .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
-                let (rhs_builder, compute_rhs) = {
+                lhs_builder.assign(lhs, lhs_result);
+
+                // compile another block in which rhs is computed
+                let (rhs_builder, compute_rhs, rhs) = {
                     let block = state.new_block();
                     let start = block.block(); // make sure that lhs jumps to the *start* of rhs's computation
-                    (
-                        compile_expr(
-                            state,
-                            block,
-                            rhs,
-                            *rhs_expr,
-                            bindings,
-                            variables,
-                            source_info,
-                        )
-                        .map_err(|e| e.with_backup_source(rhs_span, source_info))?,
-                        start,
-                    )
+                    let (mut rhs_block, rhs_value) =
+                        compile_expr(state, block, *rhs_expr, bindings, variables, source_info)
+                            .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
+                    let rhs = bindings.next_binding();
+                    rhs_block.assign(rhs, rhs_value);
+
+                    (rhs_block, start, rhs)
                 };
                 // create the new block that will start with a phi node to merge the two branches
-                let mut end_builder = state.new_block();
-                end_builder.assign(
-                    target,
-                    Value::Phi {
-                        nodes: vec![
-                            PhiDescriptor {
-                                value: lhs.into(),
-                                block_from: lhs_builder.block(),
-                            },
-                            PhiDescriptor {
-                                value: rhs.into(),
-                                block_from: rhs_builder.block(),
-                            },
-                        ],
-                    },
-                );
+                let end_builder = state.new_block();
                 // finish rhs by telling it to jump directly to the end
-                rhs_builder.finish_block(
+                let rhs_block = rhs_builder.finish_block(
                     state,
                     Branch::Unconditional {
                         target: end_builder.block(),
@@ -217,7 +155,7 @@ pub fn compile_expr<'code>(
                         rhs: 0.into(),
                     },
                 );
-                lhs_builder.finish_block(
+                let lhs_block = lhs_builder.finish_block(
                     state,
                     Branch::Conditional {
                         flag,
@@ -226,41 +164,51 @@ pub fn compile_expr<'code>(
                     },
                 );
 
-                Ok(end_builder)
+                let end = Value::Phi {
+                    nodes: vec![
+                        PhiDescriptor {
+                            value: lhs.into(),
+                            block_from: lhs_block,
+                        },
+                        PhiDescriptor {
+                            value: rhs.into(),
+                            block_from: rhs_block,
+                        },
+                    ],
+                };
+
+                Ok((end_builder, end))
             }
             ast::BinaryOp::Assignment { op } => {
-                let rhs = bindings.next_binding();
                 // compute rhs
-                let mut builder = compile_expr(
-                    state,
-                    builder,
-                    rhs,
-                    *rhs_expr,
-                    bindings,
-                    variables,
-                    source_info,
-                )
-                .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
+                let (mut builder, rhs_value) =
+                    compile_expr(state, builder, *rhs_expr, bindings, variables, source_info)
+                        .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
+
+                let rhs = bindings.next_binding();
+                builder.assign(rhs, rhs_value);
+
                 let (lhs_mem, lhs_size) = expr_as_ptr(*lhs_expr, variables)
                     .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
-                if let Some(assignment_enabled) = op {
+                let result_binding = if let Some(assignment_enabled) = op {
                     // 1. read the memory
                     let lhs = bindings.next_binding();
                     builder.load(lhs, lhs_mem, lhs_size);
                     // 2. Compute the value
-                    match assignment_enabled {
+                    let value = match assignment_enabled {
                         ast::AssignmentEnabledOp::Arithmetic(arithmop) => {
-                            compile_arithmetic(&mut builder, bindings, arithmop, target, lhs, rhs)
+                            compile_arithmetic(&mut builder, bindings, arithmop, lhs, rhs)
                         }
-                        ast::AssignmentEnabledOp::Bit(bitop) => {
-                            compile_bitop(&mut builder, bitop, target, lhs, rhs)
-                        }
-                    }
+                        ast::AssignmentEnabledOp::Bit(bitop) => compile_bitop(bitop, lhs, rhs),
+                    };
+                    let result = bindings.next_binding();
+                    builder.assign(result, value);
+                    result
                 } else {
-                    builder.assign(target, rhs)
-                }
-                builder.store(target, lhs_mem, lhs_size);
-                Ok(builder)
+                    rhs
+                };
+                builder.store(result_binding, lhs_mem, lhs_size);
+                Ok((builder, Value::Binding(result_binding)))
             }
         },
     }
@@ -296,40 +244,27 @@ fn compile_arithmetic(
     builder: &mut BlockBuilder,
     bindings: &mut BindingCounter,
     arithmop: ast::ArithmeticOp,
-    target: Binding,
     lhs: Binding,
     rhs: Binding,
-) {
+) -> Value {
     match arithmop {
-        ast::ArithmeticOp::Add => builder.assign(
-            target,
-            Value::Add {
-                lhs,
-                rhs: rhs.into(),
-            },
-        ),
-        ast::ArithmeticOp::Subtract => builder.assign(
-            target,
-            Value::Subtract {
-                lhs,
-                rhs: rhs.into(),
-            },
-        ),
-        ast::ArithmeticOp::Multiply => builder.assign(
-            target,
-            Value::Multiply {
-                lhs,
-                rhs: rhs.into(),
-            },
-        ),
-        ast::ArithmeticOp::Divide => builder.assign(
-            target,
-            Value::Divide {
-                lhs,
-                rhs: rhs.into(),
-                is_signed: true, // assume signed division for now (i32)
-            },
-        ),
+        ast::ArithmeticOp::Add => Value::Add {
+            lhs,
+            rhs: rhs.into(),
+        },
+        ast::ArithmeticOp::Subtract => Value::Subtract {
+            lhs,
+            rhs: rhs.into(),
+        },
+        ast::ArithmeticOp::Multiply => Value::Multiply {
+            lhs,
+            rhs: rhs.into(),
+        },
+        ast::ArithmeticOp::Divide => Value::Divide {
+            lhs,
+            rhs: rhs.into(),
+            is_signed: true, // assume signed division for now (i32)
+        },
         ast::ArithmeticOp::Modulo => {
             // modulo is a bit more complex.
             // It does q = lhs / rhs, qxd = q * rhs, target = lhs - qxd
@@ -351,49 +286,37 @@ fn compile_arithmetic(
                     rhs: rhs.into(),
                 },
             );
-            builder.assign(
-                target,
-                Value::Subtract {
-                    lhs,
-                    rhs: qxd.into(),
-                },
-            )
+            Value::Subtract {
+                lhs,
+                rhs: qxd.into(),
+            }
         }
     }
 }
 
 // bit operations can't go out of the block, and
 // require both elements to be computed first
-fn compile_bitop(
-    builder: &mut BlockBuilder,
-    bitop: ast::BitOp,
-    target: Binding,
-    lhs: Binding,
-    rhs: Binding,
-) {
-    builder.assign(
-        target,
-        match bitop {
-            ast::BitOp::And => Value::And {
-                lhs,
-                rhs: rhs.into(),
-            },
-            ast::BitOp::Or => Value::Or {
-                lhs,
-                rhs: rhs.into(),
-            },
-            ast::BitOp::Xor => Value::Xor {
-                lhs,
-                rhs: rhs.into(),
-            },
-            ast::BitOp::RightShift => Value::Lsr {
-                lhs,
-                rhs: rhs.into(),
-            },
-            ast::BitOp::LeftShift => Value::Lsl {
-                lhs,
-                rhs: rhs.into(),
-            },
+fn compile_bitop(bitop: ast::BitOp, lhs: Binding, rhs: Binding) -> Value {
+    match bitop {
+        ast::BitOp::And => Value::And {
+            lhs,
+            rhs: rhs.into(),
         },
-    )
+        ast::BitOp::Or => Value::Or {
+            lhs,
+            rhs: rhs.into(),
+        },
+        ast::BitOp::Xor => Value::Xor {
+            lhs,
+            rhs: rhs.into(),
+        },
+        ast::BitOp::RightShift => Value::Lsr {
+            lhs,
+            rhs: rhs.into(),
+        },
+        ast::BitOp::LeftShift => Value::Lsl {
+            lhs,
+            rhs: rhs.into(),
+        },
+    }
 }

@@ -13,33 +13,25 @@ pub fn compile_statement<'code>(
     match statement {
         ast::Statement::Return((expr, expr_span)) => {
             let ret_value = bindings.next_binding();
-            expr::compile_expr(
-                state,
-                builder,
-                ret_value,
-                expr,
-                bindings,
-                variables,
-                source_meta,
-            )
-            .map_err(|e| e.with_backup_source(expr_span, source_meta))?
+            {
+                let (mut block, resulting_value) =
+                    expr::compile_expr(state, builder, expr, bindings, variables, source_meta)?;
+                block.assign(ret_value, resulting_value);
+                Ok(block)
+            }
+            .map_err(|e: VarE| e.with_backup_source(expr_span, source_meta))?
             .finish_block(state, ret_value);
             Ok(state.new_block())
         }
         ast::Statement::SingleExpr((expr, expr_span)) => {
             // create a dummy target that may or may not be cleaned up later,
             // depending on what it does
+            let (mut block, result_expr) =
+                expr::compile_expr(state, builder, expr, bindings, variables, source_meta)
+                    .map_err(|e| e.with_backup_source(expr_span, source_meta))?;
             let dummy = bindings.next_binding();
-            expr::compile_expr(
-                state,
-                builder,
-                dummy,
-                expr,
-                bindings,
-                variables,
-                source_meta,
-            )
-            .map_err(|e| e.with_backup_source(expr_span, source_meta))
+            block.assign(dummy, result_expr);
+            Ok(block)
         }
         ast::Statement::DeclareVar {
             name: Source { source: name, span },
@@ -49,17 +41,17 @@ pub fn compile_statement<'code>(
             builder.allocate(memory, 4); // all variables are 4-byte right now
                                          // compile init
             let builder = if let Some((init, init_span)) = init {
-                let compute_init = bindings.next_binding();
-                let mut builder = expr::compile_expr(
+                let (mut builder, expr) = expr::compile_expr(
                     state,
                     builder,
-                    compute_init,
                     init,
                     bindings,
                     variables,
                     source_meta,
                 )
                 .map_err(|e| e.with_backup_source(init_span, source_meta))?;
+                let compute_init = bindings.next_binding();
+                builder.assign(compute_init, expr);
                 builder.store(compute_init, memory, ByteSize::U32);
                 builder
             } else {
@@ -91,17 +83,17 @@ pub fn compile_statement<'code>(
             true_branch: (true_stmt, true_span),
             false_branch,
         } => {
-            let condition = bindings.next_binding();
-            let mut builder = expr::compile_expr(
+            let (mut builder, condition_result) = expr::compile_expr(
                 state,
                 builder,
-                condition,
                 condition_expr,
                 bindings,
                 variables,
                 source_meta,
             )
             .map_err(|e| e.with_backup_source(condition_span, source_meta))?;
+            let condition = bindings.next_binding();
+            builder.assign(condition, condition_result);
             let flag = bindings.next_binding();
             builder.assign(
                 flag,

@@ -100,11 +100,7 @@ impl BlockBuilder {
     }
 }
 
-// enum BlockResult {
-//     FinishedBlock(BlockBinding),
-//     Unfinished(BlockBuilder),
-// }
-
+// NOTE: uses `MaybeUninit` to preserve the relationship between indices and bindings
 #[derive(Default)]
 pub struct IRGenState {
     blocks: Vec<MaybeUninit<BasicBlock>>,

@@ -1,4 +1,5 @@
 use crate::codegen::assembly::Condition;
+pub mod cleanup;
 mod convert;
 mod format;
 pub mod generate;
@@ -11,16 +12,16 @@ pub struct BasicBlock {
     pub end: BlockEnd,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BlockBinding(pub usize);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BlockEnd {
     Branch(Branch),
     Return(Binding),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Branch {
     Unconditional {
         target: BlockBinding,
@@ -33,6 +34,7 @@ pub enum Branch {
 }
 
 // assign, store, load, alloc, free
+#[derive(Debug, PartialEq)]
 pub enum Statement {
     Assign {
         index: Binding,
@@ -46,6 +48,7 @@ pub enum Statement {
 }
 
 // phi, cmp, add, sub, neg.... all operations
+#[derive(Debug, PartialEq)]
 pub enum Value {
     // allocate memory
     Allocate {
@@ -120,24 +123,33 @@ pub enum Value {
     Binding(Binding),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub struct Binding(pub usize);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CouldBeConstant {
     Binding(Binding),
     Constant(u64),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ByteSize {
     U8,
     U32,
     U64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PhiDescriptor {
     pub value: CouldBeConstant,
     pub block_from: BlockBinding,
+}
+
+impl CouldBeConstant {
+    pub const fn as_binding(self) -> Option<Binding> {
+        match self {
+            CouldBeConstant::Binding(binding) => Some(binding),
+            CouldBeConstant::Constant(_) => None,
+        }
+    }
 }
