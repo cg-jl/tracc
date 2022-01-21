@@ -8,4 +8,3 @@ pub mod error;
 pub mod grammar;
 pub mod intermediate;
 pub mod output;
-pub mod variables;

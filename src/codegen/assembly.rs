@@ -1,4 +1,4 @@
-use crate::{codegen::RegisterDescriptor, write_instruction};
+use crate::write_instruction;
 // use bitflags::bitflags;
 use std::fmt;
 
@@ -483,16 +483,6 @@ impl fmt::Display for Register {
 }
 
 impl Register {
-    pub const fn as_register_descriptor(self) -> Option<RegisterDescriptor> {
-        match self {
-            Self::GeneralPurpose { index, .. } => {
-                // UNSAFE: index is already valid at this point
-                Some(unsafe { RegisterDescriptor::from_index(index) })
-            }
-            // it is not writable, so there's no register descriptor needed
-            _ => None,
-        }
-    }
     pub const fn bit_size(self) -> BitSize {
         match self {
             Self::GeneralPurpose { bit_size, .. } => bit_size,
