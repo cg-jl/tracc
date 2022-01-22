@@ -27,9 +27,10 @@ fn run() -> Result<(), Box<dyn Error>> {
     let program: Program = Parser::new(&meta).parse()?;
     let (name, mut ir) = tracc::intermediate::generate::compile_program(program, &meta)?;
     tracc::intermediate::cleanup::perform_cleanup(&mut ir);
-    println!("func {}", name);
+    let (alloc_size, alloc_infos) = tracc::codegen::memory::resolve_memory(&ir.code);
+    println!("func {} (needs {} bytes)", name, alloc_size);
     for (i, block) in ir.code.into_iter().enumerate() {
-        println!("BB{}:", i);
+        println!("BB{}: ({} bytes)", i, alloc_infos[i].alloc_size);
         for stmt in block.statements {
             println!("  {}", stmt);
         }

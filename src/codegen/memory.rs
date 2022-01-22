@@ -4,27 +4,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::intermediate::{Binding, BlockEnd, IRCode, Statement, Value};
 
-pub fn resolve_memory(code: &mut IRCode) -> (usize, Vec<AllocInfo>) {
-    // actually traverse the graph and get the memory
-    let (res, mem_bindings) = allocate_memory(code);
-
-    // now find all the memory definitions and remove them
-    let mut diff_map = vec![0; code.len()];
-
-    for binding in mem_bindings {
-        let (block_index, statement_index) = super::find_definition_in_code(code, binding)
-            .expect("could not find memory definition");
-        let offset = diff_map[block_index];
-        code[block_index]
-            .statements
-            .remove(statement_index - offset);
-        diff_map[block_index] += 1;
-    }
-
-    res
-}
-
 /// Allocation info for a given block
+#[derive(Debug)]
 pub struct AllocInfo {
     pub alloc_size: usize,
     pub alloc_map: HashMap<Binding, usize>,
@@ -35,7 +16,7 @@ pub struct AllocInfo {
 
 /// Traverse the CFG to know how much memory we need at most and
 /// memory map for each block
-fn allocate_memory(code: &IRCode) -> ((usize, Vec<AllocInfo>), impl Iterator<Item = Binding>) {
+pub fn resolve_memory(code: &IRCode) -> (usize, Vec<AllocInfo>) {
     // #1. get the memory usage map
     let mut mem_usage = Vec::with_capacity(code.len());
     mem_usage.extend(memories_per_block(code));
@@ -55,26 +36,23 @@ fn allocate_memory(code: &IRCode) -> ((usize, Vec<AllocInfo>), impl Iterator<Ite
         .collect();
 
     // #4. Actually allocate the memory needed
-    (
-        mem_usage
-            .into_iter()
-            .map(|mut usage_list| {
-                // we need reversed comparisons so highest usefulness score is put first
-                usage_list.sort_unstable_by(|a, b| score[b].cmp(&score[a]));
-                allocate_block_memory(usage_list, &allocation_sizes)
-            })
-            .fold(
-                (0, Vec::with_capacity(code.len())),
-                |(max_size, mut allocs), (alloc_size, alloc_map)| {
-                    allocs.push(AllocInfo {
-                        alloc_size,
-                        alloc_map,
-                    });
-                    (max_size.max(alloc_size), allocs)
-                },
-            ),
-        score.into_keys(),
-    )
+    mem_usage
+        .into_iter()
+        .map(|mut usage_list| {
+            // we need reversed comparisons so highest usefulness score is put first
+            usage_list.sort_unstable_by(|a, b| score[b].cmp(&score[a]));
+            allocate_block_memory(usage_list, &allocation_sizes)
+        })
+        .fold(
+            (0, Vec::with_capacity(code.len())),
+            |(max_size, mut allocs), (alloc_size, alloc_map)| {
+                allocs.push(AllocInfo {
+                    alloc_size,
+                    alloc_map,
+                });
+                (max_size.max(alloc_size), allocs)
+            },
+        )
 }
 
 /// Allocate the stack memory that a block will need for `alloca` objects (registers don't count

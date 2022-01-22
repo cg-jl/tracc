@@ -2,7 +2,7 @@ use crate::intermediate::BasicBlock;
 use crate::intermediate::{Binding, IRCode, Statement};
 
 pub mod assembly;
-mod memory;
+pub mod memory;
 
 /// find the definition for a particular binding in a block
 fn find_definition_in_block(block: &BasicBlock, binding: Binding) -> Option<usize> {
