@@ -516,7 +516,7 @@ impl BitSize {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Memory {
-    pub register: ImmutableRegister,
+    pub register: Register,
     pub offset: Offset,
 }
 
