@@ -1,19 +1,41 @@
 //! First step of code generation is to get the stack memory usage for the code
 
 use std::collections::{HashMap, HashSet};
-use std::mem::MaybeUninit;
 
-use crate::intermediate::BasicBlock;
-use crate::intermediate::{Binding, BlockEnd, IRCode, Statement, Value, IR};
+use crate::intermediate::{Binding, BlockEnd, IRCode, Statement, Value};
 
-use super::assembly;
+pub fn resolve_memory(code: &mut IRCode) -> (usize, Vec<AllocInfo>) {
+    // actually traverse the graph and get the memory
+    let (res, mem_bindings) = allocate_memory(code);
+
+    // now find all the memory definitions and remove them
+    let mut diff_map = vec![0; code.len()];
+
+    for binding in mem_bindings {
+        let (block_index, statement_index) = super::find_definition_in_code(code, binding)
+            .expect("could not find memory definition");
+        let offset = diff_map[block_index];
+        code[block_index]
+            .statements
+            .remove(statement_index - offset);
+        diff_map[block_index] += 1;
+    }
+
+    res
+}
+
+/// Allocation info for a given block
+pub struct AllocInfo {
+    pub alloc_size: usize,
+    pub alloc_map: HashMap<Binding, usize>,
+}
 
 // TODO: I think I need to figure out register usage for the block first, then figure out the
 // memory I need.
 
 /// Traverse the CFG to know how much memory we need at most and
 /// memory map for each block
-pub fn allocate_memory(code: &IRCode) -> (usize, Vec<HashMap<Binding, usize>>) {
+fn allocate_memory(code: &IRCode) -> ((usize, Vec<AllocInfo>), impl Iterator<Item = Binding>) {
     // #1. get the memory usage map
     let mut mem_usage = Vec::with_capacity(code.len());
     mem_usage.extend(memories_per_block(code));
@@ -26,27 +48,33 @@ pub fn allocate_memory(code: &IRCode) -> (usize, Vec<HashMap<Binding, usize>>) {
         .keys()
         .map(|mem| {
             // TODO: make this use an external search function
-            let alloc_size = find_allocation(code, *mem)
+            let alloc_size = find_allocation_size(code, *mem)
                 .expect("could not find allocation size for memory binding");
             (*mem, alloc_size)
         })
         .collect();
 
     // #4. Actually allocate the memory needed
-    mem_usage
-        .into_iter()
-        .map(|mut usage_list| {
-            // we need reversed comparisons so highest usefulness score is put first
-            usage_list.sort_unstable_by(|a, b| score[b].cmp(&score[a]));
-            allocate_block_memory(usage_list, &allocation_sizes)
-        })
-        .fold(
-            (0, Vec::with_capacity(code.len())),
-            |(max_size, mut allocs), (alloc_size, alloc_map)| {
-                allocs.push(alloc_map);
-                (max_size.max(alloc_size), allocs)
-            },
-        )
+    (
+        mem_usage
+            .into_iter()
+            .map(|mut usage_list| {
+                // we need reversed comparisons so highest usefulness score is put first
+                usage_list.sort_unstable_by(|a, b| score[b].cmp(&score[a]));
+                allocate_block_memory(usage_list, &allocation_sizes)
+            })
+            .fold(
+                (0, Vec::with_capacity(code.len())),
+                |(max_size, mut allocs), (alloc_size, alloc_map)| {
+                    allocs.push(AllocInfo {
+                        alloc_size,
+                        alloc_map,
+                    });
+                    (max_size.max(alloc_size), allocs)
+                },
+            ),
+        score.into_keys(),
+    )
 }
 
 /// Allocate the stack memory that a block will need for `alloca` objects (registers don't count
@@ -137,11 +165,18 @@ fn memories_score(code: &IRCode, usage_per_block: &[Vec<Binding>]) -> HashMap<Bi
 }
 
 /// Find the allocation size for a particular memory binding
-fn find_allocation(code: &IRCode, target_alloc: Binding) -> Option<usize> {
-    match super::find_definition_in_code(code, target_alloc)? {
-        Value::Allocate { size } => Some(*size),
-        _ => None,
-    }
+fn find_allocation_size(code: &IRCode, target_alloc: Binding) -> Option<usize> {
+    super::find_definition_in_code(code, target_alloc).and_then(|(block_index, statement_index)| {
+        if let Statement::Assign {
+            value: Value::Allocate { size },
+            ..
+        } = code[block_index].statements[statement_index]
+        {
+            Some(size)
+        } else {
+            None
+        }
+    })
 }
 
 fn align(value: usize, align_to: usize) -> usize {
