@@ -26,9 +26,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
     let (name, mut ir) = tracc::intermediate::generate::compile_program(program, &meta)?;
-    tracc::intermediate::cleanup::remove_aliases(&mut ir);
+    tracc::intermediate::cleanup::perform_cleanup(&mut ir);
     println!("func {}", name);
-    for (i, block) in ir.into_iter().enumerate() {
+    for (i, block) in ir.code.into_iter().enumerate() {
         println!("BB{}:", i);
         for stmt in block.statements {
             println!("  {}", stmt);

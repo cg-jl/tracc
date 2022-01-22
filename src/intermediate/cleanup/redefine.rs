@@ -1,5 +1,5 @@
 use crate::intermediate::{
-    BasicBlock, Binding, BlockEnd, Branch, CouldBeConstant, PhiDescriptor, Statement, Value, IR,
+    BasicBlock, Binding, BlockEnd, Branch, CouldBeConstant, PhiDescriptor, Statement, Value, IRCode,
 };
 
 /// Mechanism used by cleanup code to rename bindings
@@ -123,7 +123,7 @@ impl Rename for BasicBlock {
     }
 }
 
-impl Rename for IR {
+impl Rename for IRCode {
     fn rename(&mut self, target: Binding, rename_as: Binding) {
         for block in self.iter_mut() {
             block.rename(target, rename_as);

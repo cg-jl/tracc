@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::mem::MaybeUninit;
 
-use super::{BasicBlock, Binding, BlockBinding, ByteSize, Condition, Statement, Value, IR};
+use super::{
+    BackwardsMap, BasicBlock, Binding, BlockBinding, ByteSize, Condition, IRCode, Statement, Value,
+    IR,
+};
 use crate::error::SourceMetadata;
 use crate::grammar::lexer::Source;
 use crate::intermediate::{BlockEnd, Branch, PhiDescriptor};
@@ -10,6 +13,34 @@ mod block;
 mod expr;
 mod statement;
 use thiserror::Error;
+
+fn generate_backwards_graph(ir: &IRCode) -> BackwardsMap {
+    let mut backwards_map = BackwardsMap::new();
+
+    // go through the branches and add a `from` to the targets
+    for (block_index, block) in ir.iter().enumerate() {
+        let bb = BlockBinding(block_index);
+        match block.end {
+            BlockEnd::Branch(branch) => match branch {
+                Branch::Unconditional { target } => {
+                    backwards_map.entry(target.0).or_default().push(bb.0);
+                }
+                Branch::Conditional {
+                    flag: _,
+                    target_true,
+                    target_false,
+                } => {
+                    backwards_map.entry(target_true.0).or_default().push(bb.0);
+                    backwards_map.entry(target_false.0).or_default().push(bb.0);
+                }
+            },
+            // a leaf block doesn't
+            BlockEnd::Return(_) => (),
+        }
+    }
+
+    backwards_map
+}
 
 pub fn compile_program<'code>(
     p: ast::Program<'code>,
@@ -35,7 +66,15 @@ pub fn compile_program<'code>(
     let ret = binding_counter.next_binding();
     end.assign(ret, 0);
     end.finish_block(&mut state, ret);
-    Ok((name, state.release().collect()))
+    let ir: IRCode = state.release().collect();
+    let backwards_map = generate_backwards_graph(&ir);
+    Ok((
+        name,
+        IR {
+            code: ir,
+            backwards_map,
+        },
+    ))
 }
 
 // TODO: make block builder struct

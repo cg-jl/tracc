@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::codegen::assembly::Condition;
 pub mod cleanup;
 mod convert;
@@ -5,14 +7,21 @@ mod format;
 pub mod generate;
 // IR: everything is divided into basic blocks
 
-pub type IR = Vec<BasicBlock>;
+pub type BackwardsMap = HashMap<usize, Vec<usize>>;
+
+pub type IRCode = Vec<BasicBlock>;
+
+pub struct IR {
+    pub code: IRCode,
+    pub backwards_map: BackwardsMap,
+}
 
 pub struct BasicBlock {
     pub statements: Vec<Statement>,
     pub end: BlockEnd,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockBinding(pub usize);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
