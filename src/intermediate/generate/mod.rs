@@ -23,15 +23,15 @@ fn generate_backwards_graph(ir: &IRCode) -> BackwardsMap {
         match block.end {
             BlockEnd::Branch(branch) => match branch {
                 Branch::Unconditional { target } => {
-                    backwards_map.entry(target.0).or_default().push(bb.0);
+                    backwards_map.entry(target).or_default().push(bb);
                 }
                 Branch::Conditional {
                     flag: _,
                     target_true,
                     target_false,
                 } => {
-                    backwards_map.entry(target_true.0).or_default().push(bb.0);
-                    backwards_map.entry(target_false.0).or_default().push(bb.0);
+                    backwards_map.entry(target_true).or_default().push(bb);
+                    backwards_map.entry(target_false).or_default().push(bb);
                 }
             },
             // a leaf block doesn't

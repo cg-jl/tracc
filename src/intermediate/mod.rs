@@ -7,7 +7,7 @@ mod format;
 pub mod generate;
 // IR: everything is divided into basic blocks
 
-pub type BackwardsMap = HashMap<usize, Vec<usize>>;
+pub type BackwardsMap = HashMap<BlockBinding, Vec<BlockBinding>>;
 
 pub type IRCode = Vec<BasicBlock>;
 
@@ -160,5 +160,33 @@ impl CouldBeConstant {
             CouldBeConstant::Binding(binding) => Some(binding),
             CouldBeConstant::Constant(_) => None,
         }
+    }
+}
+
+impl Branch {
+    pub fn branch_list(&self) -> impl Iterator<Item = BlockBinding> + '_ {
+        let mut iteration = 0usize;
+        std::iter::from_fn(move || {
+            let last_iteration = iteration;
+            iteration += 1;
+            match self {
+                Branch::Unconditional { target } => {
+                    if last_iteration == 0 {
+                        Some(*target)
+                    } else {
+                        None
+                    }
+                }
+                Branch::Conditional {
+                    flag: _,
+                    target_true,
+                    target_false,
+                } => match last_iteration {
+                    0 => Some(*target_true),
+                    1 => Some(*target_false),
+                    _ => None,
+                },
+            }
+        })
     }
 }

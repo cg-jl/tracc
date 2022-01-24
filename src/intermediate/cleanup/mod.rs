@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::intermediate::{cleanup::redefine::Rename, Statement, Value};
 
 use super::BackwardsMap;
+use super::BlockBinding;
 use super::IRCode;
 use super::IR;
 
@@ -51,7 +52,7 @@ fn prune_unreached_blocks(backwards_map: &BackwardsMap, code: &mut IRCode) {
     let mut unused_blocks = Vec::with_capacity(code.len() - 1);
     for i in 1..code.len() {
         // no other block reaches this one
-        if backwards_map.get(&i).is_none() {
+        if backwards_map.get(&BlockBinding(i)).is_none() {
             unused_blocks.push(i);
         }
     }
