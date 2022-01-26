@@ -21,7 +21,7 @@ pub struct BasicBlock {
     pub end: BlockEnd,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockBinding(pub usize);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -132,7 +132,7 @@ pub enum Value {
     Binding(Binding),
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Binding(pub usize);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
