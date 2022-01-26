@@ -2,62 +2,142 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::intermediate::{Binding, BlockEnd, IRCode, Statement, Value};
+use crate::intermediate::{BackwardsMap, BasicBlock, Binding, BlockBinding, Statement, Value, IR};
 
-/// Allocation info for a given block
-#[derive(Debug)]
-pub struct AllocInfo {
-    pub alloc_size: usize,
-    pub alloc_map: HashMap<Binding, usize>,
-}
+// even if a piece of memory is not used in a block, if a leaf of it uses that piece of memory, the
+// block must keep that memory alive.
+//
+// we have a list of memory bindings with:
+//  - their size
+//  - their init block
+//  - the blocks that use them directly
 
-// TODO: I think I need to figure out register usage for the block first, then figure out the
-// memory I need.
+// idea:
+//  - get all the leafs where each memory binding is last used
+//  - propagate those uses in the following way:
+//      - if a block uses some memory, and that memory is first defined in that block, it is not
+//      propagated back.
+//      - otherwise, all that memory that is not first defined in that block is wanted to be put at
+//      the **front** of the parent block's memory (each block will expect its memory offset to
+//      start at 0)
+//      - in case of two or more blocks having the same parent:
+//          - the common bindings are pushed to the front and reordered in the children
+//          - the non-common bindings will be designated a padded zone with the maximum of the
+//          added sizes and aligned to 4 bytes, and the parent's rest of bindings will have to be pushed
+//          back.
+//  - phases:
+//      - #0. Make the initial allocations for all the blocks as if no conflicts could happen
+//      (which isn't true)
+//      - #1. Gather all the new stuff that is going to be added to each block in a per-branch
+//      basis. (go from leaf blocks up to the top)
+//      - #2. Reorder everything so that all follows the rule (I'll get into that)
 
-/// Traverse the CFG to know how much memory we need at most and
-/// memory map for each block
-pub fn resolve_memory(code: &IRCode) -> (usize, Vec<AllocInfo>) {
-    // #1. get the memory usage map
-    let mut mem_usage = Vec::with_capacity(code.len());
-    mem_usage.extend(memories_per_block(code));
-
-    // #2. Get the memory scores and sort them
-    let score = memories_score(code, &mem_usage);
-
-    // #3. Make the allocation map
-    let allocation_sizes: HashMap<_, _> = score
-        .keys()
-        .map(|mem| {
-            // TODO: make this use an external search function
-            let alloc_size = find_allocation_size(code, *mem)
-                .expect("could not find allocation size for memory binding");
-            (*mem, alloc_size)
+pub fn debug_what_im_doing(ir: &IR) {
+    dbg!(&ir.backwards_map);
+    let alloc_map = make_alloc_map(&ir.code);
+    let dep_graph: AllocInfo = ir
+        .code
+        .iter()
+        .enumerate()
+        .map(|(block_index, block)| {
+            (
+                BlockBinding(block_index),
+                list_memory_deps(&block.statements)
+                    .into_iter()
+                    .map(AllocUnion::Single)
+                    .collect(),
+            )
         })
         .collect();
 
-    // #4. Actually allocate the memory needed
-    mem_usage
-        .into_iter()
-        .map(|mut usage_list| {
-            // we need reversed comparisons so highest usefulness score is put first
-            usage_list.sort_unstable_by(|a, b| score[b].cmp(&score[a]));
-            allocate_block_memory(usage_list, &allocation_sizes)
-        })
-        .fold(
-            (0, Vec::with_capacity(code.len())),
-            |(max_size, mut allocs), (alloc_size, alloc_map)| {
-                allocs.push(AllocInfo {
-                    alloc_size,
-                    alloc_map,
-                });
-                (max_size.max(alloc_size), allocs)
-            },
-        )
+    dbg!(&dep_graph);
+    let wanted_map = gather_branch_info(&ir.code, &ir.backwards_map, dep_graph);
+
+    dbg!(&alloc_map);
+    dbg!(&wanted_map);
 }
+
+pub type AllocInfo = HashMap<BlockBinding, Vec<AllocUnion>>;
+
+/// an allocation union is responsible for having one or multiple bindings allocated in the same space.
+/// an allocation union can have other nested structures of usings (for deeper branches)
+#[derive(std::clone::Clone)]
+pub enum AllocUnion {
+    Single(Binding),
+    Many(Vec<AllocUnion>),
+}
+
+impl AllocUnion {}
+
+impl std::fmt::Debug for AllocUnion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AllocUnion::Single(single) => single.fmt(f),
+            AllocUnion::Many(many) => {
+                write!(f, "{:?}", many)
+            }
+        }
+    }
+}
+
+// pub enum Alloc {
+//     Single(Binding),
+//     Branching(Vec<Binding>),
+// }
+
+fn gather_branch_info(
+    code: &[BasicBlock],
+    backwards_map: &BackwardsMap,
+    exisiting_allocs: AllocInfo,
+) -> HashMap<BlockBinding, AllocInfo> {
+    let mut result: HashMap<_, AllocInfo> = HashMap::with_capacity(code.len());
+
+    // add all the 'self' blocks
+    for block_index in 0..code.len() {
+        let bb = BlockBinding(block_index);
+        result.insert(bb, {
+            let mut info = AllocInfo::new();
+            info.insert(bb, exisiting_allocs.get(&bb).cloned().unwrap_or_default());
+            info
+        });
+    }
+
+    for leaf_block in super::find_leaf_blocks(code) {
+        let mut queue = vec![leaf_block];
+        let mut visited = HashSet::new();
+        while !queue.is_empty() {
+            let current_leaf = queue.pop().unwrap();
+            if !visited.contains(&current_leaf) {
+                visited.insert(current_leaf);
+                for parent in backwards_map
+                    .get(&current_leaf)
+                    .into_iter()
+                    .flat_map(|x| x.iter())
+                    .copied()
+                {
+                    let info = result
+                        .get_mut(&parent)
+                        .expect("already inserted with 'self' blocks");
+                    assert!(
+                        info.insert(current_leaf, exisiting_allocs[&current_leaf].clone())
+                            .is_none(),
+                        "should not have any value yet"
+                    );
+                    queue.push(parent);
+                }
+            }
+        }
+    }
+    result
+}
+
+// TODO: make per-block allocation maps out of the whole allocation map and memory block's scope
+// the idea is to set further-scoped memory blocks to the right and keep more local memory to the
+// left
 
 /// Allocate the stack memory that a block will need for `alloca` objects (registers don't count
 /// yet)
-fn allocate_block_memory(
+pub fn allocate_block_memory(
     memory_usage: impl IntoIterator<Item = Binding>,
     memory_sizes: &HashMap<Binding, usize>,
 ) -> (usize, HashMap<Binding, usize>) {
@@ -71,92 +151,75 @@ fn allocate_block_memory(
     (current_offset, map)
 }
 
-/// Analyze the memories that each block of the code uses, either by store or load
-fn memories_per_block(code: &IRCode) -> impl Iterator<Item = Vec<Binding>> + '_ {
-    code.iter().map(|block| {
-        let mut bindings = Vec::new();
-        for statement in &block.statements {
-            match statement {
-                Statement::Store { mem_binding, .. } => {
-                    if !bindings.contains(mem_binding) {
-                        bindings.push(*mem_binding)
-                    }
-                }
-                Statement::Assign {
-                    index: _,
-                    value: Value::Load { mem_binding, .. },
-                } => {
-                    if !bindings.contains(mem_binding) {
-                        bindings.push(*mem_binding)
-                    }
-                }
-                _ => (),
-            }
-        }
-        bindings
-    })
+fn deps_per_block(code: &[BasicBlock]) -> HashMap<BlockBinding, Vec<Binding>> {
+    code.iter()
+        .enumerate()
+        .map(|(block_index, block)| {
+            (
+                BlockBinding(block_index),
+                list_memory_deps(&block.statements),
+            )
+        })
+        .collect()
 }
 
-/// Get a usefulness score for each of the memories,
-/// being the score higher the more flow it occupies.
-///
-/// Usefulness score is computed by following through the CFG in a dfs manner,
-/// adding one each time a new block is encountered and subtracting one each time an already
-/// visited block is encountered. This is done to avoid a branching flow influencing the score, by
-/// making all the branches that converge in the same area score once.
-fn memories_score(code: &IRCode, usage_per_block: &[Vec<Binding>]) -> HashMap<Binding, usize> {
-    let mut score: HashMap<_, usize> = HashMap::new();
+/// Make the dependency graph for memory
+fn make_dependency_graph(code: &[BasicBlock]) -> HashMap<Binding, Vec<BlockBinding>> {
+    let mut graph: HashMap<_, Vec<_>> = HashMap::new();
 
-    let mut visited = HashSet::new();
-
-    let mut queue = vec![0];
-
-    while !queue.is_empty() {
-        // UNSAFE: queue is not empty.
-        let next = unsafe { queue.pop().unwrap_unchecked() };
-        if visited.contains(&next) {
-            for mem in &usage_per_block[next] {
-                score.entry(*mem).and_modify(|x| *x -= 1);
-            }
-        } else {
-            for mem in &usage_per_block[next] {
-                score.entry(*mem).and_modify(|x| *x += 1).or_insert(1);
-            }
-            visited.insert(next);
-            if let BlockEnd::Branch(branch) = code[next].end {
-                match branch {
-                    crate::intermediate::Branch::Unconditional { target } => queue.push(target.0),
-                    crate::intermediate::Branch::Conditional {
-                        flag: _,
-                        target_true,
-                        target_false,
-                    } => {
-                        queue.push(target_true.0);
-                        queue.push(target_false.0);
-                    }
-                }
-            }
+    for (block_index, block) in code.iter().enumerate() {
+        let bb = BlockBinding(block_index);
+        for mem in list_memory_deps(&block.statements) {
+            graph.entry(mem).or_default().push(bb);
         }
     }
-
-    score
+    graph
 }
 
-/// Find the allocation size for a particular memory binding
-fn find_allocation_size(code: &IRCode, target_alloc: Binding) -> Option<usize> {
-    super::find_definition_in_code(code, target_alloc).and_then(|(block_index, statement_index)| {
+pub type AllocMap = HashMap<Binding, usize>;
+
+/// Make the memory allocation map for the whole code
+fn make_alloc_map(code: &[BasicBlock]) -> AllocMap {
+    code.iter()
+        .flat_map(|block| list_memory_defs(&block.statements))
+        .collect()
+}
+
+/// List the memory allocations that the block defines
+fn list_memory_defs(block: &[Statement]) -> impl Iterator<Item = (Binding, usize)> + '_ {
+    block.iter().filter_map(|statement| {
         if let Statement::Assign {
+            index,
             value: Value::Allocate { size },
-            ..
-        } = code[block_index].statements[statement_index]
+        } = statement
         {
-            Some(size)
+            Some((*index, *size))
         } else {
             None
         }
     })
 }
 
-fn align(value: usize, align_to: usize) -> usize {
-    align_to * (value / align_to) + if value % align_to == 0 { 0 } else { align_to }
+/// Analyze the memory that each block of the code uses, either by store or load
+fn list_memory_deps(block: &[Statement]) -> Vec<Binding> {
+    let mut bindings = Vec::new();
+    for statement in block {
+        match statement {
+            Statement::Store { mem_binding, .. } => {
+                if !bindings.contains(mem_binding) {
+                    bindings.push(*mem_binding)
+                }
+            }
+            Statement::Assign {
+                index: _,
+                value: Value::Load { mem_binding, .. },
+            } => {
+                if !bindings.contains(mem_binding) {
+                    bindings.push(*mem_binding)
+                }
+            }
+            _ => (),
+        }
+    }
+    bindings
 }
