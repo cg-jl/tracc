@@ -8,21 +8,10 @@ use super::assembly;
 
 // even if a piece of memory is not used in a block, if a leaf of it uses that piece of memory, the
 // block must keep that memory alive.
-//
-// we have a list of memory bindings with:
-//  - their size
-//  - their init block
-//  - the blocks that use them directly
-
-// better idea:
-//  - start on the leaves
-//  - if the place is not taken, assign that index
 
 type AllocInfo = HashMap<BlockBinding, Vec<Binding>>;
 
 pub type MemoryMap = HashMap<Binding, assembly::Memory>;
-pub type MemoryIndices = HashMap<Binding, usize>;
-pub type MemoryList = Vec<assembly::Memory>;
 
 pub fn figure_out_stack_allocs(ir: &IR) -> (MemoryMap, usize) {
     let alloc_map = make_alloc_map(&ir.code);
@@ -80,6 +69,9 @@ pub fn align(value: usize, to: usize) -> usize {
     }
 }
 
+// what allocate_graph does:
+//  - start on the leaves and follow through their preceding blocks
+//  - if the place is not taken, assign that index
 fn allocate_graph(
     ir: &IR,
     mut dep_graph: AllocInfo,
@@ -142,32 +134,7 @@ fn allocate_graph(
     (commons, alloc_graph)
 }
 
-/// an allocation union is responsible for having one or multiple bindings allocated in the same space.
-/// an allocation union can have other nested structures of usings (for deeper branches)
-
-// TODO: make per-block allocation maps out of the whole allocation map and memory block's scope
-// the idea is to set further-scoped memory blocks to the right and keep more local memory to the
-// left
-
-/// Allocate the stack memory that a block will need for `alloca` objects (registers don't count
-/// yet)
-pub fn allocate_block_memory(
-    memory_usage: impl IntoIterator<Item = Binding>,
-    memory_sizes: &HashMap<Binding, usize>,
-) -> (usize, HashMap<Binding, usize>) {
-    // the memory usage is sorted, so we just have to fill it in
-    let mut map = HashMap::new();
-    let mut current_offset = 0;
-    for mem in memory_usage {
-        map.insert(mem, current_offset);
-        current_offset += memory_sizes[&mem];
-    }
-    (current_offset, map)
-}
-
-/// Make the dependency graph for memory
-
-pub type AllocMap = HashMap<Binding, usize>;
+type AllocMap = HashMap<Binding, usize>;
 
 /// Make the memory allocation map for the whole code
 fn make_alloc_map(code: &[BasicBlock]) -> AllocMap {

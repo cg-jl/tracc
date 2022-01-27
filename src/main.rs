@@ -25,22 +25,13 @@ fn run() -> Result<(), Box<dyn Error>> {
     let _out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
-    let (name, mut ir) = tracc::intermediate::generate::compile_program(program, &meta)?;
-    tracc::intermediate::cleanup::perform_cleanup(&mut ir);
-    tracc::codegen::memory::debug_what_im_doing(&ir);
-    println!();
-    println!();
+    let (_name, mut ir) = tracc::intermediate::generate::compile_program(program, &meta)?;
 
+    tracc::intermediate::cleanup::prepare_for_codegen(&mut ir);
+    let (memory_map, stack_size) = tracc::codegen::memory::figure_out_stack_allocs(&ir);
 
-    println!("func {}", name);
-    for (i, block) in ir.code.into_iter().enumerate() {
-        println!("BB{}:", i);
-        for stmt in block.statements {
-            println!("  {}", stmt);
-        }
-        println!("  {}", block.end);
-    }
-
+    dbg!(ir);
+    dbg!(memory_map, stack_size);
 
     // let program = tracc::variables::convert_program(program, &meta)?;
     // let output = program.compile();
