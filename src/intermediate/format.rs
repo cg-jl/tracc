@@ -3,8 +3,8 @@ use std::fmt;
 use crate::write_instruction;
 
 use super::{
-    Binding, BlockBinding, BlockEnd, Branch, ByteSize, CouldBeConstant, PhiDescriptor, Statement,
-    Value,
+    BasicBlock, Binding, BlockBinding, BlockEnd, Branch, ByteSize, CouldBeConstant, PhiDescriptor,
+    Statement, Value, IR,
 };
 
 // format impls
@@ -127,6 +127,22 @@ impl fmt::Display for BlockEnd {
     }
 }
 
+impl fmt::Display for BasicBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for stmt in &self.statements {
+            writeln!(f, "  {}", stmt)?;
+        }
+        writeln!(f, "  {}", self.end)
+    }
+}
+
+
+impl fmt::Debug for BasicBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 impl fmt::Display for Branch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -137,5 +153,19 @@ impl fmt::Display for Branch {
                 target_false,
             } => write_instruction!(f, "br", flag, target_true, target_false),
         }
+    }
+}
+
+impl fmt::Debug for IR {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "code: ")?;
+        for (block_index, block) in self.code.iter().enumerate() {
+            let bb = BlockBinding(block_index);
+            writeln!(f, "{}:", bb)?;
+            write!(f, "{}", block)?;
+        }
+
+        writeln!(f, "backwards map: {:?}", self.backwards_map)?;
+        writeln!(f, "forward map: {:?}", self.forward_map)
     }
 }
