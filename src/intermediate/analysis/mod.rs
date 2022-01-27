@@ -1,6 +1,4 @@
-use crate::intermediate::BasicBlock;
-
-use super::{BlockBinding, BlockEnd, BranchingMap};
+use super::{BlockBinding, BranchingMap};
 // leaf blocks are blocks that have predecessors but aren't parents of anything
 pub fn find_leaf_blocks<'code>(
     forward_map: &'code BranchingMap,
