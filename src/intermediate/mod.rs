@@ -1,19 +1,23 @@
 use std::collections::HashMap;
 
-use crate::codegen::assembly::Condition;
+pub mod analysis;
 pub mod cleanup;
 mod convert;
 mod format;
 pub mod generate;
+pub mod refactor;
+
+use crate::codegen::assembly::Condition;
 // IR: everything is divided into basic blocks
 
-pub type BackwardsMap = HashMap<BlockBinding, Vec<BlockBinding>>;
+pub type BranchingMap = HashMap<BlockBinding, Vec<BlockBinding>>;
 
 pub type IRCode = Vec<BasicBlock>;
 
 pub struct IR {
     pub code: IRCode,
-    pub backwards_map: BackwardsMap,
+    pub backwards_map: BranchingMap,
+    pub forward_map: BranchingMap,
 }
 
 pub struct BasicBlock {
@@ -21,7 +25,8 @@ pub struct BasicBlock {
     pub end: BlockEnd,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(transparent)]
 pub struct BlockBinding(pub usize);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -160,6 +165,17 @@ impl CouldBeConstant {
             CouldBeConstant::Binding(binding) => Some(binding),
             CouldBeConstant::Constant(_) => None,
         }
+    }
+}
+
+impl BlockEnd {
+    pub fn branch_list(&self) -> impl Iterator<Item = BlockBinding> + '_ {
+        match self {
+            BlockEnd::Branch(branch) => Some(branch.branch_list()),
+            BlockEnd::Return(_) => None,
+        }
+        .into_iter()
+        .flatten()
     }
 }
 

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::mem::MaybeUninit;
 
 use super::{
-    BackwardsMap, BasicBlock, Binding, BlockBinding, ByteSize, Condition, IRCode, Statement, Value,
+    BasicBlock, Binding, BlockBinding, BranchingMap, ByteSize, Condition, IRCode, Statement, Value,
     IR,
 };
 use crate::error::SourceMetadata;
@@ -14,32 +14,20 @@ mod expr;
 mod statement;
 use thiserror::Error;
 
-fn generate_backwards_graph(ir: &IRCode) -> BackwardsMap {
-    let mut backwards_map = BackwardsMap::new();
+pub fn generate_branching_graphs(ir: &IRCode) -> (BranchingMap, BranchingMap) {
+    let mut backwards_map = BranchingMap::new();
+    let mut forward_map = BranchingMap::new();
 
     // go through the branches and add a `from` to the targets
     for (block_index, block) in ir.iter().enumerate() {
         let bb = BlockBinding(block_index);
-        match block.end {
-            BlockEnd::Branch(branch) => match branch {
-                Branch::Unconditional { target } => {
-                    backwards_map.entry(target).or_default().push(bb);
-                }
-                Branch::Conditional {
-                    flag: _,
-                    target_true,
-                    target_false,
-                } => {
-                    backwards_map.entry(target_true).or_default().push(bb);
-                    backwards_map.entry(target_false).or_default().push(bb);
-                }
-            },
-            // a leaf block doesn't
-            BlockEnd::Return(_) => (),
+        for branch in block.end.branch_list() {
+            backwards_map.entry(branch).or_default().push(bb);
+            forward_map.entry(bb).or_default().push(branch);
         }
     }
 
-    backwards_map
+    (forward_map, backwards_map)
 }
 
 pub fn compile_program<'code>(
@@ -67,12 +55,14 @@ pub fn compile_program<'code>(
     end.assign(ret, 0);
     end.finish_block(&mut state, ret);
     let ir: IRCode = state.release().collect();
-    let backwards_map = generate_backwards_graph(&ir);
+    let (forward_map, backwards_map) = generate_branching_graphs(&ir);
+
     Ok((
         name,
         IR {
             code: ir,
             backwards_map,
+            forward_map,
         },
     ))
 }
