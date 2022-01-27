@@ -2,7 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::intermediate::{BackwardsMap, BasicBlock, Binding, BlockBinding, Statement, Value, IR};
+use crate::intermediate::{BasicBlock, Binding, BlockBinding, Statement, Value, IR};
+
+use super::assembly;
 
 // even if a piece of memory is not used in a block, if a leaf of it uses that piece of memory, the
 // block must keep that memory alive.
@@ -12,28 +14,17 @@ use crate::intermediate::{BackwardsMap, BasicBlock, Binding, BlockBinding, State
 //  - their init block
 //  - the blocks that use them directly
 
-// idea:
-//  - get all the leafs where each memory binding is last used
-//  - propagate those uses in the following way:
-//      - if a block uses some memory, and that memory is first defined in that block, it is not
-//      propagated back.
-//      - otherwise, all that memory that is not first defined in that block is wanted to be put at
-//      the **front** of the parent block's memory (each block will expect its memory offset to
-//      start at 0)
-//      - in case of two or more blocks having the same parent:
-//          - the common bindings are pushed to the front and reordered in the children
-//          - the non-common bindings will be designated a padded zone with the maximum of the
-//          added sizes and aligned to 4 bytes, and the parent's rest of bindings will have to be pushed
-//          back.
-//  - phases:
-//      - #0. Make the initial allocations for all the blocks as if no conflicts could happen
-//      (which isn't true)
-//      - #1. Gather all the new stuff that is going to be added to each block in a per-branch
-//      basis. (go from leaf blocks up to the top)
-//      - #2. Reorder everything so that all follows the rule (I'll get into that)
+// better idea:
+//  - start on the leaves
+//  - if the place is not taken, assign that index
 
-pub fn debug_what_im_doing(ir: &IR) {
-    dbg!(&ir.backwards_map);
+type AllocInfo = HashMap<BlockBinding, Vec<Binding>>;
+
+pub type MemoryMap = HashMap<Binding, assembly::Memory>;
+pub type MemoryIndices = HashMap<Binding, usize>;
+pub type MemoryList = Vec<assembly::Memory>;
+
+pub fn figure_out_stack_allocs(ir: &IR) -> (MemoryMap, usize) {
     let alloc_map = make_alloc_map(&ir.code);
     let dep_graph: AllocInfo = ir
         .code
@@ -42,94 +33,117 @@ pub fn debug_what_im_doing(ir: &IR) {
         .map(|(block_index, block)| {
             (
                 BlockBinding(block_index),
-                list_memory_deps(&block.statements)
-                    .into_iter()
-                    .map(AllocUnion::Single)
-                    .collect(),
+                list_memory_deps(&block.statements),
             )
         })
         .collect();
 
-    dbg!(&dep_graph);
-    let wanted_map = gather_branch_info(&ir.code, &ir.backwards_map, dep_graph);
+    let (mem_description, positions) = allocate_graph(ir, dep_graph);
 
-    dbg!(&alloc_map);
-    dbg!(&wanted_map);
+    // calculate the memory sizes & memory lists
+    let mut memories = Vec::with_capacity(mem_description.len());
+
+    let mut stack_offset = 0;
+
+    for list in mem_description {
+        let max_size = list
+            .into_iter()
+            .map(|binding| alloc_map[&binding])
+            .max()
+            .expect("Memory descriptions can't have empty lists");
+
+        memories.push(assembly::Memory {
+            register: assembly::Register::StackPointer,
+            // determined size: the memories are listed from left to right
+            offset: assembly::Offset::Determined(stack_offset),
+        });
+        stack_offset += max_size;
+    }
+
+    // let's merge the positions and memories into memory map that
+    // can be easily accessed by the rest of codegen
+    (
+        positions
+            .into_iter()
+            .map(|(binding, memory_index)| (binding, memories[memory_index]))
+            .collect(),
+        stack_offset, // note: this does not align the stack bytes yet because it might need more for callee-saved registers
+    )
 }
 
-pub type AllocInfo = HashMap<BlockBinding, Vec<AllocUnion>>;
+// assumes to != 0
+pub fn align(value: usize, to: usize) -> usize {
+    if value % to == 0 {
+        value
+    } else {
+        to * (value / to + 1)
+    }
+}
+
+fn allocate_graph(
+    ir: &IR,
+    mut dep_graph: AllocInfo,
+) -> (Vec<Vec<Binding>>, HashMap<Binding, usize>) {
+    let mut commons: Vec<Vec<Binding>> = Vec::new();
+    let mut alloc_graph = HashMap::new();
+    use crate::intermediate::analysis;
+
+    let mut queue: Vec<_> =
+        analysis::find_leaf_blocks(&ir.forward_map, &ir.backwards_map).collect();
+
+    // note: we need a visited set to avoid loops
+    let mut visited = HashSet::new();
+
+    while !queue.is_empty() {
+        let block = queue.pop().unwrap();
+
+        if visited.contains(&block) {
+            continue;
+        }
+
+        visited.insert(block);
+
+        // these are all the dependencies that this block has
+        let deps = dep_graph.remove(&block).unwrap_or_default();
+
+        // for each dependency:
+        for dep in deps.iter().copied() {
+            // if the dependency is already allocated, then we don't need to do anything
+            if alloc_graph.contains_key(&dep) {
+                continue;
+            }
+
+            // otherwise, we'll look at our commons map and see if we have any clashes
+            // with the rest of the dependencies
+            if let Some(common_index) =
+                commons.iter().enumerate().find_map(|(index, common_list)| {
+                    if common_list.iter().all(|mem| !deps.contains(mem)) {
+                        Some(index)
+                    } else {
+                        None
+                    }
+                })
+            {
+                // we found an already existing list that doesn't clash!
+                // set it to allocate an we're in
+                alloc_graph.insert(dep, common_index);
+                commons[common_index].push(dep);
+            } else {
+                // otherwise, we'll assign a new spot
+                alloc_graph.insert(dep, commons.len());
+                commons.push(vec![dep]);
+            }
+        }
+
+        // add all its parents to the queue
+        queue.extend(ir.backwards_map.get(&block).into_iter().flatten());
+    }
+
+    (commons, alloc_graph)
+}
 
 /// an allocation union is responsible for having one or multiple bindings allocated in the same space.
 /// an allocation union can have other nested structures of usings (for deeper branches)
-#[derive(std::clone::Clone)]
-pub enum AllocUnion {
-    Single(Binding),
-    Many(Vec<AllocUnion>),
-}
-
-impl AllocUnion {}
-
-impl std::fmt::Debug for AllocUnion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AllocUnion::Single(single) => single.fmt(f),
-            AllocUnion::Many(many) => {
-                write!(f, "{:?}", many)
-            }
-        }
-    }
-}
-
-// pub enum Alloc {
-//     Single(Binding),
-//     Branching(Vec<Binding>),
-// }
-
-fn gather_branch_info(
-    code: &[BasicBlock],
-    backwards_map: &BackwardsMap,
-    exisiting_allocs: AllocInfo,
-) -> HashMap<BlockBinding, AllocInfo> {
-    let mut result: HashMap<_, AllocInfo> = HashMap::with_capacity(code.len());
-
-    // add all the 'self' blocks
-    for block_index in 0..code.len() {
-        let bb = BlockBinding(block_index);
-        result.insert(bb, {
-            let mut info = AllocInfo::new();
-            info.insert(bb, exisiting_allocs.get(&bb).cloned().unwrap_or_default());
-            info
-        });
-    }
-
-    for leaf_block in super::find_leaf_blocks(code) {
-        let mut queue = vec![leaf_block];
-        let mut visited = HashSet::new();
-        while !queue.is_empty() {
-            let current_leaf = queue.pop().unwrap();
-            if !visited.contains(&current_leaf) {
-                visited.insert(current_leaf);
-                for parent in backwards_map
-                    .get(&current_leaf)
-                    .into_iter()
-                    .flat_map(|x| x.iter())
-                    .copied()
-                {
-                    let info = result
-                        .get_mut(&parent)
-                        .expect("already inserted with 'self' blocks");
-                    assert!(
-                        info.insert(current_leaf, exisiting_allocs[&current_leaf].clone())
-                            .is_none(),
-                        "should not have any value yet"
-                    );
-                    queue.push(parent);
-                }
-            }
-        }
-    }
-    result
-}
 
 // TODO: make per-block allocation maps out of the whole allocation map and memory block's scope
 // the idea is to set further-scoped memory blocks to the right and keep more local memory to the
@@ -151,30 +165,7 @@ pub fn allocate_block_memory(
     (current_offset, map)
 }
 
-fn deps_per_block(code: &[BasicBlock]) -> HashMap<BlockBinding, Vec<Binding>> {
-    code.iter()
-        .enumerate()
-        .map(|(block_index, block)| {
-            (
-                BlockBinding(block_index),
-                list_memory_deps(&block.statements),
-            )
-        })
-        .collect()
-}
-
 /// Make the dependency graph for memory
-fn make_dependency_graph(code: &[BasicBlock]) -> HashMap<Binding, Vec<BlockBinding>> {
-    let mut graph: HashMap<_, Vec<_>> = HashMap::new();
-
-    for (block_index, block) in code.iter().enumerate() {
-        let bb = BlockBinding(block_index);
-        for mem in list_memory_deps(&block.statements) {
-            graph.entry(mem).or_default().push(bb);
-        }
-    }
-    graph
-}
 
 pub type AllocMap = HashMap<Binding, usize>;
 
