@@ -30,7 +30,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     tracc::intermediate::cleanup::prepare_for_codegen(&mut ir);
     let (memory_map, stack_size) = tracc::codegen::memory::figure_out_stack_allocs(&ir);
 
-    dbg!(ir);
+    tracc::codegen::registers::debug_what_im_doing(&ir);
     dbg!(memory_map, stack_size);
 
     // let program = tracc::variables::convert_program(program, &meta)?;
