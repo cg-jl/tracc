@@ -14,6 +14,7 @@ mod expr;
 mod statement;
 use thiserror::Error;
 
+
 pub fn generate_branching_graphs(ir: &IRCode) -> (BranchingMap, BranchingMap) {
     let mut backwards_map = BranchingMap::new();
     let mut forward_map = BranchingMap::new();
@@ -89,6 +90,7 @@ impl BlockBuilder {
             value: value.into(),
         })
     }
+    // TODO: use type ids and allocate by alignment, not by size (values have to be aligned)
     pub fn allocate(&mut self, target: Binding, size: usize) {
         self.assign(target, Value::Allocate { size })
     }
