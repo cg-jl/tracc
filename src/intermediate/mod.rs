@@ -61,6 +61,8 @@ pub enum Statement {
     },
 }
 
+// TODO: merge binary ops from `Value` into the same value kind, same for unops
+
 // phi, cmp, add, sub, neg.... all operations
 #[derive(Debug, PartialEq)]
 pub enum Value {
@@ -204,5 +206,19 @@ impl Branch {
                 },
             }
         })
+    }
+}
+
+impl core::ops::Index<BlockBinding> for Vec<BasicBlock> {
+    type Output = BasicBlock;
+
+    fn index(&self, index: BlockBinding) -> &Self::Output {
+        &self[index.0]
+    }
+}
+
+impl core::ops::IndexMut<BlockBinding> for Vec<BasicBlock> {
+    fn index_mut(&mut self, index: BlockBinding) -> &mut Self::Output {
+        &mut self[index.0]
     }
 }
