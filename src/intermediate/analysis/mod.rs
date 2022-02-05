@@ -32,6 +32,45 @@ pub fn find_assignment_value(code: &[BasicBlock], binding: Binding) -> Option<&V
         })
 }
 
+pub fn predecessors(ir: &IR, binding: BlockBinding) -> impl Iterator<Item = BlockBinding> + '_ {
+    BottomTopTraversal {
+        backwards_map: &ir.backwards_map,
+        visited: HashSet::new(),
+        queue: vec![binding],
+    }
+}
+pub struct BottomTopTraversal<'code> {
+    backwards_map: &'code BranchingMap,
+    visited: HashSet<BlockBinding>,
+    queue: Vec<BlockBinding>,
+}
+
+pub fn iterate_with_bindings(
+    code: &[BasicBlock],
+) -> impl Iterator<Item = (BlockBinding, &BasicBlock)> {
+    code.iter()
+        .enumerate()
+        .map(|(index, block)| (BlockBinding(index), block))
+}
+
+impl<'code> Iterator for BottomTopTraversal<'code> {
+    type Item = BlockBinding;
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.queue.pop()?;
+        self.visited.insert(next);
+        let visited_ref = &self.visited;
+        let parents = self
+            .backwards_map
+            .get(&next)
+            .into_iter()
+            .flatten()
+            .filter(|x| !visited_ref.contains(x))
+            .copied();
+        self.queue.extend(parents);
+        Some(next)
+    }
+}
+
 pub struct TopBottomTraversal<'code> {
     /// the code graph
     forward_map: &'code BranchingMap,
