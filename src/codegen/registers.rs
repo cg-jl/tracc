@@ -37,18 +37,6 @@ use super::assembly::Condition;
 //     Extra memory will be given in size directly and will need to be aligned to 4 bytes
 //     (the stack needs everything aligned to at least 4 bytes)
 
-#[derive(Debug)]
-enum Hint {
-    /// The binding is used in a `ret` statement
-    Return,
-    /// The binding is used to branch to different blocks
-    CmpResult(Condition),
-    /// The binding is used in a phi function to other binding
-    Phi { target: Binding },
-    /// The binding is a pointer to a stack-allocated frame, ignore it
-    AllocPtr,
-}
-
 #[derive(Debug, Clone, Copy)]
 enum Usage {
     /// the binding is used in a computation of other binding
@@ -62,7 +50,7 @@ enum Usage {
 }
 type UsageMap = HashMap<Binding, Vec<Usage>>;
 
-// get what each binding depends on
+// get what each binding is used for
 fn get_usage_map(ir: &IR) -> UsageMap {
     let mut usage_map = UsageMap::new();
 
@@ -100,6 +88,115 @@ fn get_usage_map(ir: &IR) -> UsageMap {
     usage_map
 }
 
+#[derive(Clone, Copy)]
+struct BlockAddress {
+    pub block: BlockBinding,
+    pub statement: usize,
+}
+
+impl std::fmt::Debug for BlockAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}[{}]", self.block, self.statement)
+    }
+}
+
+#[derive(Clone)]
+struct Lifetime {
+    pub start: BlockAddress,
+    pub ends: HashMap<BlockBinding, usize>,
+}
+// TODO: move `Debug` impls to a separate module
+
+impl std::fmt::Debug for Lifetime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        struct AddressMapDebugImpl<'a>(&'a HashMap<BlockBinding, usize>);
+        impl<'a> std::fmt::Debug for AddressMapDebugImpl<'a> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_list()
+                    .entries(
+                        self.0
+                            .iter()
+                            .map(|(&block, &statement)| BlockAddress { block, statement }),
+                    )
+                    .finish()
+            }
+        }
+        f.debug_struct("Lifetime")
+            .field("start", &self.start)
+            .field("ends", &AddressMapDebugImpl(&self.ends))
+            .finish()
+    }
+}
+
+impl Lifetime {
+    pub fn new(start: BlockAddress) -> Self {
+        Self {
+            start,
+            ends: HashMap::new(),
+        }
+    }
+    /// If the binding is local to the block, it will return the statement index
+    pub fn local_end(&self) -> Option<(BlockBinding, usize)> {
+        self.ends
+            .get(&self.start.block)
+            .map(|&index| (self.start.block, index))
+    }
+    /// Checks whether the binding is local to the block (is not used in other blocks)
+    pub fn is_local_to_block(&self) -> bool {
+        // if the code is correct, and the binding is local, once it has been ended in the block
+        // it's defined then no more uses can happen
+        self.ends.contains_key(&self.start.block)
+    }
+    // pub fn encloses(&self, other: &Self, ir: &IR) -> bool {
+    //     use std::cmp::Ordering;
+    //
+    //     // for each of the blocks that each binding dies in, we will get their
+    //     // predecessors, and we'll only care about the common lines of predecessors
+    // }
+}
+
+type LifetimeMap = HashMap<Binding, Lifetime>;
+
+fn get_lifetimes(ir: &IR) -> LifetimeMap {
+    let mut map = LifetimeMap::new();
+    for block in analysis::TopBottomTraversal::from(ir) {
+        let block_ref = &ir.code[block];
+        for (statement_index, statement) in block_ref.statements.iter().enumerate() {
+            use analysis::BindingUsage;
+
+            for dep in statement.binding_deps() {
+                let dep_lifetime = map.get_mut(&dep).expect("should have known the binding");
+                dep_lifetime
+                    .ends
+                    .entry(block)
+                    .and_modify(|curr| {
+                        if *curr < statement_index {
+                            *curr = statement_index;
+                        }
+                    })
+                    .or_insert(statement_index);
+            }
+
+            if let Statement::Assign { index, .. } = statement {
+                assert!(
+                    map.insert(
+                        *index,
+                        Lifetime::new(BlockAddress {
+                            block,
+                            statement: statement_index
+                        })
+                    )
+                    .is_none(),
+                    "should not have known this binding from earlier"
+                );
+            }
+        }
+    }
+    map
+}
+
+// where does each binding die?
+
 //fn uses_from_deps(deps: &HashMap<Binding, Vec<Binding>>) -> UsageMap {}
 
 // TODO: figure out how cpu status flags are affected by each binding and if the last modifier to
@@ -115,5 +212,6 @@ fn get_usage_map(ir: &IR) -> UsageMap {
 
 pub fn debug_what_im_doing(ir: &IR) {
     let usage_map = get_usage_map(ir);
-    dbg!(ir, usage_map);
+    let lifetime_map = get_lifetimes(ir);
+    dbg!(ir, usage_map, lifetime_map);
 }
