@@ -209,6 +209,13 @@ impl Branch {
     }
 }
 
+impl core::ops::Index<BlockBinding> for IR {
+    type Output = BasicBlock;
+    fn index(&self, index: BlockBinding) -> &Self::Output {
+        &self.code[index.0]
+    }
+}
+
 impl core::ops::Index<BlockBinding> for Vec<BasicBlock> {
     type Output = BasicBlock;
 

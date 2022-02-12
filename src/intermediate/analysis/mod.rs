@@ -16,6 +16,18 @@ pub fn find_leaf_blocks<'code>(
         .filter(move |key| !forward_map.contains_key(key))
 }
 
+pub fn is_indirect_child_of(
+    ir: &IR,
+    possible_child: BlockBinding,
+    possible_parent: BlockBinding,
+) -> bool {
+    if possible_child == possible_parent {
+        false
+    } else {
+        antecessors(ir, possible_parent).any(|indirect_child| indirect_child == possible_child)
+    }
+}
+
 pub fn find_assignment_value(code: &[BasicBlock], binding: Binding) -> Option<&Value> {
     code.iter()
         .flat_map(|block| block.statements.iter())
@@ -32,7 +44,7 @@ pub fn find_assignment_value(code: &[BasicBlock], binding: Binding) -> Option<&V
         })
 }
 
-pub fn predecessors(ir: &IR, binding: BlockBinding) -> impl Iterator<Item = BlockBinding> + '_ {
+pub fn antecessors(ir: &IR, binding: BlockBinding) -> impl Iterator<Item = BlockBinding> + '_ {
     BottomTopTraversal {
         backwards_map: &ir.backwards_map,
         visited: HashSet::new(),
@@ -43,6 +55,25 @@ pub struct BottomTopTraversal<'code> {
     backwards_map: &'code BranchingMap,
     visited: HashSet<BlockBinding>,
     queue: Vec<BlockBinding>,
+}
+
+impl<'code> BottomTopTraversal<'code> {
+    fn new(ir: &'code IR, queue: Vec<BlockBinding>) -> Self {
+        Self {
+            backwards_map: &ir.backwards_map,
+            visited: HashSet::new(),
+            queue,
+        }
+    }
+}
+
+impl<'code> From<&'code IR> for BottomTopTraversal<'code> {
+    fn from(ir: &'code IR) -> Self {
+        Self::new(
+            ir,
+            find_leaf_blocks(&ir.forward_map, &ir.backwards_map).collect(),
+        )
+    }
 }
 
 pub fn iterate_with_bindings(
@@ -71,6 +102,26 @@ impl<'code> Iterator for BottomTopTraversal<'code> {
     }
 }
 
+pub fn predecessors(ir: &IR, block: BlockBinding) -> TopBottomTraversal {
+    TopBottomTraversal::new(ir, vec![block])
+}
+
+pub fn predecessors_filtering_branches<'ir>(
+    ir: &'ir IR,
+    block_from: BlockBinding,
+    mut continue_branch: impl FnMut(BlockBinding) -> bool + 'ir,
+) -> impl Iterator<Item = BlockBinding> + 'ir {
+    let mut queue = vec![block_from];
+    let mut visited = HashSet::new();
+    std::iter::from_fn(move || {
+        let next = queue.pop().filter(|block| visited.insert(*block))?;
+        if continue_branch(next) {
+            queue.extend(ir.forward_map.get(&next).into_iter().flatten().copied());
+        }
+        Some(next)
+    })
+}
+
 pub struct TopBottomTraversal<'code> {
     /// the code graph
     forward_map: &'code BranchingMap,
@@ -80,13 +131,62 @@ pub struct TopBottomTraversal<'code> {
     queue: Vec<BlockBinding>,
 }
 
-impl<'code> From<&'code IR> for TopBottomTraversal<'code> {
-    fn from(code: &'code IR) -> Self {
+impl<'ir> TopBottomTraversal<'ir> {
+    fn new(ir: &'ir IR, queue: Vec<BlockBinding>) -> Self {
         Self {
-            forward_map: &code.forward_map,
-            queue: vec![BlockBinding(0)],
+            forward_map: &ir.forward_map,
+            queue,
             visited: HashSet::new(),
         }
+    }
+    // exclude a block from being processed for its children (i.e add it to the visited set and remove it from the
+    // queue)
+    pub fn exclude(&mut self, exclude_block: BlockBinding) {
+        self.queue.retain(|x| x != &exclude_block);
+        self.visited.insert(exclude_block);
+    }
+
+    pub fn exclude_flatten<T, I: IntoIterator<Item = T> + 'ir>(
+        mut self,
+        mut mapper: impl FnMut(BlockBinding) -> I + 'ir,
+    ) -> impl Iterator<Item = T> + 'ir {
+        let mut current = None;
+        std::iter::from_fn(move || {
+            if current.is_none() {
+                let next_block = self.next()?;
+                current = Some(mapper(next_block).into_iter());
+            }
+            let curr_iter = current.as_mut()?;
+            if let Some(item) = curr_iter.next() {
+                Some(item)
+            } else {
+                current = None;
+                None
+            }
+        })
+    }
+
+    // exclude entire branches from running (not the same as filtering the list, excluding a block
+    // will exclude the entire graph)
+    pub fn excluding(
+        mut self,
+        mut exclude_fn: impl FnMut(BlockBinding) -> bool + 'ir,
+    ) -> impl Iterator<Item = BlockBinding> + 'ir {
+        std::iter::from_fn(move || {
+            let next = self.next()?;
+            if exclude_fn(next) {
+                self.exclude(next);
+                None
+            } else {
+                Some(next)
+            }
+        })
+    }
+}
+
+impl<'code> From<&'code IR> for TopBottomTraversal<'code> {
+    fn from(code: &'code IR) -> Self {
+        Self::new(code, vec![BlockBinding(0)])
     }
 }
 

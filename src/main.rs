@@ -28,10 +28,21 @@ fn run() -> Result<(), Box<dyn Error>> {
     let (_name, mut ir) = tracc::intermediate::generate::compile_program(program, &meta)?;
 
     tracc::intermediate::cleanup::prepare_for_codegen(&mut ir);
-    let (memory_map, stack_size) = tracc::codegen::memory::figure_out_stack_allocs(&ir);
+    //    let (memory_map, stack_size) = tracc::codegen::memory::figure_out_stack_allocs(&ir);
 
-    tracc::codegen::registers::debug_what_im_doing(&ir);
-    dbg!(memory_map, stack_size);
+    use tracc::codegen::assembly::Condition;
+    use tracc::intermediate::*;
+
+    let collisions = tracc::intermediate::analysis::lifetimes::compute_lifetime_collisions(&ir);
+
+    dbg!(tracc::codegen::memory::figure_out_allocations(
+        &ir,
+        tracc::codegen::memory::make_alloc_map(&ir.code),
+        &collisions
+    ));
+
+    //tracc::codegen::registers::debug_what_im_doing(&ir);
+    // dbg!(memory_map, stack_size);
 
     // let program = tracc::variables::convert_program(program, &meta)?;
     // let output = program.compile();
