@@ -2,6 +2,9 @@ use std::collections::HashSet;
 
 use super::{BasicBlock, Binding, BlockBinding, BranchingMap, Statement, Value, IR};
 mod binding_usage;
+pub mod lifetimes;
+
+pub use lifetimes::{compute_lifetimes, Lifetime, LifetimeMap, compute_lifetime_collisions, CollisionMap};
 
 pub use binding_usage::BindingUsage;
 
