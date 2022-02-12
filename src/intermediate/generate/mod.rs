@@ -14,8 +14,7 @@ mod expr;
 mod statement;
 use thiserror::Error;
 
-
-pub fn generate_branching_graphs(ir: &IRCode) -> (BranchingMap, BranchingMap) {
+fn generate_branching_graphs(ir: &IRCode) -> (BranchingMap, BranchingMap) {
     let mut backwards_map = BranchingMap::new();
     let mut forward_map = BranchingMap::new();
 
@@ -29,6 +28,17 @@ pub fn generate_branching_graphs(ir: &IRCode) -> (BranchingMap, BranchingMap) {
     }
 
     (forward_map, backwards_map)
+}
+
+impl From<Vec<BasicBlock>> for IR {
+    fn from(code: Vec<BasicBlock>) -> Self {
+        let (forward_map, backwards_map) = generate_branching_graphs(&code);
+        Self {
+            forward_map,
+            backwards_map,
+            code,
+        }
+    }
 }
 
 pub fn compile_program<'code>(
