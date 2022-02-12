@@ -9,14 +9,12 @@ use super::assembly;
 // even if a piece of memory is not used in a block, if a leaf of it uses that piece of memory, the
 // block must keep that memory alive.
 
-type AllocInfo = HashMap<BlockBinding, Vec<Binding>>;
+type DependencyMap = HashMap<BlockBinding, Vec<Binding>>;
 
 pub type MemoryMap = HashMap<Binding, assembly::Memory>;
 
-pub fn figure_out_stack_allocs(ir: &IR) -> (MemoryMap, usize) {
-    let alloc_map = make_alloc_map(&ir.code);
-    let dep_graph: AllocInfo = ir
-        .code
+fn get_dep_graph(ir: &IR) -> DependencyMap {
+    ir.code
         .iter()
         .enumerate()
         .map(|(block_index, block)| {
@@ -25,39 +23,7 @@ pub fn figure_out_stack_allocs(ir: &IR) -> (MemoryMap, usize) {
                 list_memory_deps(&block.statements),
             )
         })
-        .collect();
-
-    let (mem_description, positions) = allocate_graph(ir, dep_graph);
-
-    // calculate the memory sizes & memory lists
-    let mut memories = Vec::with_capacity(mem_description.len());
-
-    let mut stack_offset = 0;
-
-    for list in mem_description {
-        let max_size = list
-            .into_iter()
-            .map(|binding| alloc_map[&binding])
-            .max()
-            .expect("Memory descriptions can't have empty lists");
-
-        memories.push(assembly::Memory {
-            register: assembly::Register::StackPointer,
-            // determined size: the memories are listed from left to right
-            offset: assembly::Offset::Determined(stack_offset),
-        });
-        stack_offset += max_size;
-    }
-
-    // let's merge the positions and memories into memory map that
-    // can be easily accessed by the rest of codegen
-    (
-        positions
-            .into_iter()
-            .map(|(binding, memory_index)| (binding, memories[memory_index]))
-            .collect(),
-        stack_offset, // note: this does not align the stack bytes yet because it might need more for callee-saved registers
-    )
+        .collect()
 }
 
 // assumes to != 0
@@ -72,72 +38,75 @@ pub fn align(value: usize, to: usize) -> usize {
 // what allocate_graph does:
 //  - start on the leaves and follow through their preceding blocks
 //  - if the place is not taken, assign that index
-fn allocate_graph(
-    ir: &IR,
-    mut dep_graph: AllocInfo,
-) -> (Vec<Vec<Binding>>, HashMap<Binding, usize>) {
-    let mut commons: Vec<Vec<Binding>> = Vec::new();
-    let mut alloc_graph = HashMap::new();
-    use crate::intermediate::analysis;
-
-    let mut queue: Vec<_> =
-        analysis::find_leaf_blocks(&ir.forward_map, &ir.backwards_map).collect();
-
-    // note: we need a visited set to avoid loops
-    let mut visited = HashSet::new();
-
-    while !queue.is_empty() {
-        let block = queue.pop().unwrap();
-
-        if visited.contains(&block) {
-            continue;
-        }
-
-        visited.insert(block);
-
-        // these are all the dependencies that this block has
-        let deps = dep_graph.remove(&block).unwrap_or_default();
-
-        // for each dependency:
-        for dep in deps.iter().copied() {
-            // if the dependency is already allocated, then we don't need to do anything
-            if alloc_graph.contains_key(&dep) {
-                continue;
-            }
-
-            // otherwise, we'll look at our commons map and see if we have any clashes
-            // with the rest of the dependencies
-            if let Some(common_index) =
-                commons.iter().enumerate().find_map(|(index, common_list)| {
-                    if common_list.iter().all(|mem| !deps.contains(mem)) {
-                        Some(index)
-                    } else {
-                        None
-                    }
-                })
-            {
-                // we found an already existing list that doesn't clash!
-                // set it to allocate an we're in
-                alloc_graph.insert(dep, common_index);
-                commons[common_index].push(dep);
-            } else {
-                // otherwise, we'll assign a new spot
-                alloc_graph.insert(dep, commons.len());
-                commons.push(vec![dep]);
-            }
-        }
-
-        // add all its parents to the queue
-        queue.extend(ir.backwards_map.get(&block).into_iter().flatten());
-    }
-
-    (commons, alloc_graph)
-}
+use crate::intermediate::analysis;
 
 type AllocMap = HashMap<Binding, usize>;
 
+pub fn figure_out_allocations(
+    ir: &IR,
+    allocations_needed: AllocMap,
+    collision_map: &analysis::lifetimes::CollisionMap,
+) -> (HashMap<Binding, usize>, usize) {
+    let mut local_collisions: Vec<(_, HashSet<_>)> = collision_map
+        .iter()
+        .filter_map(|(k, set)| {
+            if allocations_needed.contains_key(k) {
+                Some((
+                    *k,
+                    set.iter()
+                        .filter(|k| allocations_needed.contains_key(k))
+                        .copied()
+                        .collect(),
+                ))
+            } else {
+                None
+            }
+        })
+        .collect();
+    local_collisions.sort_by_key(|(_, v)| v.len());
+    let mut blocks: Vec<HashSet<_>> = Vec::new();
+
+    for (binding, collisions) in local_collisions {
+        // if we find some block where there are no other collisions, we can put it there.
+        // otherwise we'll have to allocate a new block for it.
+        if let Some(block_index) = blocks.iter().enumerate().find_map(|(i, set)| {
+            // we want to know if there are no collisions in common
+            if set.is_disjoint(&collisions) {
+                Some(i)
+            } else {
+                None
+            }
+        }) {
+            blocks[block_index].insert(binding);
+        } else {
+            let mut new_block = HashSet::new();
+            new_block.insert(binding);
+            blocks.push(new_block);
+        }
+    }
+
+    // allocation is done, now we gotta transform the data into offsets
+
+    let mut offsets = HashMap::new();
+    let mut size = 0;
+
+    for block in blocks {
+        // assign the offset as the current size
+        offsets.extend(block.iter().copied().map(|binding| (binding, size)));
+
+        // now we bump the size by the max value of those allocations
+        size += block
+            .into_iter()
+            .map(|binding| allocations_needed[&binding])
+            .max()
+            .unwrap();
+    }
+
+    (offsets, size)
+}
+
 /// Make the memory allocation map for the whole code
-fn make_alloc_map(code: &[BasicBlock]) -> AllocMap {
+pub fn make_alloc_map(code: &[BasicBlock]) -> AllocMap {
     code.iter()
         .flat_map(|block| list_memory_defs(&block.statements))
         .collect()
@@ -181,3 +150,6 @@ fn list_memory_deps(block: &[Statement]) -> Vec<Binding> {
     }
     bindings
 }
+
+#[cfg(test)]
+mod tests {}
