@@ -1,6 +1,57 @@
+use crate::intermediate::{Binding, CouldBeConstant, Statement, Value};
+use crate::intermediate::{BlockEnd, Branch, IR};
+use std::collections::HashMap;
 use std::iter::FromIterator;
 
-use crate::intermediate::{Binding, CouldBeConstant, Statement, Value};
+#[derive(Debug, Clone, Copy)]
+pub enum Usage {
+    /// the binding is used in a computation of other binding
+    Binding(Binding),
+    /// the binding is used in a store
+    Store(Binding),
+    /// the binding is used in a return statement
+    Return,
+    /// the binding is used as a switch for branch
+    Branch,
+}
+pub type UsageMap = HashMap<Binding, Vec<Usage>>;
+
+// get what each binding is used for
+pub fn get_usage_map(ir: &IR) -> UsageMap {
+    let mut usage_map = UsageMap::new();
+
+    for block in &ir.code {
+        for statement in &block.statements {
+            match statement {
+                Statement::Store {
+                    mem_binding,
+                    binding,
+                    ..
+                } => usage_map
+                    .entry(*binding)
+                    .or_default()
+                    .push(Usage::Store(*mem_binding)),
+                Statement::Assign { index, value } => {
+                    for dep in value.binding_deps() {
+                        usage_map
+                            .entry(dep)
+                            .or_default()
+                            .push(Usage::Binding(*index));
+                    }
+                }
+            }
+        }
+
+        match block.end {
+            BlockEnd::Return(ret) => usage_map.entry(ret).or_default().push(Usage::Return),
+            BlockEnd::Branch(Branch::Conditional { flag, .. }) => {
+                usage_map.entry(flag).or_default().push(Usage::Branch)
+            }
+            BlockEnd::Branch(Branch::Unconditional { .. }) => {}
+        }
+    }
+    usage_map
+}
 
 pub trait BindingUsage {
     // Check if a binding is used

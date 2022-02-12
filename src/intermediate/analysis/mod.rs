@@ -4,9 +4,11 @@ use super::{BasicBlock, Binding, BlockBinding, BranchingMap, Statement, Value, I
 mod binding_usage;
 pub mod lifetimes;
 
-pub use lifetimes::{compute_lifetimes, Lifetime, LifetimeMap, compute_lifetime_collisions, CollisionMap};
+pub use lifetimes::{
+    compute_lifetime_collisions, compute_lifetimes, CollisionMap, Lifetime, LifetimeMap,
+};
 
-pub use binding_usage::BindingUsage;
+pub use binding_usage::{get_usage_map, BindingUsage, UsageMap};
 
 // leaf blocks are blocks that have predecessors but aren't parents of anything
 pub fn find_leaf_blocks<'code>(
