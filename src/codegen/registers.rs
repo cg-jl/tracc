@@ -1,13 +1,5 @@
 //! Register analysis of the code
 
-use std::collections::{HashMap, HashSet};
-
-use crate::intermediate::{
-    analysis, Binding, BlockBinding, BlockEnd, Branch, Statement, Value, IR,
-};
-
-use super::assembly::Condition;
-
 // #1. Get what each binding is used for, call it hints:
 //      - returning from a function:
 //          - the binding is used in a `ret` statement
