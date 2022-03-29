@@ -21,6 +21,7 @@ pub fn compile_block(
         out.extend(match statement {
             Statement::Return(expr) => {
                 compile_expr(expr, bail_return_target, registers, stack, var_ctx, false)
+                    .chain_single(Instruction::Ret)
             }
             Statement::Single(expr) => {
                 compile_expr(expr, bail_return_target, registers, stack, var_ctx, true)

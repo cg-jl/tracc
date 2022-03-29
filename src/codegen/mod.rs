@@ -72,6 +72,9 @@ impl AssemblyOutput {
     pub fn cons_directive(&mut self, directive: Directive) {
         self.cons_asm(Assembly::Directive(directive))
     }
+    pub fn iter(&self) -> impl Iterator<Item = &Assembly> {
+        self.inner.iter()
+    }
     pub fn iter_mut(&mut self) -> IterMut<Assembly> {
         self.inner.iter_mut()
     }

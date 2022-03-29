@@ -1,6 +1,6 @@
 use super::assembly::{Assembly, Directive, Instruction};
-use super::hlir::Function;
 use super::block::compile_block;
+use super::hlir::Function;
 use super::load_immediate;
 use super::registers::with_registers;
 use super::registers::RegisterDescriptor;
@@ -37,7 +37,6 @@ impl Compile for Function<'_> {
                 })
             })
         }));
-        output.push_instruction(Instruction::Ret);
         output
     }
 }
