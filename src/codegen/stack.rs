@@ -91,11 +91,32 @@ impl StackManager {
                 lhs: ImmutableRegister(Register::StackPointer),
                 rhs: Data::Immediate(final_allocated_size as u64),
             });
-            instructions.push_instruction(Instruction::Add {
+            // before any returns, we have to push the instruction to restore the stack
+            let restore_stack = Instruction::Add {
                 target: MutableRegister(Register::StackPointer),
                 lhs: ImmutableRegister(Register::StackPointer),
                 rhs: Data::Immediate(final_allocated_size as u64),
-            });
+            };
+            let mut indices: Vec<_> = instructions
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, asm)| {
+                    if matches!(asm, Assembly::Instruction(Instruction::Ret)) {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // do the insertions iterating back to front to avoid readjusting indices
+            indices.sort_unstable();
+            instructions.inner.reserve(indices.len());
+            for insert_index in indices.into_iter().rev() {
+                instructions
+                    .inner
+                    .insert(insert_index, restore_stack.into());
+            }
         }
 
         instructions

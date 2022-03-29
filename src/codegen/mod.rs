@@ -112,6 +112,9 @@ impl AssemblyOutput {
     pub fn push_label(&mut self, label: Label) {
         self.push_asm(Assembly::Label(label.to_string()))
     }
+    pub fn last(&self) -> Option<&Assembly> {
+        self.inner.back()
+    }
 }
 
 impl<A: Into<Assembly>> From<A> for AssemblyOutput {

@@ -1,3 +1,4 @@
+use super::assembly::MutableRegister;
 use super::assembly::{Assembly, Directive, Instruction};
 use super::block::compile_block;
 use super::hlir::Function;
@@ -37,6 +38,24 @@ impl Compile for Function<'_> {
                 })
             })
         }));
+        // if main hasn't had a return yet, add it.
+        if is_main
+            && !matches!(
+                output.last(),
+                Some(&Assembly::Instruction(Instruction::Ret))
+            )
+        {
+            // return zero.
+            output.push_instruction(Instruction::Mov {
+                target: MutableRegister(super::assembly::Register::GeneralPurpose {
+                    index: 0,
+                    bit_size: super::assembly::BitSize::Bit32,
+                }),
+                source: super::assembly::Data::immediate(0, super::assembly::BitSize::Bit32),
+            });
+            output.push_instruction(Instruction::Ret);
+        }
+
         output
     }
 }
