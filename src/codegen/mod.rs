@@ -22,7 +22,11 @@ pub fn load_immediate(
     registers.using_register_mutably(stack, target, BitSize::Bit32, |_, _, target| {
         Instruction::Mov {
             target,
-            source: Data::Immediate(value as u64),
+            // UNSAFE: safe, they have the same bytes and bits.
+            source: Data::immediate(
+                unsafe { std::mem::transmute::<i32, u32>(value) } as u64,
+                BitSize::Bit32,
+            ),
         }
     })
 }

@@ -539,11 +539,11 @@ impl const OpFlags for BitOp {
 
 impl const OpFlags for ArithmeticOp {
     fn is_commutative(&self) -> bool {
-        matches!(self, Self::Add | Self::Subtract)
+        matches!(self, Self::Add | Self::Multiply)
     }
 
     fn is_associative(&self) -> bool {
-        matches!(self, Self::Add | Self::Subtract)
+        matches!(self, Self::Add | Self::Subtract | Self::Multiply)
     }
 }
 
