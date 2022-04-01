@@ -13,6 +13,9 @@ use assembly::*;
 pub use registers::RegisterDescriptor;
 use std::collections::vec_deque::IterMut;
 use std::collections::VecDeque;
+
+use self::registers::RegisterManager;
+use self::stack::StackManager;
 pub fn load_immediate(
     stack: &mut stack::StackManager,
     registers: &mut registers::RegisterManager,
@@ -31,12 +34,75 @@ pub fn load_immediate(
     })
 }
 
+pub struct LoopEnv {
+    start: Label,
+    end: Label,
+}
+
+pub struct CompilerContext {
+    var_ctx: Vec<Memory>,
+    loop_status: Option<LoopEnv>,
+    stack: StackManager,
+    registers: RegisterManager,
+    target: RegisterDescriptor,
+    is_current_ignored: bool,
+}
+
+impl CompilerContext {
+    pub fn registers(&self) -> &RegisterManager {
+        &self.registers
+    }
+    pub fn finalize(mut self, output: AssemblyOutput) -> AssemblyOutput {
+        self.stack
+            .finalize(self.registers.finalize(&mut self.stack, output))
+    }
+    pub fn using_register_mutably<T: Into<AssemblyOutput>>(
+        &mut self,
+        descriptor: RegisterDescriptor,
+        bit_size: BitSize,
+        cont: impl FnOnce(&mut Self, MutableRegister) -> T,
+    ) -> AssemblyOutput {
+        self.registers
+            .using_register_mutably(&mut self.stack, descriptor, bit_size, |_, _, reg| {
+                cont(self, reg)
+            })
+    }
+    pub fn locking_register<T>(
+        &mut self,
+        descriptor: RegisterDescriptor,
+        cont: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        self.registers.locking_register(descriptor, |_| cont(self))
+    }
+    pub fn with_target<T>(
+        &mut self,
+        target: RegisterDescriptor,
+        cont: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let old_target = self.target;
+        self.target = target;
+        let res = cont(self);
+        self.target = old_target;
+        res
+    }
+    pub fn while_ignoring<T>(&mut self, cont: impl FnOnce(&mut Self) -> T) -> T {
+        let old_ignored = self.is_current_ignored;
+        self.is_current_ignored = true;
+        let res = cont(self);
+        self.is_current_ignored = old_ignored;
+        res
+    }
+    pub fn checking_ignored<T>(&mut self, cont: impl FnOnce(&mut Self, bool) -> T) -> T {
+        cont(self, self.is_current_ignored)
+    }
+}
+
 pub trait Compile {
     fn compile(self) -> AssemblyOutput;
 }
 
 pub trait CompileWith<State> {
-    fn compile(self, helper: &mut State) -> AssemblyOutput;
+    fn compile(self, ctx: &mut State) -> AssemblyOutput;
 }
 
 #[repr(transparent)]
