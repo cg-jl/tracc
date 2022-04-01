@@ -112,6 +112,16 @@ impl CompileWith<CompilerContext> for Vec<Statement> {
                         })
                         .chain_single(env.end)
                 }
+                Statement::LoopBreak => Branch::Unconditional {
+                    register: None,
+                    label: ctx.expect_env().end,
+                }
+                .into(),
+                Statement::LoopContinue => Branch::Unconditional {
+                    register: None,
+                    label: ctx.expect_env().start,
+                }
+                .into(),
             })
         }
         out

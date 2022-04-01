@@ -57,15 +57,11 @@ pub enum Statement<'source> {
     },
     Loop {
         condition: (Expr<'source>, Span),
-        body: Vec<(LoopAllowedStatement<'source>, Span)>,
+        body: Vec<(Statement<'source>, Span)>,
+        is_do_while: bool,
     },
-}
-
-#[derive(Debug)]
-pub enum LoopAllowedStatement<'source> {
-    RegularStatement(Statement<'source>),
-    Break,
-    Continue,
+    LoopBreak,
+    LoopContinue,
 }
 
 fn format_block(block: &[(Statement, Span)], f: &mut fmt::Formatter, depth: usize) -> fmt::Result {
@@ -76,42 +72,6 @@ fn format_block(block: &[(Statement, Span)], f: &mut fmt::Formatter, depth: usiz
         format_statement(stmt, *stmt_span, f, depth + 2)?;
     }
     Ok(())
-}
-fn format_loop_block(
-    block: &[(LoopAllowedStatement, Span)],
-    f: &mut fmt::Formatter,
-    depth: usize,
-) -> fmt::Result {
-    let spacing = " ".repeat(depth);
-    for (stmt, stmt_span) in block {
-        f.write_str(&spacing)?;
-        f.write_str("  - ")?;
-        format_loop_statement(stmt, *stmt_span, f, depth + 2)?;
-    }
-    Ok(())
-}
-
-fn format_loop_statement(
-    stmt: &LoopAllowedStatement,
-    stmt_span: Span,
-    f: &mut fmt::Formatter,
-    depth: usize,
-) -> fmt::Result {
-    let spacing = " ".repeat(depth);
-    match stmt {
-        LoopAllowedStatement::RegularStatement(other) => {
-            format_statement(other, stmt_span, f, depth)
-        }
-        LoopAllowedStatement::Break => {
-            write!(f, "Break@{:?}\n{}", stmt_span.as_range(), spacing + "    ")
-        }
-        LoopAllowedStatement::Continue => write!(
-            f,
-            "Continue@{:?}\n{}",
-            stmt_span.as_range(),
-            spacing + "    "
-        ),
-    }
 }
 
 fn format_statement(
@@ -129,10 +89,17 @@ fn format_statement(
         Statement::Loop {
             condition: (expr, expr_span),
             body,
+            is_do_while,
         } => {
-            write!(f, "Loop@{:?}\n{}", stmt_span.as_range(), spacing + "    ")?;
+            write!(
+                f,
+                "{}Loop@{:?}\n{}",
+                if *is_do_while { "DoWhile" } else { "" },
+                stmt_span.as_range(),
+                spacing + "    "
+            )?;
             format_expr(expr, *expr_span, f, depth + 1)?;
-            format_loop_block(body, f, depth + 1)
+            format_block(body, f, depth + 1)
         }
         Statement::SingleExpr((expr, expr_span)) => {
             write!(
@@ -196,6 +163,18 @@ fn format_statement(
                 Ok(())
             }
         }
+        Statement::LoopBreak => write!(
+            f,
+            "LoopBreak@{:?}\n{}",
+            stmt_span.as_range(),
+            spacing + "    "
+        ),
+        Statement::LoopContinue => write!(
+            f,
+            "LoopContinue@{:?}\n{}",
+            stmt_span.as_range(),
+            spacing + "    "
+        ),
     }
 }
 

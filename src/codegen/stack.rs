@@ -24,6 +24,16 @@ impl StackManager {
         }
     }
 
+    // allocate and deallocate manually.
+    pub unsafe fn alloc_bytes(&mut self, amount: usize) -> Memory {
+        let mem = Memory { register: ImmutableRegister(Register::StackPointer), offset: Offset::Undetermined(self.currently_used) };
+        self.currently_used += amount;
+        mem
+    }
+    pub unsafe fn dealloc_bytes(&mut self, amount: usize) {
+        self.currently_used -= amount;
+    }
+
     pub fn with_alloc_bytes<F, T>(&mut self, amount: usize, cont: F) -> T
     where
         F: FnOnce(&mut Self, Memory) -> T,

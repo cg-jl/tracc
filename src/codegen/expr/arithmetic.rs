@@ -64,19 +64,16 @@ pub fn compile_arithmetic_op(
                     ArithmeticOp::Modulo => {
                         compute_rhs.chain(ctx.locking_register(ctx.target, |ctx| {
                             let helper = if let Data::Register(ImmutableRegister(reg)) = rhs_data {
-                                ctx.registers.locking_register(
-                                    reg.as_register_descriptor().unwrap(),
-                                    |registers| {
-                                        // this will be the quotient register, that I'm going to throw
-                                        ctx.registers.get_suitable_register(UsageContext::Normal)
-                                    },
-                                )
+                                ctx.locking_register(reg.as_register_descriptor().unwrap(), |ctx| {
+                                    // this will be the quotient register, that I'm going to throw
+                                    ctx.registers.get_suitable_register(UsageContext::Normal)
+                                })
                             } else {
                                 ctx.registers.get_suitable_register(UsageContext::Normal)
                             };
                             // udiv helper, target (lhs), rhs_target
                             // msub target, helper, rhs_target, target (lhs)
-                            ctx.using_register_mutably(helper, BitSize::Bit32, |_ctx, helper| {
+                            ctx.using_register_mutably(helper, BitSize::Bit32, |ctx, helper| {
                                 Instruction::Div {
                                     signed: false,
                                     target: helper,

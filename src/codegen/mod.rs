@@ -34,6 +34,7 @@ pub fn load_immediate(
     })
 }
 
+#[derive(Copy, Clone)]
 pub struct LoopEnv {
     start: Label,
     end: Label,
@@ -52,9 +53,19 @@ impl CompilerContext {
     pub fn registers(&self) -> &RegisterManager {
         &self.registers
     }
-    pub fn finalize(mut self, output: AssemblyOutput) -> AssemblyOutput {
-        self.stack
-            .finalize(self.registers.finalize(&mut self.stack, output))
+    pub fn finalize(self, mut output: AssemblyOutput) -> AssemblyOutput {
+        let CompilerContext {
+            var_ctx,
+            mut stack,
+            registers,
+            ..
+        } = self;
+
+        output = registers.finalize(&mut stack, output);
+        // UNSAFE: safe. those bytes were initially allocated in `new` and we've made sure
+        // to allocate them the last thing.
+        unsafe { stack.dealloc_bytes(var_ctx.len() * 4) };
+        stack.finalize(output)
     }
     pub fn using_register_mutably<T: Into<AssemblyOutput>>(
         &mut self,
@@ -62,17 +73,24 @@ impl CompilerContext {
         bit_size: BitSize,
         cont: impl FnOnce(&mut Self, MutableRegister) -> T,
     ) -> AssemblyOutput {
-        self.registers
-            .using_register_mutably(&mut self.stack, descriptor, bit_size, |_, _, reg| {
-                cont(self, reg)
-            })
+        // UNSAFE: safe, the output returned from the continuation is wrapped from
+        // the `end_mutable_use` method.
+        let usable_reg = unsafe { self.registers.begin_mutable_use(descriptor, bit_size) };
+        let output = cont(self, usable_reg).into();
+        unsafe {
+            self.registers
+                .end_mutable_use(&mut self.stack, usable_reg, output)
+        }
     }
     pub fn locking_register<T>(
         &mut self,
         descriptor: RegisterDescriptor,
         cont: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        self.registers.locking_register(descriptor, |_| cont(self))
+        unsafe { self.registers.lock_register(descriptor) };
+        let res = cont(self);
+        unsafe { self.registers.unlock_register(descriptor) };
+        res
     }
     pub fn with_target<T>(
         &mut self,
@@ -111,6 +129,23 @@ impl CompilerContext {
         let res = cont(self);
         self.loop_status = old_loop_env;
         res
+    }
+    pub fn new(target: RegisterDescriptor, var_amount: usize) -> Self {
+        let mut stack = StackManager::new();
+        // UNSAFE: safe, this is deallocated in finalize()
+        let mem = unsafe { stack.alloc_bytes(var_amount * 4) };
+        Self {
+            var_ctx: mem.partition(4).skip(1).take(var_amount).collect(),
+            loop_status: None,
+            stack,
+            registers: RegisterManager::new(),
+            target,
+            is_current_ignored: false,
+        }
+    }
+    pub fn expect_env(&self) -> LoopEnv {
+        self.loop_status
+            .expect("should've been inside a loop. check parser")
     }
 }
 

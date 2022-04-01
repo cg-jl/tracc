@@ -8,7 +8,8 @@ use super::{
     },
     hlir::Expr,
     load_immediate,
-    registers::UsageContext,
+    registers::{RegisterDescriptor, RegisterManager, UsageContext},
+    stack::StackManager,
     AssemblyOutput, CompileWith, CompilerContext, Memory,
 };
 use crate::ast::{BinaryOp, UnaryOp};
@@ -57,7 +58,7 @@ fn compile_as_pointer(expr: Expr, ctx: &mut CompilerContext) -> (Memory, BitSize
         }
     }
 }
-fn compile_expr_as_data(ctx: &mut CompilerContext, expr: Expr) -> (AssemblyOutput, Data) {
+fn compile_expr_as_data<'stack>(ctx: &mut CompilerContext, expr: Expr) -> (AssemblyOutput, Data) {
     if let Expr::Constant(b) = expr {
         (
             AssemblyOutput::new(),
@@ -122,7 +123,7 @@ impl CompileWith<CompilerContext> for Expr {
                 BinaryOp::Relational(relation) => {
                     // compute both, compare and cset. Simple, right?
                     let compute_lhs = lhs.compile(ctx);
-                    let (compute_rhs, rhs_target) = ctx.locking_register(ctx.target, |registers| {
+                    let (compute_rhs, rhs_target) = ctx.locking_register(ctx.target, |ctx| {
                         let rhs_target =
                             ctx.registers().get_suitable_register(UsageContext::Normal);
                         let compute_rhs = rhs.compile(ctx);
@@ -212,6 +213,18 @@ impl CompileWith<CompilerContext> for Expr {
         }
     }
 }
+
+// fn compile_logic(
+//     op: LogicOp,
+//     lhs: Expr,
+//     rhs: Expr,
+//     registers: &mut RegisterManager,
+//     stack: &mut StackManager,
+// ) -> AssemblyOutput {
+//     match op {
+//         LogicOp::And => {}
+//     }
+// }
 
 fn into_bool(register: MutableRegister, output: &mut AssemblyOutput, expect_zero: bool) {
     let condition = if expect_zero {

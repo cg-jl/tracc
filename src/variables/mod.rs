@@ -1,6 +1,4 @@
-use crate::ast::{
-    BinaryOp, Block, Expr, Function, Identifier, LoopAllowedStatement, Program, Statement,
-};
+use crate::ast::{BinaryOp, Block, Expr, Function, Identifier, Program, Statement};
 use crate::codegen;
 use crate::error::SourceMetadata;
 use crate::error::{self, Span};
@@ -121,25 +119,6 @@ fn convert_function<'code>(
 }
 
 type VarRes<T> = Result<T, error::Error<VarError>>;
-fn assign_loop_block_indices<'code>(
-    block: Vec<(LoopAllowedStatement<'code>, Span)>,
-    env: &mut Env<'code>,
-    source_meta: &SourceMetadata,
-) -> VarRes<Vec<codegen::hlir::LoopAllowedStatement>> {
-    env.push_map();
-    let result = block
-        .into_iter()
-        .map(|(stmt, _)| assign_loop_statement_indices(stmt, env, source_meta))
-        .fold(Ok(Vec::new()), |v, other| {
-            let mut v = v?;
-            let other = other?;
-            v.reserve(other.len());
-            v.extend(other);
-            Ok(v)
-        });
-    env.pop_map();
-    result
-}
 
 fn assign_block_indices<'code>(
     block: Vec<(Statement<'code>, Span)>,
@@ -161,24 +140,6 @@ fn assign_block_indices<'code>(
     result
 }
 
-fn assign_loop_statement_indices<'code>(
-    stmt: LoopAllowedStatement<'code>,
-    env: &mut Env<'code>,
-    source_meta: &SourceMetadata,
-) -> VarRes<Vec<codegen::hlir::LoopAllowedStatement>> {
-    match stmt {
-        LoopAllowedStatement::RegularStatement(statement) => {
-            assign_statement_indices(statement, env, source_meta).map(|x| {
-                x.into_iter()
-                    .map(codegen::hlir::LoopAllowedStatement::RegularStatement)
-                    .collect()
-            })
-        }
-        LoopAllowedStatement::Break => Ok(vec![codegen::hlir::LoopAllowedStatement::Break]),
-        LoopAllowedStatement::Continue => Ok(vec![codegen::hlir::LoopAllowedStatement::Continue]),
-    }
-}
-
 fn assign_statement_indices<'code>(
     stmt: Statement<'code>,
     env: &mut Env<'code>,
@@ -188,11 +149,16 @@ fn assign_statement_indices<'code>(
         Statement::Loop {
             condition: (condition, condition_span),
             body,
+            is_do_while,
         } => {
             let condition = assign_expr_indices(condition, env, source_meta)
                 .map_err(|err| err.with_backup_source(condition_span, source_meta))?;
-            let body = assign_loop_block_indices(body, env, source_meta)?;
-            Ok(vec![codegen::hlir::Statement::Loop { condition, body }])
+            let block = assign_block_indices(body, env, source_meta)?;
+            Ok(vec![codegen::hlir::Statement::Loop {
+                condition,
+                block,
+                condition_at_end: is_do_while,
+            }])
         }
         Statement::Return((expr, expr_span)) => {
             let ret_expr = assign_expr_indices(expr, env, source_meta)
@@ -256,6 +222,8 @@ fn assign_statement_indices<'code>(
                 false_branch,
             }])
         }
+        Statement::LoopBreak => Ok(vec![codegen::hlir::Statement::LoopBreak]),
+        Statement::LoopContinue => Ok(vec![codegen::hlir::Statement::LoopContinue]),
     }
 }
 

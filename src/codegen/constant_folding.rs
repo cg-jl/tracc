@@ -1,6 +1,6 @@
 use crate::ast::{ArithmeticOp, BinaryOp, BitOp, LogicOp, OpFlags, UnaryOp};
 
-use super::hlir::{Expr, LoopAllowedStatement, Statement};
+use super::hlir::{Expr, Statement};
 
 pub fn reorder_and_fold_block(
     block: impl IntoIterator<Item = Statement>,
@@ -12,24 +12,14 @@ pub fn reorder_and_fold_block(
 // XXX: I have to do this recursive because I don't have yet a nice linear IR
 pub fn reorder_and_fold_statement(stmt: Statement) -> Statement {
     match stmt {
-        Statement::Loop { condition, body } => Statement::Loop {
+        Statement::Loop {
+            condition,
+            block,
+            condition_at_end,
+        } => Statement::Loop {
             condition: reduce_and_reorder_expr(condition),
-            body: body
-                .into_iter()
-                // TODO: make a better loop optimizer: known conditions, break on known condition,
-                // continue on empty...
-                .map(|loop_statement| match loop_statement {
-                    // reorder normal statements as well.
-                    LoopAllowedStatement::RegularStatement(statement) => {
-                        LoopAllowedStatement::RegularStatement(reorder_and_fold_statement(
-                            statement,
-                        ))
-                    }
-                    // leave those as-is. They're purely indicators.
-                    LoopAllowedStatement::Break => LoopAllowedStatement::Break,
-                    LoopAllowedStatement::Continue => LoopAllowedStatement::Continue,
-                })
-                .collect(),
+            block: reorder_and_fold_block(block).collect(),
+            condition_at_end,
         },
         Statement::Return(ret_expr) => Statement::Return(reduce_and_reorder_expr(ret_expr)),
         Statement::Single(expr) => Statement::Single(reduce_and_reorder_expr(expr)),
@@ -42,6 +32,9 @@ pub fn reorder_and_fold_statement(stmt: Statement) -> Statement {
             true_branch: reorder_and_fold_block(true_branch).collect(),
             false_branch: false_branch.map(|b| reorder_and_fold_block(b).collect()),
         },
+        // these can't be reordered, they're special jumps.
+        Statement::LoopBreak => Statement::LoopBreak,
+        Statement::LoopContinue => Statement::LoopContinue,
     }
 }
 

@@ -178,6 +178,57 @@ impl RegisterManager {
             user(stack, self, &all_usable_registers).into()
         })
     }
+    /// Begin using a register mutably. This function is marked unsafe because this is a resource
+    /// and has to be "deallocated" by using [`end_mutable_use`]
+    pub unsafe fn begin_mutable_use(
+        &mut self,
+        register: RegisterDescriptor,
+        bit_size: BitSize,
+    ) -> MutableRegister {
+        self.lock_register(register);
+        // return the mutable register directly.
+        register.as_mutable(bit_size)
+    }
+
+    /// End a mutable use of a register, hopefully got from [`begin_mutable_use`], making sure
+    /// that the output has the correct savings.
+    ///
+    /// Caller ensures `register` to have been retrieved from a previous call to
+    /// `begin_mutable_use` with a descriptor.
+    pub unsafe fn end_mutable_use(
+        &mut self,
+        stack: &mut StackManager,
+        register: MutableRegister,
+        register_used: AssemblyOutput,
+    ) -> AssemblyOutput {
+        let descriptor = RegisterDescriptor::from_mutable(register).unwrap_unchecked();
+
+        // ensure that it is presaved if it is one of the callee-saved registers
+        if (9..=15).contains(&descriptor.register) {
+            self.presaved_registers.set(descriptor.register);
+        }
+
+        self.register_usage[descriptor.register as usize] -= 1;
+        let current_uses = self.register_usage[descriptor.register as usize];
+        if current_uses != 0 {
+            saving_register(stack, register, move |_| register_used)
+        } else {
+            register_used
+        }
+    }
+    /// Locks a register as if it was being used mutably. The user of this function
+    /// is responsible to call `unlock_register` with the same descriptor.
+    ///
+    /// Locking registers does not actually prevent the rest from using them, but it discourages
+    /// the selector from using that register, and when that register is used for something else,
+    /// it is saved like if it was being used mutably.
+    pub unsafe fn lock_register(&mut self, descriptor: RegisterDescriptor) {
+        self.register_usage[descriptor.register as usize] += 1;
+    }
+    /// Unlocks a previously locked register.
+    pub unsafe fn unlock_register(&mut self, descriptor: RegisterDescriptor) {
+        self.register_usage[descriptor.register as usize] -= 1;
+    }
     /// Given a function, gives a mutable register to it, saving it if needed.
     ///
     /// # Safety
@@ -278,6 +329,13 @@ pub struct RegisterDescriptor {
 }
 
 impl RegisterDescriptor {
+    const fn from_mutable(mutable: MutableRegister) -> Option<Self> {
+        if let MutableRegister(Register::GeneralPurpose { index, .. }) = mutable {
+            Some(Self { register: index })
+        } else {
+            None
+        }
+    }
     /// Obtain the mutable version of the register. For obvious reasons
     /// it is only accessible by the `RegisterManager` to only give mutable registers to
     #[inline]
