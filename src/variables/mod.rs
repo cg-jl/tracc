@@ -42,8 +42,12 @@ pub fn convert_program<'code>(
     program: Program<'code>,
     source_meta: &SourceMetadata,
 ) -> Result<codegen::hlir::Program<'code>, error::Error<VarError>> {
-    let Program(function) = program;
-    convert_function(function, source_meta).map(codegen::hlir::Program)
+    let Program(functions) = program;
+    functions
+        .into_iter()
+        .map(|f| convert_function(f, source_meta))
+        .collect::<Result<Vec<_>, _>>()
+        .map(codegen::hlir::Program)
 }
 
 struct Env<'code> {

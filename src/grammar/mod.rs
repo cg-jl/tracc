@@ -136,6 +136,7 @@ pub enum ParseErrorKind {
     UnexpectedEOF {
         wanted: Option<WantedSpec<TokenKind>>,
     },
+    UnpairedBrace,
 }
 
 impl ParseErrorKind {
@@ -163,6 +164,7 @@ use std::fmt;
 impl fmt::Display for ParseErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::UnpairedBrace => write!(f, "unpaired brace: '}}'"),
             Self::LexError(err) => write!(f, "error while lexing source: {}", err),
             Self::UnexpectedEOF { wanted } => {
                 write!(f, "unexpected end of input")?;

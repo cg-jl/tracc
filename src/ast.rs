@@ -6,7 +6,7 @@ use std::fmt;
 
 // TODO: spans
 
-pub struct Program<'source>(pub Function<'source>);
+pub struct Program<'source>(pub Vec<Function<'source>>);
 
 impl fmt::Debug for Program<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

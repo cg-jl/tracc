@@ -4,7 +4,7 @@ use crate::ast::{BinaryOp, UnaryOp};
 
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct Program<'source>(pub Function<'source>);
+pub struct Program<'source>(pub Vec<Function<'source>>);
 
 #[derive(Debug)]
 pub struct Function<'source> {

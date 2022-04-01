@@ -135,7 +135,7 @@ fn if_statement<'code>(
         _ => (
             None,
             Span {
-                offset: true_branch_span.offset,
+                offset: true_branch_span.offset + true_branch_span.len,
                 len: 0,
             },
         ),
