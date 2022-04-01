@@ -85,9 +85,9 @@ impl CompilerContext {
         self.target = old_target;
         res
     }
-    pub fn while_ignoring<T>(&mut self, cont: impl FnOnce(&mut Self) -> T) -> T {
+    pub fn with_ignoring<T>(&mut self, ignoring: bool, cont: impl FnOnce(&mut Self) -> T) -> T {
         let old_ignored = self.is_current_ignored;
-        self.is_current_ignored = true;
+        self.is_current_ignored = ignoring;
         let res = cont(self);
         self.is_current_ignored = old_ignored;
         res

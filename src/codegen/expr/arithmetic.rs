@@ -122,7 +122,7 @@ fn compile_arithmetic_op(
                     }
                 }
             } else {
-                ctx.while_ignoring(|ctx| rhs.compile(ctx))
+                ctx.with_ignoring(true, |ctx| rhs.compile(ctx))
             }
         }))
 }
