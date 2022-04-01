@@ -105,6 +105,13 @@ impl CompilerContext {
             cont(self).into()
         }
     }
+    pub fn with_loop<T>(&mut self, loop_env: LoopEnv, cont: impl FnOnce(&mut Self) -> T) -> T {
+        let old_loop_env = self.loop_status;
+        self.loop_status = Some(loop_env);
+        let res = cont(self);
+        self.loop_status = old_loop_env;
+        res
+    }
 }
 
 pub trait Compile {

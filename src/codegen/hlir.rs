@@ -28,6 +28,14 @@ pub enum Statement {
         true_branch: Vec<Statement>,
         false_branch: Option<Vec<Statement>>,
     },
+    /// While/Do while loop.
+    Loop {
+        condition: Expr,
+        block: Vec<Statement>,
+        condition_at_end: bool,
+    },
+    LoopBreak,
+    LoopContinue,
 }
 
 #[derive(Debug)]
