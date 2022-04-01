@@ -10,7 +10,7 @@ use crate::{
 
 use super::compile_expr_as_data;
 
-fn compile_arithmetic_op(
+pub fn compile_arithmetic_op(
     ctx: &mut CompilerContext,
     op: ArithmeticOp,
     lhs: Expr,

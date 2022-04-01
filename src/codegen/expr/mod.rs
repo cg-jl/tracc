@@ -8,9 +8,8 @@ use super::{
     },
     hlir::Expr,
     load_immediate,
-    registers::{RegisterDescriptor, RegisterManager, UsageContext},
-    stack::StackManager,
-    AssemblyOutput, Memory,
+    registers::UsageContext,
+    AssemblyOutput, CompileWith, CompilerContext, Memory,
 };
 use crate::ast::{BinaryOp, UnaryOp};
 
@@ -50,17 +49,29 @@ use crate::ast::{BinaryOp, UnaryOp};
 // interpet the expression as a pointer
 // NOTE: this might need a way to lock (mutable) registers used in `Memory` places
 // when more expression types are available as pointers
-fn compile_as_pointer(
-    expr: Expr,
-    _stack: &mut StackManager,
-    _registers: &mut RegisterManager,
-    var_ctx: &[Memory],
-) -> (Memory, BitSize, AssemblyOutput) {
+fn compile_as_pointer(expr: Expr, ctx: &mut CompilerContext) -> (Memory, BitSize, AssemblyOutput) {
     match expr {
-        Expr::Variable { index } => (var_ctx[index], BitSize::Bit32, AssemblyOutput::new()),
+        Expr::Variable { index } => (ctx.var_ctx[index], BitSize::Bit32, AssemblyOutput::new()),
         _ => {
             unreachable!("no other expressions than variables should be available as pointers yet")
         }
+    }
+}
+fn compile_expr_as_data(ctx: &mut CompilerContext, expr: Expr) -> (AssemblyOutput, Data) {
+    if let Expr::Constant(b) = expr {
+        (
+            AssemblyOutput::new(),
+            Data::immediate(b as u64, BitSize::Bit32),
+        )
+    } else {
+        ctx.locking_register(ctx.target, move |ctx| {
+            let target = ctx.registers().get_suitable_register(UsageContext::Normal);
+            let compute_rhs = ctx.with_target(target, |ctx| expr.compile(ctx));
+            (
+                compute_rhs,
+                Data::Register(target.as_immutable(BitSize::Bit32)),
+            )
+        })
     }
 }
 
@@ -69,179 +80,138 @@ fn locking_memory_register<T>(
         register: ImmutableRegister(register),
         offset: _,
     }: Memory,
-    registers: &mut RegisterManager,
-    cont: impl FnOnce(&mut RegisterManager) -> T,
+    ctx: &mut CompilerContext,
+    cont: impl FnOnce(&mut CompilerContext) -> T,
 ) -> T {
     // inspect the register and pass through if nothing
     if let Some(rd) = register.as_register_descriptor() {
-        registers.locking_register(rd, cont)
+        ctx.locking_register(rd, cont)
     } else {
-        cont(registers)
+        cont(ctx)
     }
 }
 
-// compile expression to a register
-pub fn compile_expr(
-    expr: Expr,
-    target: RegisterDescriptor,
-    registers: &mut RegisterManager,
-    stack: &mut StackManager,
-    var_ctx: &[Memory],
-    is_ignored: bool,
-) -> AssemblyOutput {
-    match expr {
-        Expr::AlreadyInTarget => AssemblyOutput::new(),
-        Expr::Variable { index } => {
-            let mem = var_ctx[index];
-            // bit32 as all variables are currently bit32
-            registers.using_register_mutably(
-                stack,
-                target,
-                BitSize::Bit32,
-                |_stack, _registers, target| Instruction::Ldr {
-                    register: target,
-                    address: mem,
-                },
-            )
-        }
-        Expr::Constant(value) => {
-            if !is_ignored {
-                load_immediate(stack, registers, target, value)
-            } else {
-                AssemblyOutput::new()
+impl CompileWith<CompilerContext> for Expr {
+    fn compile(self, ctx: &mut CompilerContext) -> AssemblyOutput {
+        match self {
+            Expr::AlreadyInTarget => AssemblyOutput::new(),
+            Expr::Variable { index } => {
+                let mem = ctx.var_ctx[index];
+                // bit32 as all variables are currently bit32
+                ctx.using_register_mutably(ctx.target, BitSize::Bit32, |_ctx, target| {
+                    Instruction::Ldr {
+                        register: target,
+                        address: mem,
+                    }
+                })
             }
-        }
-        Expr::Binary {
-            operator,
-            lhs,
-            rhs,
-            branch_depends_on_result,
-        } => match operator {
-            BinaryOp::Arithmetic(arithm) => arithmetic::compile_arithmetic_op(
-                arithm, target, *lhs, *rhs, registers, stack, var_ctx, is_ignored,
-            ),
-            BinaryOp::Bit(bitop) => bit::compile_bit_op(
-                bitop, target, *lhs, *rhs, registers, stack, var_ctx, is_ignored,
-            ),
-            BinaryOp::Logic(logicop) => logic::compile_logic_op(
-                logicop, target, *lhs, *rhs, registers, stack, var_ctx, is_ignored,
-            ),
-            BinaryOp::Relational(relation) => {
-                // compute both, compare and cset. Simple, right?
-                let compute_lhs = compile_expr(*lhs, target, registers, stack, var_ctx, is_ignored);
-                let (compute_rhs, rhs_target) = registers.locking_register(target, |registers| {
-                    let rhs_target = registers.get_suitable_register(UsageContext::Normal);
-                    let compute_rhs =
-                        compile_expr(*rhs, rhs_target, registers, stack, var_ctx, is_ignored);
+            Expr::Constant(value) => ctx.empty_on_ignore(|ctx| {
+                load_immediate(&mut ctx.stack, &mut ctx.registers, ctx.target, value)
+            }),
+            Expr::Binary {
+                operator,
+                lhs,
+                rhs,
+                branch_depends_on_result,
+            } => match operator {
+                BinaryOp::Arithmetic(arithm) => {
+                    arithmetic::compile_arithmetic_op(ctx, arithm, *lhs, *rhs)
+                }
+                BinaryOp::Bit(bitop) => bit::compile_bit_op(bitop, ctx, *lhs, *rhs),
+                BinaryOp::Logic(logicop) => logic::compile_logic_op(ctx, logicop, *lhs, *rhs),
+                BinaryOp::Relational(relation) => {
+                    // compute both, compare and cset. Simple, right?
+                    let compute_lhs = lhs.compile(ctx);
+                    let (compute_rhs, rhs_target) = ctx.locking_register(ctx.target, |registers| {
+                        let rhs_target =
+                            ctx.registers().get_suitable_register(UsageContext::Normal);
+                        let compute_rhs = rhs.compile(ctx);
 
-                    (compute_rhs, rhs_target)
-                });
-                compute_lhs
-                    .chain(compute_rhs)
-                    .chain_single(Instruction::Cmp {
-                        register: target.as_immutable(BitSize::Bit32),
-                        data: Data::Register(rhs_target.as_immutable(BitSize::Bit32)),
-                    })
-                    .chain(if !branch_depends_on_result {
-                        registers.using_register_mutably(
-                            stack,
-                            target,
-                            BitSize::Bit32,
-                            |_stack, _registers, target| Instruction::Cset {
-                                target,
-                                condition: relation.to_condition(),
-                            },
-                        )
-                    } else {
-                        AssemblyOutput::new()
-                    })
-            }
-            BinaryOp::Assignment { op } => {
-                if let Some(assignment_enabled) = op {
-                    // if there's a binary operation to do:
-                    //   #1 Evaluate the pointer to some place, call it M
-                    //   #2 Get a new register that doesn't touch M and inside that bubble
-                    //   compile the binary operation using a dummy as the lhs
-                    //   #3 Put that register back in the memory controlled by `target`
-                    let (target_mem, target_bitsize, target_build) =
-                        compile_as_pointer(*lhs, stack, registers, var_ctx);
-                    let (produce_value, value_target) =
-                        locking_memory_register(target_mem, registers, |registers| {
-                            let value_target =
-                                registers.get_suitable_register(UsageContext::Normal);
-                            let get_value_down = registers.using_register_mutably(
-                                stack,
-                                value_target,
-                                target_bitsize,
-                                |_stack, _regs, target| Instruction::Ldr {
-                                    register: target,
-                                    address: target_mem,
+                        (compute_rhs, rhs_target)
+                    });
+                    compute_lhs
+                        .chain(compute_rhs)
+                        .chain_single(Instruction::Cmp {
+                            register: ctx.target.as_immutable(BitSize::Bit32),
+                            data: Data::Register(rhs_target.as_immutable(BitSize::Bit32)),
+                        })
+                        .chain(if !branch_depends_on_result {
+                            ctx.using_register_mutably(
+                                ctx.target,
+                                BitSize::Bit32,
+                                |_ctx, target| Instruction::Cset {
+                                    target,
+                                    condition: relation.to_condition(),
                                 },
-                            );
-                            let produce_value = compile_expr(
-                                Expr::Binary {
+                            )
+                        } else {
+                            AssemblyOutput::new()
+                        })
+                }
+                BinaryOp::Assignment { op } => {
+                    if let Some(assignment_enabled) = op {
+                        // if there's a binary operation to do:
+                        //   #1 Evaluate the pointer to some place, call it M
+                        //   #2 Get a new register that doesn't touch M and inside that bubble
+                        //   compile the binary operation using a dummy as the lhs
+                        //   #3 Put that register back in the memory controlled by `target`
+                        let (target_mem, target_bitsize, target_build) =
+                            compile_as_pointer(*lhs, ctx);
+                        let (produce_value, value_target) =
+                            locking_memory_register(target_mem, ctx, |ctx| {
+                                let value_target =
+                                    ctx.registers().get_suitable_register(UsageContext::Normal);
+                                let get_value_down = ctx.using_register_mutably(
+                                    value_target,
+                                    target_bitsize,
+                                    |_ctx, target| Instruction::Ldr {
+                                        register: target,
+                                        address: target_mem,
+                                    },
+                                );
+                                let produce_value = Expr::Binary {
                                     operator: assignment_enabled.into(),
                                     lhs: Box::new(Expr::AlreadyInTarget),
                                     rhs,
                                     branch_depends_on_result: false,
-                                },
-                                value_target,
-                                registers,
-                                stack,
-                                var_ctx,
-                                false, // not ignored as it will be put into the memory
-                            );
+                                }
+                                .compile(ctx);
 
-                            (get_value_down.chain(produce_value), value_target)
-                        });
-                    target_build
-                        .chain(produce_value)
-                        .chain_single(Instruction::Str {
-                            register: value_target.as_immutable(target_bitsize),
-                            address: target_mem,
-                        })
-                } else {
-                    // this one is easier. just compile rhs to `target` and then put it into the value
-                    compile_expr(*rhs, target, registers, stack, var_ctx, false).chain(
-                        registers.locking_register(target, |registers| {
-                            let (target_mem, target_bitsize, build_target) =
-                                compile_as_pointer(*lhs, stack, registers, var_ctx);
-                            build_target.chain_single(Instruction::Str {
-                                register: target.as_immutable(target_bitsize),
+                                (get_value_down.chain(produce_value), value_target)
+                            });
+                        target_build
+                            .chain(produce_value)
+                            .chain_single(Instruction::Str {
+                                register: value_target.as_immutable(target_bitsize),
                                 address: target_mem,
                             })
-                        }),
-                    )
+                    } else {
+                        // this one is easier. just compile rhs to `target` and then put it into the value
+                        ctx.with_ignoring(false, |ctx| rhs.compile(ctx)).chain(
+                            ctx.locking_register(ctx.target, |ctx| {
+                                let (target_mem, target_bitsize, build_target) =
+                                    compile_as_pointer(*lhs, ctx);
+                                build_target.chain_single(Instruction::Str {
+                                    register: ctx.target.as_immutable(target_bitsize),
+                                    address: target_mem,
+                                })
+                            }),
+                        )
+                    }
                 }
-            }
-        },
-        Expr::Unary { operator, inner } => {
-            let expr = compile_expr(*inner, target, registers, stack, var_ctx, is_ignored);
-            if is_ignored {
-                expr
-            } else {
-                // NOTE: bit32 as everything is an int
-                expr.chain(registers.using_register_mutably(
-                    stack,
-                    target,
-                    BitSize::Bit32,
-                    |_, _, target| compile_unary(operator, target),
-                ))
+            },
+            Expr::Unary { operator, inner } => {
+                let expr = inner.compile(ctx);
+                expr.chain(ctx.empty_on_ignore(|ctx| {
+                    // // NOTE: bit32 as everything is an int
+                    ctx.using_register_mutably(ctx.target, BitSize::Bit32, |_ctx, target| {
+                        compile_unary(operator, target)
+                    })
+                }))
             }
         }
     }
 }
-// fn compile_logic(
-//     op: LogicOp,
-//     lhs: Expr,
-//     rhs: Expr,
-//     registers: &mut RegisterManager,
-//     stack: &mut StackManager,
-// ) -> AssemblyOutput {
-//     match op {
-//         LogicOp::And => {}
-//     }
-// }
 
 fn into_bool(register: MutableRegister, output: &mut AssemblyOutput, expect_zero: bool) {
     let condition = if expect_zero {
