@@ -28,6 +28,17 @@ pub enum Statement {
         true_branch: Vec<Statement>,
         false_branch: Option<Vec<Statement>>,
     },
+    Loop {
+        condition: Expr,
+        body: Vec<LoopAllowedStatement>,
+    },
+}
+
+#[derive(Debug)]
+pub enum LoopAllowedStatement {
+    RegularStatement(Statement),
+    Break,
+    Continue,
 }
 
 #[derive(Debug)]
