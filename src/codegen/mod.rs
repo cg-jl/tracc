@@ -95,6 +95,16 @@ impl CompilerContext {
     pub fn checking_ignored<T>(&mut self, cont: impl FnOnce(&mut Self, bool) -> T) -> T {
         cont(self, self.is_current_ignored)
     }
+    pub fn empty_on_ignore<T: Into<AssemblyOutput>>(
+        &mut self,
+        cont: impl FnOnce(&mut Self) -> T,
+    ) -> AssemblyOutput {
+        if self.is_current_ignored {
+            AssemblyOutput::new()
+        } else {
+            cont(self).into()
+        }
+    }
 }
 
 pub trait Compile {
