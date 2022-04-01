@@ -1,6 +1,6 @@
 use crate::ast::{ArithmeticOp, BinaryOp, BitOp, LogicOp, OpFlags, UnaryOp};
 
-use super::hlir::{Expr, Statement};
+use super::hlir::{Expr, LoopAllowedStatement, Statement};
 
 pub fn reorder_and_fold_block(
     block: impl IntoIterator<Item = Statement>,
@@ -12,6 +12,25 @@ pub fn reorder_and_fold_block(
 // XXX: I have to do this recursive because I don't have yet a nice linear IR
 pub fn reorder_and_fold_statement(stmt: Statement) -> Statement {
     match stmt {
+        Statement::Loop { condition, body } => Statement::Loop {
+            condition: reduce_and_reorder_expr(condition),
+            body: body
+                .into_iter()
+                // TODO: make a better loop optimizer: known conditions, break on known condition,
+                // continue on empty...
+                .map(|loop_statement| match loop_statement {
+                    // reorder normal statements as well.
+                    LoopAllowedStatement::RegularStatement(statement) => {
+                        LoopAllowedStatement::RegularStatement(reorder_and_fold_statement(
+                            statement,
+                        ))
+                    }
+                    // leave those as-is. They're purely indicators.
+                    LoopAllowedStatement::Break => LoopAllowedStatement::Break,
+                    LoopAllowedStatement::Continue => LoopAllowedStatement::Continue,
+                })
+                .collect(),
+        },
         Statement::Return(ret_expr) => Statement::Return(reduce_and_reorder_expr(ret_expr)),
         Statement::Single(expr) => Statement::Single(reduce_and_reorder_expr(expr)),
         Statement::IfStatement {
