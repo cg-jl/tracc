@@ -1,13 +1,55 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use super::{
     refactor::{self, redefine::Rename},
-    BlockBinding, IRCode, Statement, Value, IR,
+    BasicBlock, Binding, BlockBinding, IRCode, Statement, Value, IR,
 };
 
-pub fn prepare_for_codegen(ir: &mut IR) {
-    remove_aliases(&mut ir.code);
+pub fn run_cleanup(ir: &mut IR) {
     prune_unreached_blocks(ir);
+    remove_aliases(&mut ir.code);
+    remove_unused_bindings(ir);
+}
+
+fn remove_unused_bindings(ir: &mut IR) {
+    // #1. Catch all the definitions
+
+    use super::analysis::lifetimes::BlockAddress;
+    let defs_map: HashMap<_, _> = super::analysis::lifetimes::get_defs(ir).collect();
+
+    let defs: HashSet<_> = defs_map.keys().cloned().collect();
+
+    // #2 Catch all the binding dependencies
+
+    use super::analysis::BindingUsage;
+    let deps: HashSet<Binding> = ir
+        .code
+        .iter()
+        .flat_map(|block: &BasicBlock| block.binding_deps())
+        .collect();
+
+    // #3. Anything defined but not depended on is unused
+    let unused = defs
+        .difference(&deps)
+        .cloned()
+        .map(|binding| defs_map[&binding]);
+
+    // #4. Organize the addresses into their corresponding blocks
+    let mut blocks: HashMap<BlockBinding, Vec<usize>> = HashMap::new();
+    for BlockAddress { block, statement } in unused {
+        blocks.entry(block).or_default().push(statement);
+    }
+
+    // #5. Do the liberations
+    for (block, mut indices) in blocks {
+        // sort the indices so that deletion can be done while keeping all indices correct
+        indices.sort_unstable();
+
+        for index in indices.into_iter().rev() {
+            ir[block].statements.remove(index);
+        }
+    }
 }
 
 /// final cleanup before codegen: Remove all aliasing behavior
@@ -88,19 +130,9 @@ fn prune_unreached_blocks(ir: &mut IR) {
 
     // for all unused blocks:
     for unused_binding in unused_blocks {
-        let removal_index = unused_binding.0;
-        // #1. Rename references to the blocks after the current block to match their new index
-        // (drops by 1)
-        for further_index in removal_index + 1..ir.code.len() {
-            let target_index = further_index - 1;
-            let old = BlockBinding(further_index);
-            let new = BlockBinding(target_index);
-
-            refactor::rename_block(ir, old, new);
-        }
-
-        // #2. Now we can safely remove the block
-        ir.code.remove(removal_index);
+        // remove the block
+        // UNSAFE: safe. the block is no longer used.
+        unsafe { refactor::remove_block(ir, unused_binding) };
     }
 }
 

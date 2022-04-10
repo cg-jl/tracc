@@ -14,7 +14,7 @@ mod expr;
 mod statement;
 use thiserror::Error;
 
-fn generate_branching_graphs(ir: &IRCode) -> (BranchingMap, BranchingMap) {
+pub fn generate_branching_graphs(ir: &IRCode) -> (BranchingMap, BranchingMap) {
     let mut backwards_map = BranchingMap::new();
     let mut forward_map = BranchingMap::new();
 

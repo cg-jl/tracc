@@ -1,8 +1,29 @@
-use super::{IR, BlockBinding};
+use super::{BasicBlock, BlockBinding, IR};
 
 pub mod redefine;
 
-pub fn rename_block(ir: &mut IR, target: BlockBinding, replace_with: BlockBinding) {
+/// Remove a block from the IR
+///
+/// # Safety
+/// The block must not be referred by any of the blocks that come after its index
+/// in the IR's vector.
+pub unsafe fn remove_block(ir: &mut IR, target: BlockBinding) -> BasicBlock {
+    let BlockBinding(index) = target;
+
+    // shift the names of the blocks to the right to be 1 less.
+    for i in index + 1..ir.code.len() {
+        rename_block(ir, BlockBinding(i), BlockBinding(i - 1));
+    }
+
+    // now we can remove that basic block
+    ir.code.remove(index)
+}
+
+/// Rename a block
+///
+/// # Safety
+/// The new block name must not collide with other blocks.
+pub unsafe fn rename_block(ir: &mut IR, target: BlockBinding, replace_with: BlockBinding) {
     // rename refs in the code
     for block in ir.code.iter_mut() {
         match block.end {

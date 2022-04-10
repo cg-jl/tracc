@@ -1,5 +1,5 @@
+use crate::intermediate::{BasicBlock, BlockEnd, Branch, IR};
 use crate::intermediate::{Binding, CouldBeConstant, Statement, Value};
-use crate::intermediate::{BlockEnd, Branch, IR};
 use std::collections::HashMap;
 use std::iter::FromIterator;
 
@@ -176,5 +176,33 @@ impl BindingUsage for Statement {
             } => mem_binding.contains_binding(target) || binding.contains_binding(target),
             Self::Assign { index: _, value } => value.contains_binding(target),
         }
+    }
+}
+
+impl BindingUsage for BasicBlock {
+    fn binding_deps(&self) -> Vec<Binding> {
+        let mut output: Vec<_> = self
+            .statements
+            .iter()
+            .flat_map(|statement| statement.binding_deps())
+            .collect();
+        match self.end {
+            BlockEnd::Branch(Branch::Conditional { flag, .. }) => output.push(flag),
+            BlockEnd::Return(ret) => output.push(ret),
+            _ => (),
+        }
+        output
+    }
+    fn contains_binding(&self, binding: Binding) -> bool {
+        let is_in_end = match self.end {
+            BlockEnd::Branch(Branch::Conditional { flag, .. }) => flag == binding,
+            BlockEnd::Return(ret) => ret == binding,
+            _ => false,
+        };
+        is_in_end
+            || (self
+                .statements
+                .iter()
+                .any(|statement| statement.contains_binding(binding)))
     }
 }

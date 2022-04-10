@@ -1,5 +1,5 @@
 use crate::intermediate::{
-    BasicBlock, Binding, BlockEnd, Branch, CouldBeConstant, PhiDescriptor, Statement, Value, IRCode,
+    BasicBlock, Binding, BlockEnd, Branch, CouldBeConstant, IRCode, PhiDescriptor, Statement, Value,
 };
 
 /// Mechanism used by cleanup code to rename bindings

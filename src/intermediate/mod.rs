@@ -3,10 +3,10 @@ use std::collections::HashMap;
 pub mod analysis;
 pub mod cleanup;
 mod convert;
+pub mod fold;
 mod format;
 pub mod generate;
 pub mod refactor;
-pub mod fold;
 
 use crate::codegen::assembly::Condition;
 // IR: everything is divided into basic blocks
@@ -217,16 +217,8 @@ impl core::ops::Index<BlockBinding> for IR {
     }
 }
 
-impl core::ops::Index<BlockBinding> for Vec<BasicBlock> {
-    type Output = BasicBlock;
-
-    fn index(&self, index: BlockBinding) -> &Self::Output {
-        &self[index.0]
-    }
-}
-
-impl core::ops::IndexMut<BlockBinding> for Vec<BasicBlock> {
+impl core::ops::IndexMut<BlockBinding> for IR {
     fn index_mut(&mut self, index: BlockBinding) -> &mut Self::Output {
-        &mut self[index.0]
+        &mut self.code[index.0]
     }
 }

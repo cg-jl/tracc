@@ -58,7 +58,7 @@ pub fn compute_lifetime_collisions(ir: &IR) -> CollisionMap {
         .collect()
 }
 
-fn get_defs(ir: &IR) -> impl Iterator<Item = (Binding, BlockAddress)> + '_ {
+pub fn get_defs(ir: &IR) -> impl Iterator<Item = (Binding, BlockAddress)> + '_ {
     // go through each block and the statements which define a binding
     super::iterate_with_bindings(&ir.code).flat_map(|(block_binding, block)| {
         block
