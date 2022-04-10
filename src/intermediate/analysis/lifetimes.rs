@@ -82,7 +82,6 @@ fn get_defs(ir: &IR) -> impl Iterator<Item = (Binding, BlockAddress)> + '_ {
 }
 
 fn get_lifetime_ends(ir: &IR) -> HashMap<Binding, Vec<BlockAddress>> {
-    dbg!(ir);
     // #1. Get all block ends for each binding
     let all_block_ends = {
         let mut map: HashMap<Binding, HashMap<BlockBinding, usize>> = HashMap::new();
@@ -237,7 +236,7 @@ impl std::fmt::Debug for BlockAddress {
 }
 
 // TODO: move `Debug` impls to a separate module
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct BlockAddress {
     pub block: BlockBinding,
     pub statement: usize,

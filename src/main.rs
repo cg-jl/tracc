@@ -18,27 +18,20 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     use std::fs;
+    use std::io::Write;
 
     let opt = Opt::from_args();
     let filename = opt.file;
     let file = fs::read_to_string(&filename)?;
-    let _out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
+    let out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
-    let (_name, mut ir) = tracc::intermediate::generate::compile_program(program, &meta)?;
+    let (function_name, mut ir) = tracc::intermediate::generate::compile_program(program, &meta)?;
 
     tracc::intermediate::cleanup::prepare_for_codegen(&mut ir);
-    //    let (memory_map, stack_size) = tracc::codegen::memory::figure_out_stack_allocs(&ir);
 
-    use tracc::codegen::assembly::Condition;
-    use tracc::intermediate::*;
-
-    let collisions = tracc::intermediate::analysis::lifetimes::compute_lifetime_collisions(&ir);
-
-    dbg!(tracc::codegen::memory::figure_out_allocations(
-        &ir,
-        tracc::codegen::memory::make_alloc_map(&ir.code),
-        &collisions
+    let output = tracc::codegen::codegen(ir).cons(tracc::codegen::assembly::Assembly::Label(
+        function_name.into(),
     ));
 
     //tracc::codegen::registers::debug_what_im_doing(&ir);
@@ -46,10 +39,10 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     // let program = tracc::variables::convert_program(program, &meta)?;
     // let output = program.compile();
-    // let mut file = fs::File::create(out_file)?;
-    // for x in output {
-    //     writeln!(file, "{}", x)?;
-    // }
+    let mut file = fs::File::create(out_file)?;
+    for x in output {
+        writeln!(file, "{}", x)?;
+    }
 
     Ok(())
 }

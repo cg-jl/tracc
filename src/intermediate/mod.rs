@@ -6,6 +6,7 @@ mod convert;
 mod format;
 pub mod generate;
 pub mod refactor;
+pub mod fold;
 
 use crate::codegen::assembly::Condition;
 // IR: everything is divided into basic blocks

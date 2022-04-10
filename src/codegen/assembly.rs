@@ -472,6 +472,9 @@ pub enum Register {
     StackPointer,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct RegisterID(pub u8);
+
 impl fmt::Display for Register {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -483,6 +486,10 @@ impl fmt::Display for Register {
 }
 
 impl Register {
+    pub const fn from_id(id: RegisterID, bit_size: BitSize) -> Self {
+        let RegisterID(index) = id;
+        Self::GeneralPurpose { index, bit_size }
+    }
     pub const fn bit_size(self) -> BitSize {
         match self {
             Self::GeneralPurpose { bit_size, .. } => bit_size,

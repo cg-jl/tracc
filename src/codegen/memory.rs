@@ -46,7 +46,7 @@ pub fn figure_out_allocations(
     ir: &IR,
     allocations_needed: AllocMap,
     collision_map: &analysis::lifetimes::CollisionMap,
-) -> (HashMap<Binding, usize>, usize) {
+) -> (MemoryMap, usize) {
     let mut local_collisions: Vec<(_, HashSet<_>)> = collision_map
         .iter()
         .filter_map(|(k, set)| {
@@ -102,7 +102,21 @@ pub fn figure_out_allocations(
             .unwrap();
     }
 
-    (offsets, size)
+    (
+        offsets
+            .into_iter()
+            .map(|(binding, offset)| {
+                (
+                    binding,
+                    assembly::Memory {
+                        register: assembly::Register::StackPointer,
+                        offset: assembly::Offset::Determined(offset),
+                    },
+                )
+            })
+            .collect(),
+        size,
+    )
 }
 
 /// Make the memory allocation map for the whole code
