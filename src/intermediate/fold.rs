@@ -267,7 +267,31 @@ fn value_propagate_constant(binding: Binding, binding_value: u64, value: Value) 
             (lhs, rhs) => Value::Add { lhs, rhs },
         },
         Value::Subtract { lhs, rhs } => todo!(),
-        Value::Multiply { lhs, rhs } => todo!(),
+        Value::Multiply { lhs, rhs } => match (lhs, rhs) {
+            (a, CouldBeConstant::Constant(c)) if a == binding => {
+                Value::Constant(binding_value.wrapping_mul(c))
+            }
+            (a, CouldBeConstant::Binding(b)) => {
+                if a == b && a == binding {
+                    Value::Constant(binding_value.wrapping_mul(binding_value))
+                } else if a == binding {
+                    // flip the operation to have the constant on rhs
+                    Value::Multiply {
+                        lhs: b,
+                        rhs: CouldBeConstant::Constant(binding_value),
+                    }
+                } else if b == binding {
+                    Value::Multiply {
+                        lhs: a,
+                        rhs: CouldBeConstant::Constant(binding_value),
+                    }
+                } else {
+                    Value::Multiply { lhs, rhs }
+                }
+            }
+
+            (lhs, rhs) => Value::Multiply { lhs, rhs },
+        },
         Value::Divide {
             lhs,
             rhs,
