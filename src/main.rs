@@ -26,13 +26,11 @@ fn run() -> Result<(), Box<dyn Error>> {
     let out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
-    let (function_name, mut ir) = tracc::intermediate::generate::compile_program(program, &meta)?;
+    let (function_name, ir) = tracc::intermediate::generate::compile_program(program, &meta)?;
 
-    tracc::intermediate::cleanup::prepare_for_codegen(&mut ir);
-
-    let output = tracc::codegen::codegen(ir).cons(tracc::codegen::assembly::Assembly::Label(
-        function_name.into(),
-    ));
+    let output = tracc::codegen::codegen(tracc::intermediate::fold::constant_fold(ir)).cons(
+        tracc::codegen::assembly::Assembly::Label(function_name.into()),
+    );
 
     //tracc::codegen::registers::debug_what_im_doing(&ir);
     // dbg!(memory_map, stack_size);

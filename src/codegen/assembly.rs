@@ -396,6 +396,19 @@ pub enum Condition {
     LessEqual,
 }
 
+impl Condition {
+    pub fn antidote(self) -> Self {
+        match self {
+            Self::Equals => Self::NotEquals,
+            Self::NotEquals => Self::NotEquals,
+            Self::GreaterThan => Self::LessEqual,
+            Self::GreaterEqual => Self::LessThan,
+            Self::LessThan => Self::GreaterEqual,
+            Self::LessEqual => Self::GreaterThan,
+        }
+    }
+}
+
 impl fmt::Display for Condition {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

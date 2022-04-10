@@ -1,8 +1,7 @@
 pub mod assembly;
 pub mod flags;
 pub mod has_binding;
-pub mod memory;
-pub mod registers;
+use crate::allocators::{memory, registers};
 use crate::intermediate::*;
 
 use std::collections::VecDeque;
@@ -200,7 +199,8 @@ fn compile_value(
                 assembly::BitSize::Bit32,
             )),
             rhs: could_be_constant_to_data(rhs, registers),
-        }.into(),
+        }
+        .into(),
         Value::Divide {
             lhs,
             rhs,
