@@ -1,5 +1,5 @@
 //! Register analysis of the code
-use super::assembly::RegisterID;
+use crate::codegen::assembly::RegisterID;
 use crate::intermediate::{analysis::CollisionMap, Binding, BlockEnd, IR};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -82,19 +82,23 @@ pub fn make_allocator_hints(code: &IR) -> HashMap<Binding, Vec<AllocatorHint>> {
     map
 }
 
+#[allow(dead_code)] // this function will be used upon having calls, don't worry
 fn is_callee_saved(register: u8) -> bool {
     (9..=15).contains(&register)
 }
 
 #[derive(Debug)]
 pub struct CodegenHints {
+    #[allow(dead_code)]
     /// list of bindings that couldn't be allocated the return register but are to be returned.
     pub need_move_to_return_reg: HashSet<Binding>,
     /// list of bindings that couldn't be allocated a callee-saved register so they need to be
     /// pre-saved before a call is met.
+    #[allow(dead_code)]
     pub save_upon_call: HashSet<Binding>,
 
     /// set of bindings that could not be allocated, for whatever reason
+    #[allow(dead_code)]
     pub completely_spilled: HashSet<Binding>,
 
     /// The register assigned for the bindings

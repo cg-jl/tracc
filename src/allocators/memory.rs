@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::intermediate::{BasicBlock, Binding, BlockBinding, Statement, Value, IR};
 
-use super::assembly;
+use crate::codegen::assembly;
 
 // even if a piece of memory is not used in a block, if a leaf of it uses that piece of memory, the
 // block must keep that memory alive.
@@ -12,19 +12,6 @@ use super::assembly;
 type DependencyMap = HashMap<BlockBinding, Vec<Binding>>;
 
 pub type MemoryMap = HashMap<Binding, assembly::Memory>;
-
-fn get_dep_graph(ir: &IR) -> DependencyMap {
-    ir.code
-        .iter()
-        .enumerate()
-        .map(|(block_index, block)| {
-            (
-                BlockBinding(block_index),
-                list_memory_deps(&block.statements),
-            )
-        })
-        .collect()
-}
 
 // assumes to != 0
 pub fn align(value: usize, to: usize) -> usize {
@@ -140,30 +127,3 @@ fn list_memory_defs(block: &[Statement]) -> impl Iterator<Item = (Binding, usize
         }
     })
 }
-
-/// Analyze the memory that each block of the code uses, either by store or load
-fn list_memory_deps(block: &[Statement]) -> Vec<Binding> {
-    let mut bindings = Vec::new();
-    for statement in block {
-        match statement {
-            Statement::Store { mem_binding, .. } => {
-                if !bindings.contains(mem_binding) {
-                    bindings.push(*mem_binding)
-                }
-            }
-            Statement::Assign {
-                index: _,
-                value: Value::Load { mem_binding, .. },
-            } => {
-                if !bindings.contains(mem_binding) {
-                    bindings.push(*mem_binding)
-                }
-            }
-            _ => (),
-        }
-    }
-    bindings
-}
-
-#[cfg(test)]
-mod tests {}
