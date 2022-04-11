@@ -58,7 +58,7 @@ impl Into<assembly::Assembly> for BasicBlockLabel {
     }
 }
 
-pub fn codegen(ir: IR) -> AssemblyOutput {
+pub fn codegen_function(function_name: String, ir: IR) -> AssemblyOutput {
     let collisions = crate::intermediate::analysis::compute_lifetime_collisions(&ir);
     // TODO: integrate register spill output
     let register_info = registers::alloc_registers(
@@ -69,11 +69,18 @@ pub fn codegen(ir: IR) -> AssemblyOutput {
     let (memory, mem_size) =
         memory::figure_out_allocations(&ir, memory::make_alloc_map(&ir.code), &collisions);
 
-    let mut output = AssemblyOutput::new();
+    let mut output = AssemblyOutput::new()
+        // declare function as global for linkage
+        .push(assembly::Directive::Global(function_name.clone()))
+        .push(assembly::Directive::Type(
+            function_name.clone(),
+            "function".into(),
+        ))
+        .push(assembly::Assembly::Label(function_name));
 
     for (block_index, block) in ir.code.into_iter().enumerate() {
         output = output
-            .cons(BasicBlockLabel(block_index))
+            .push(BasicBlockLabel(block_index))
             .extend(compile_block(block, &memory, &register_info.registers))
     }
 
@@ -96,7 +103,7 @@ pub fn codegen(ir: IR) -> AssemblyOutput {
     }
 }
 
-pub fn compile_block(
+fn compile_block(
     block: BasicBlock,
     memory: &memory::MemoryMap,
     registers: &registers::RegisterMap,
