@@ -292,6 +292,8 @@ fn value_propagate_constant(binding: Binding, binding_value: u64, value: Value) 
 
             (lhs, rhs) => Value::Multiply { lhs, rhs },
         },
+        // NOTE: when dividing by zero, don't fold it. The expression is UB so we'll
+        // let the user shoot themselves in the foot and insert a division by zero.
         Value::Divide {
             lhs,
             rhs,
