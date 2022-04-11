@@ -89,13 +89,13 @@ pub fn codegen_function(function_name: String, ir: IR) -> AssemblyOutput {
         // TODO: callee-saved register presaving
         output
             .cons(assembly::Instruction::Sub {
-                target: assembly::MutableRegister(assembly::Register::StackPointer),
-                lhs: assembly::ImmutableRegister(assembly::Register::StackPointer),
+                target: assembly::Register::StackPointer,
+                lhs: assembly::Register::StackPointer,
                 rhs: assembly::Data::immediate(mem_size as u64, assembly::BitSize::Bit64),
             })
             .push(assembly::Instruction::Add {
-                target: assembly::MutableRegister(assembly::Register::StackPointer),
-                lhs: assembly::ImmutableRegister(assembly::Register::StackPointer),
+                target: assembly::Register::StackPointer,
+                lhs: assembly::Register::StackPointer,
                 rhs: assembly::Data::immediate(mem_size as u64, assembly::BitSize::Bit64),
             })
     } else {
@@ -137,8 +137,9 @@ fn could_be_constant_to_data(
     registers: &registers::RegisterMap,
 ) -> assembly::Data {
     match cbc {
-        CouldBeConstant::Binding(binding) => assembly::Data::Register(assembly::ImmutableRegister(
-            assembly::Register::from_id(registers[&binding], assembly::BitSize::Bit32),
+        CouldBeConstant::Binding(binding) => assembly::Data::Register(assembly::Register::from_id(
+            registers[&binding],
+            assembly::BitSize::Bit32,
         )),
         CouldBeConstant::Constant(constant) => {
             assembly::Data::immediate(constant as u64, assembly::BitSize::Bit32)
@@ -160,17 +161,11 @@ fn compile_value(
             lhs,
             rhs,
         } => AssemblyOutput::from(assembly::Instruction::Cmp {
-            register: assembly::ImmutableRegister(assembly::Register::from_id(
-                registers[&lhs],
-                assembly::BitSize::Bit32,
-            )),
+            register: assembly::Register::from_id(registers[&lhs], assembly::BitSize::Bit32),
             data: could_be_constant_to_data(rhs, registers),
         })
         .push(assembly::Instruction::Cset {
-            target: assembly::MutableRegister(assembly::Register::from_id(
-                target_register,
-                assembly::BitSize::Bit32,
-            )),
+            target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
             condition,
         }),
         Value::Load {
@@ -183,28 +178,16 @@ fn compile_value(
             // currently both are only 32 bit
             let lhs_register = registers[&lhs];
             assembly::Instruction::Add {
-                target: assembly::MutableRegister(assembly::Register::from_id(
-                    target_register,
-                    assembly::BitSize::Bit32,
-                )),
-                lhs: assembly::ImmutableRegister(assembly::Register::from_id(
-                    lhs_register,
-                    assembly::BitSize::Bit32,
-                )),
+                target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
+                lhs: assembly::Register::from_id(lhs_register, assembly::BitSize::Bit32),
                 rhs: could_be_constant_to_data(rhs, registers),
             }
             .into()
         }
         Value::Subtract { lhs, rhs } => todo!(),
         Value::Multiply { lhs, rhs } => assembly::Instruction::Mul {
-            target: assembly::MutableRegister(assembly::Register::from_id(
-                target_register,
-                assembly::BitSize::Bit32,
-            )),
-            lhs: assembly::ImmutableRegister(assembly::Register::from_id(
-                registers[&lhs],
-                assembly::BitSize::Bit32,
-            )),
+            target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
+            lhs: assembly::Register::from_id(registers[&lhs], assembly::BitSize::Bit32),
             rhs: could_be_constant_to_data(rhs, registers),
         }
         .into(),
@@ -219,10 +202,10 @@ fn compile_value(
         Value::Or { lhs, rhs } => todo!(),
         Value::Xor { lhs, rhs } => todo!(),
         Value::Constant(ctant) => assembly::Instruction::Mov {
-            target: assembly::MutableRegister(assembly::Register::from_id(
+            target: assembly::Register::from_id(
                 target_register,
                 assembly::BitSize::Bit32, // NOTE: the constant is 32 bit.
-            )),
+            ),
             source: assembly::Data::immediate(ctant as u64, assembly::BitSize::Bit32),
         }
         .into(),

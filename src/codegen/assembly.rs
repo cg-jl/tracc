@@ -78,67 +78,55 @@ pub enum Instruction {
     /// Return from a function
     Ret,
     /// Move data to a register
-    Mov {
-        target: MutableRegister,
-        source: Data,
-    },
+    Mov { target: Register, source: Data },
     /// Move (with applied not) data to a register
-    MvN {
-        target: MutableRegister,
-        source: Data,
-    },
+    MvN { target: Register, source: Data },
     /// Compare a register with some data
-    Cmp {
-        register: ImmutableRegister,
-        data: Data,
-    },
+    Cmp { register: Register, data: Data },
     /// Sets register 1 or 0 depending on condition
     Cset {
-        target: MutableRegister,
+        target: Register,
         condition: Condition,
     },
     /// Negate a register
-    Neg {
-        target: MutableRegister,
-        source: ImmutableRegister,
-    },
+    Neg { target: Register, source: Register },
     /// Add a register and a source of data into a register
     Add {
-        target: MutableRegister,
-        lhs: ImmutableRegister,
+        target: Register,
+        lhs: Register,
         rhs: Data,
     },
     /// subtract the contents of a register from some data into a register
     Sub {
-        target: MutableRegister,
-        lhs: ImmutableRegister,
+        target: Register,
+        lhs: Register,
         rhs: Data,
     },
     /// Multiply/sub
     MSub {
-        target: MutableRegister,
-        multiplicand: ImmutableRegister,
-        multiplier: ImmutableRegister,
-        minuend: ImmutableRegister,
+        target: Register,
+        multiplicand: Register,
+        multiplier: Register,
+        minuend: Register,
     },
     /// Multiply two numbers (currently not u/s/l)
     Mul {
-        target: MutableRegister,
-        lhs: ImmutableRegister,
+        target: Register,
+        lhs: Register,
         rhs: Data,
     },
     /// Divide two signed numbers
     Div {
-        target: MutableRegister,
-        lhs: ImmutableRegister,
+        target: Register,
+        lhs: Register,
         rhs: Data,
         signed: bool,
     },
     /// Logical shift left
     // NOTE: `s` suffix is available
     Lsl {
-        target: MutableRegister,
-        lhs: ImmutableRegister,
+        target: Register,
+        lhs: Register,
         // if it is a register, only the lsbyte is used
         // if it is an immediate, range of values permitted is 0-31
         rhs: Data,
@@ -146,40 +134,34 @@ pub enum Instruction {
     /// Logical shift right
     // NOTE: `s` suffix is available
     Lsr {
-        target: MutableRegister,
-        lhs: ImmutableRegister,
+        target: Register,
+        lhs: Register,
         rhs: Data,
     },
     /// Store a register into memory
-    Str {
-        register: ImmutableRegister,
-        address: Memory,
-    },
+    Str { register: Register, address: Memory },
     /// Load a register from memory
-    Ldr {
-        register: MutableRegister,
-        address: Memory,
-    },
+    Ldr { register: Register, address: Memory },
     /// Bitwise AND
     // NOTE: `s` suffix is available
     // NOTE: register and immediate controlled LS(R|L)/ROR/ASR is available
     And {
-        target: MutableRegister,
-        lhs: ImmutableRegister,
+        target: Register,
+        lhs: Register,
         rhs: Data,
     },
 
     /// Bitwise OR
     Orr {
-        target: MutableRegister,
-        lhs: ImmutableRegister,
+        target: Register,
+        lhs: Register,
         rhs: Data,
     },
 
     /// Exclusive OR
     Eor {
-        target: MutableRegister,
-        lhs: ImmutableRegister,
+        target: Register,
+        lhs: Register,
         rhs: Data,
         bitmask: u64,
     },
@@ -192,7 +174,7 @@ pub enum Instruction {
 pub enum Branch {
     /// normal (unconditional) branch, always executed
     Unconditional {
-        register: Option<ImmutableRegister>,
+        register: Option<Register>,
         label: Label,
     },
     /// branch with link (aka call)
@@ -357,7 +339,7 @@ impl Instruction {
 #[derive(Debug, Clone, Copy)]
 pub enum Data {
     /// Take data from register
-    Register(ImmutableRegister),
+    Register(Register),
     /// Take data from an immediate value
     Immediate(u64),
     /// Stack offset
@@ -377,7 +359,7 @@ impl fmt::Display for Data {
 impl Data {
     pub const fn immediate(immediate: u64, bit_size: BitSize) -> Self {
         if immediate == 0 {
-            Self::Register(ImmutableRegister(Register::ZeroRegister { bit_size }))
+            Self::Register(Register::ZeroRegister { bit_size })
         } else {
             Self::Immediate(immediate)
         }
@@ -419,62 +401,6 @@ impl fmt::Display for Condition {
             Self::GreaterThan => write!(f, "gt"),
             Self::GreaterEqual => write!(f, "ge"),
         }
-    }
-}
-
-/// The only writable registers are zero registers and gp registers (and SSE registers which are
-/// yet to come)
-#[derive(Debug, Clone, Copy)]
-#[repr(transparent)]
-pub struct MutableRegister(pub Register);
-
-/// We can check the contents of *any* register, including registers that are not present currently
-#[derive(Debug, Clone, Copy)]
-#[repr(transparent)]
-pub struct ImmutableRegister(pub Register);
-
-// #[derive(Debug, Clone, Copy)]
-// pub enum Register {
-//     /// Unnamed general purpose register
-//     GeneralPurpose { index: u8, bit_size: BitSize },
-//     /// Register which ignores writes and gives zero when read
-//     ZeroRegister { bit_size: BitSize },
-//     /// The stack pointer
-//     StackPointer,
-// }
-
-// little trait to accomodate getting the bitsize from registers
-pub trait HasBitSize {
-    fn get_bit_size(&self) -> BitSize;
-}
-
-impl const HasBitSize for MutableRegister {
-    fn get_bit_size(&self) -> BitSize {
-        self.0.bit_size()
-    }
-}
-impl const HasBitSize for ImmutableRegister {
-    fn get_bit_size(&self) -> BitSize {
-        self.0.bit_size()
-    }
-}
-
-// there is a way to use a mutable register as immutable once you got access to it!
-impl const From<MutableRegister> for ImmutableRegister {
-    fn from(m: MutableRegister) -> Self {
-        Self(m.0)
-    }
-}
-
-impl fmt::Display for ImmutableRegister {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl fmt::Display for MutableRegister {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.fmt(f)
     }
 }
 
