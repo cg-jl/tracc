@@ -68,14 +68,17 @@ pub fn compile_program<'code>(
     let ir: IRCode = state.release().collect();
     let (forward_map, backwards_map) = generate_branching_graphs(&ir);
 
-    Ok((
-        name,
-        IR {
-            code: ir,
-            backwards_map,
-            forward_map,
-        },
-    ))
+    let mut ir = IR {
+        code: ir,
+        backwards_map,
+        forward_map,
+    };
+
+    // run some cleanup on the generated code, because we might have generated
+    // too much garbage
+    super::cleanup::run_cleanup(&mut ir);
+
+    Ok((name, ir))
 }
 
 // TODO: make block builder struct
