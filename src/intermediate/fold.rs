@@ -218,21 +218,13 @@ fn value_propagate_constant(known_binding: Binding, binding_value: u64, value: V
                             rhs: CouldBeConstant::Constant(binding_value),
                         }
                     } else {
-                        Value::Cmp {
-                            condition,
-                            lhs,
-                            rhs,
-                        }
+                        value
                     }
                 }
                 (a, CouldBeConstant::Constant(other)) if a == known_binding => {
                     Value::Constant(eval_condition(condition, binding_value, other))
                 }
-                (lhs, rhs) => Value::Cmp {
-                    condition,
-                    lhs,
-                    rhs,
-                },
+                (lhs, rhs) => value,
             }
         }
         Value::Load {
@@ -266,11 +258,11 @@ fn value_propagate_constant(known_binding: Binding, binding_value: u64, value: V
                         rhs: CouldBeConstant::Constant(binding_value),
                     }
                 } else {
-                    Value::Add { lhs, rhs }
+                    value
                 }
             }
 
-            (lhs, rhs) => Value::Add { lhs, rhs },
+            (lhs, rhs) => value,
         },
         Value::Subtract { lhs, rhs } => todo!(),
         Value::Multiply { lhs, rhs } => match (lhs, rhs) {
@@ -292,11 +284,11 @@ fn value_propagate_constant(known_binding: Binding, binding_value: u64, value: V
                         rhs: CouldBeConstant::Constant(binding_value),
                     }
                 } else {
-                    Value::Multiply { lhs, rhs }
+                    value
                 }
             }
 
-            (lhs, rhs) => Value::Multiply { lhs, rhs },
+            (lhs, rhs) => value,
         },
         // NOTE: when dividing by zero, don't fold it. The expression is UB so we'll
         // let the user shoot themselves in the foot and insert a division by zero.
