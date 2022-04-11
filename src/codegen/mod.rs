@@ -172,8 +172,19 @@ fn compile_value(
             mem_binding,
             byte_size,
         } => todo!(),
-        Value::Negate { binding } => todo!(),
-        Value::FlipBits { binding } => todo!(),
+        Value::Negate { binding } => assembly::Instruction::Neg {
+            target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
+            source: assembly::Register::from_id(registers[&binding], assembly::BitSize::Bit32),
+        }
+        .into(),
+        // binding XOR FFFFFFFF does the trick.
+        Value::FlipBits { binding } => assembly::Instruction::Eor {
+            target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
+            lhs: assembly::Register::from_id(registers[&binding], assembly::BitSize::Bit32),
+            rhs: assembly::Data::Immediate(std::u32::MAX as u64),
+            bitmask: std::u32::MAX as u64,
+        }
+        .into(),
         Value::Add { lhs, rhs } => {
             // currently both are only 32 bit
             let lhs_register = registers[&lhs];
@@ -200,7 +211,13 @@ fn compile_value(
         Value::Lsr { lhs, rhs } => todo!(),
         Value::And { lhs, rhs } => todo!(),
         Value::Or { lhs, rhs } => todo!(),
-        Value::Xor { lhs, rhs } => todo!(),
+        Value::Xor { lhs, rhs } => assembly::Instruction::Eor {
+            target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
+            lhs: assembly::Register::from_id(registers[&lhs], assembly::BitSize::Bit32),
+            rhs: could_be_constant_to_data(rhs, registers),
+            bitmask: std::u32::MAX as u64,
+        }
+        .into(),
         Value::Constant(ctant) => assembly::Instruction::Mov {
             target: assembly::Register::from_id(
                 target_register,
