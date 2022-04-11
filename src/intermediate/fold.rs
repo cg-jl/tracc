@@ -231,7 +231,13 @@ fn value_propagate_constant(known_binding: Binding, binding_value: u64, value: V
             mem_binding,
             byte_size,
         } => todo!(),
-        Value::Negate { binding } => todo!(),
+        Value::Negate { binding } => {
+            if binding == known_binding {
+                Value::Constant((!binding_value).wrapping_add(1))
+            } else {
+                value
+            }
+        }
         Value::FlipBits { binding } => {
             if binding == known_binding {
                 Value::Constant(!binding_value)
