@@ -240,7 +240,13 @@ fn value_propagate_constant(known_binding: Binding, binding_value: u64, value: V
             byte_size,
         } => todo!(),
         Value::Negate { binding } => todo!(),
-        Value::FlipBits { binding } => todo!(),
+        Value::FlipBits { binding } => {
+            if binding == known_binding {
+                Value::Constant(!binding_value)
+            } else {
+                value
+            }
+        }
         Value::Add { lhs, rhs } => match (lhs, rhs) {
             (a, CouldBeConstant::Constant(c)) if a == known_binding => {
                 Value::Constant(binding_value.wrapping_add(c))
