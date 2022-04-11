@@ -302,7 +302,29 @@ fn value_propagate_constant(known_binding: Binding, binding_value: u64, value: V
             lhs,
             rhs,
             is_signed,
-        } => todo!(),
+        } => match rhs {
+            CouldBeConstant::Binding(other) => {
+                // NOTE: Since division does *not* support any kind of -commutativity, I cannot
+                // reorder it
+                if lhs == known_binding && other == known_binding && binding_value != 0 {
+                    Value::Constant(1)
+                } else if other == known_binding {
+                    // I can set the other to be a constant
+                    Value::Divide {
+                        lhs,
+                        rhs: CouldBeConstant::Constant(binding_value),
+                        is_signed,
+                    }
+                } else {
+                    value
+                }
+            }
+            CouldBeConstant::Constant(ctant) if lhs == known_binding && ctant != 0 => {
+                Value::Constant(binding_value / ctant)
+            }
+            // otherwise i'll leave it as is, because I can't fold it in a safe way.
+            _ => value,
+        },
         Value::Lsl { lhs, rhs } => todo!(),
         Value::Lsr { lhs, rhs } => todo!(),
         Value::And { lhs, rhs } => todo!(),
