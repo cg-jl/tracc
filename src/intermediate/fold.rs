@@ -152,7 +152,7 @@ fn block_propagate_constant(binding: Binding, binding_value: u64, block: &mut [S
 }
 
 #[allow(unused)]
-fn value_propagate_constant(binding: Binding, binding_value: u64, value: Value) -> Value {
+fn value_propagate_constant(known_binding: Binding, binding_value: u64, value: Value) -> Value {
     match value {
         Value::Allocate { .. } => value,
         Value::Phi { nodes } => Value::Phi {
@@ -160,7 +160,7 @@ fn value_propagate_constant(binding: Binding, binding_value: u64, value: Value) 
                 .into_iter()
                 .map(|PhiDescriptor { value, block_from }| PhiDescriptor {
                     value: match value {
-                        CouldBeConstant::Binding(bind) if bind == binding => {
+                        CouldBeConstant::Binding(bind) if bind == known_binding => {
                             CouldBeConstant::Constant(binding_value)
                         }
                         other => other,
@@ -202,16 +202,16 @@ fn value_propagate_constant(binding: Binding, binding_value: u64, value: Value) 
             }
             match (lhs, rhs) {
                 (a, CouldBeConstant::Binding(b)) => {
-                    if a == b && a == binding {
+                    if a == b && a == known_binding {
                         Value::Constant(eval_condition(condition, binding_value, binding_value))
-                    } else if a == binding {
+                    } else if a == known_binding {
                         Value::Cmp {
                             // flip the condition and the arguments
                             condition: condition.antidote(),
                             lhs: b,
                             rhs: CouldBeConstant::Constant(binding_value),
                         }
-                    } else if b == binding {
+                    } else if b == known_binding {
                         Value::Cmp {
                             condition,
                             lhs: a,
@@ -225,7 +225,7 @@ fn value_propagate_constant(binding: Binding, binding_value: u64, value: Value) 
                         }
                     }
                 }
-                (a, CouldBeConstant::Constant(other)) if a == binding => {
+                (a, CouldBeConstant::Constant(other)) if a == known_binding => {
                     Value::Constant(eval_condition(condition, binding_value, other))
                 }
                 (lhs, rhs) => Value::Cmp {
@@ -242,19 +242,19 @@ fn value_propagate_constant(binding: Binding, binding_value: u64, value: Value) 
         Value::Negate { binding } => todo!(),
         Value::FlipBits { binding } => todo!(),
         Value::Add { lhs, rhs } => match (lhs, rhs) {
-            (a, CouldBeConstant::Constant(c)) if a == binding => {
+            (a, CouldBeConstant::Constant(c)) if a == known_binding => {
                 Value::Constant(binding_value.wrapping_add(c))
             }
             (a, CouldBeConstant::Binding(b)) => {
-                if a == b && a == binding {
+                if a == b && a == known_binding {
                     Value::Constant(binding_value.wrapping_add(binding_value))
-                } else if a == binding {
+                } else if a == known_binding {
                     // flip the operation to have the constant on rhs
                     Value::Add {
                         lhs: b,
                         rhs: CouldBeConstant::Constant(binding_value),
                     }
-                } else if b == binding {
+                } else if b == known_binding {
                     Value::Add {
                         lhs: a,
                         rhs: CouldBeConstant::Constant(binding_value),
@@ -268,19 +268,19 @@ fn value_propagate_constant(binding: Binding, binding_value: u64, value: Value) 
         },
         Value::Subtract { lhs, rhs } => todo!(),
         Value::Multiply { lhs, rhs } => match (lhs, rhs) {
-            (a, CouldBeConstant::Constant(c)) if a == binding => {
+            (a, CouldBeConstant::Constant(c)) if a == known_binding => {
                 Value::Constant(binding_value.wrapping_mul(c))
             }
             (a, CouldBeConstant::Binding(b)) => {
-                if a == b && a == binding {
+                if a == b && a == known_binding {
                     Value::Constant(binding_value.wrapping_mul(binding_value))
-                } else if a == binding {
+                } else if a == known_binding {
                     // flip the operation to have the constant on rhs
                     Value::Multiply {
                         lhs: b,
                         rhs: CouldBeConstant::Constant(binding_value),
                     }
-                } else if b == binding {
+                } else if b == known_binding {
                     Value::Multiply {
                         lhs: a,
                         rhs: CouldBeConstant::Constant(binding_value),
