@@ -349,7 +349,7 @@ pub enum Data {
 impl fmt::Display for Data {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Immediate(value) => write!(f, "#{}", value),
+            Self::Immediate(value) => write!(f, "#{:08X}", value),
             Self::Register(reg) => write!(f, "{}", reg),
             Self::StackOffset(_) => unreachable!("stack offsets must be determined before"),
         }
