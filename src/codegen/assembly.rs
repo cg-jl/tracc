@@ -175,32 +175,30 @@ pub enum Branch {
     /// normal (unconditional) branch, always executed
     Unconditional {
         register: Option<Register>,
-        label: Label,
+        label: BasicBlockLabel,
     },
     /// branch with link (aka call)
-    Linked { label: Label },
+    Linked { label: BasicBlockLabel },
     /// Conditional branch
-    Conditional { condition: Condition, label: Label },
+    Conditional {
+        condition: Condition,
+        label: BasicBlockLabel,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Label {
+pub struct BasicBlockLabel {
     num: usize,
 }
 
-impl From<Label> for Assembly {
-    fn from(val: Label) -> Self {
+impl From<BasicBlockLabel> for Assembly {
+    fn from(val: BasicBlockLabel) -> Self {
         Assembly::Label(val.to_string())
     }
 }
 
-impl Label {
-    /// Creates a new label from its number
-    ///
-    /// # Safety
-    /// The number generated for this label **must** be unique.
-    /// Use [`LabelGenerator::new_label`] to get labels.
-    pub const unsafe fn new(num: usize) -> Self {
+impl BasicBlockLabel {
+    pub const fn new(num: usize) -> Self {
         Self { num }
     }
 }
@@ -271,7 +269,7 @@ impl fmt::Display for Branch {
     }
 }
 
-impl fmt::Display for Label {
+impl fmt::Display for BasicBlockLabel {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, ".L{}", self.num)
     }

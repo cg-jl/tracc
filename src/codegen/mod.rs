@@ -161,7 +161,26 @@ fn compile_block(
                 flag,
                 target_true,
                 target_false,
-            } => todo!(),
+            } => {
+                // TODO: map with known already touched CPU flags at the end of every block, and
+                // the result they computed, if any.
+                output = output
+                    .push(assembly::Instruction::Cmp {
+                        register: assembly::Register::from_id(
+                            registers[&flag],
+                            assembly::BitSize::Bit32,
+                        ),
+                        data: assembly::Data::immediate(0, assembly::BitSize::Bit32),
+                    })
+                    .push(assembly::Branch::Conditional {
+                        condition: assembly::Condition::Equals,
+                        label: assembly::BasicBlockLabel::new(target_false.0),
+                    })
+                    .push(assembly::Branch::Unconditional {
+                        register: None,
+                        label: assembly::BasicBlockLabel::new(target_true.0),
+                    });
+            }
         },
         // TODO: make sure that the returned binding is in the place it should.
         BlockEnd::Return(ret) => output = output.push(assembly::Instruction::Ret),
