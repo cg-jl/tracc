@@ -40,6 +40,9 @@ fn try_merge(ir: &mut IR) -> bool {
     // make an initial folding step for all the blocks
     fold_ir_blocks(ir);
 
+    // cleanup the code after the fold
+    cleanup::run_cleanup(ir);
+
     // if I find a direct mapping somewhere, I inline
     let mut jumps: Vec<_> = find_unique_jumps(ir).collect();
 
