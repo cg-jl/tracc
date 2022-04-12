@@ -250,7 +250,8 @@ fn statement_propagate_constant(
             value_propagate_constant(known_binding, known_value, value)
                 .map(|value| Statement::Assign { index, value })
         }
-        Statement::Store { .. } => todo!("propagate on stores"),
+        // stores can't be folded further.
+        Statement::Store { .. } => PropagationResult::unchanged(statement),
     }
 }
 
