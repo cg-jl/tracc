@@ -91,7 +91,7 @@ fn block_set_only_predecessor(block: &mut BasicBlock, predecessor: BlockBinding)
             value: Value::Phi { nodes },
         } = statement
         {
-            let value = nodes
+            let bind = nodes
                 .into_iter()
                 .find_map(|descriptor| {
                     if descriptor.block_from == predecessor {
@@ -103,10 +103,7 @@ fn block_set_only_predecessor(block: &mut BasicBlock, predecessor: BlockBinding)
                 .expect("Inlining with no idea of phi node");
             *statement = Statement::Assign {
                 index: *index,
-                value: match value {
-                    CouldBeConstant::Binding(binding) => Value::Binding(binding),
-                    CouldBeConstant::Constant(ctant) => Value::Constant(ctant),
-                },
+                value: Value::Binding(bind),
             };
         }
     }
@@ -290,14 +287,9 @@ fn value_propagate_constant(
     match value {
         // ollacations can't be folded further.
         Value::Allocate { .. } => PropagationResult::unchanged(value),
-        Value::Phi { nodes } => nodes
-            .into_iter()
-            .map(|PhiDescriptor { value, block_from }| {
-                could_be_constant_propagate(known_binding, binding_value, value)
-                    .map(|value| PhiDescriptor { value, block_from })
-            })
-            .collect::<PropagationResult<_>>()
-            .map(|nodes| Value::Phi { nodes }),
+        // a phi node is a decision point. Until a decision is made no constant
+        // is chosen.
+        Value::Phi { .. } => PropagationResult::unchanged(value),
         Value::Cmp {
             condition,
             lhs,

@@ -158,7 +158,7 @@ pub enum ByteSize {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PhiDescriptor {
-    pub value: CouldBeConstant,
+    pub value: Binding,
     pub block_from: BlockBinding,
 }
 

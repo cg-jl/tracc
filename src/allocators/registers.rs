@@ -62,7 +62,7 @@ pub fn make_allocator_hints(code: &IR) -> HashMap<Binding, Vec<AllocatorHint>> {
                     crate::intermediate::Value::Phi { nodes } => {
                         let other_bindings: HashSet<_> = nodes
                             .into_iter()
-                            .filter_map(|descriptor| descriptor.value.as_binding())
+                            .map(|descriptor| descriptor.value)
                             .collect();
                         map.entry(*index)
                             .or_default()

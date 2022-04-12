@@ -123,10 +123,7 @@ impl BindingUsage for Value {
     fn binding_deps(&self) -> Vec<Binding> {
         match self {
             Value::Constant(_) | Value::Allocate { size: _ } => vec![],
-            Value::Phi { nodes } => nodes
-                .iter()
-                .flat_map(|node| node.value.as_binding())
-                .collect(),
+            Value::Phi { nodes } => nodes.iter().map(|node| node.value).collect(),
             Value::Add { lhs, rhs }
             | Value::Subtract { lhs, rhs }
             | Value::Multiply { lhs, rhs }
