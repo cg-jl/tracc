@@ -131,17 +131,28 @@ fn compile_block(
 ) -> AssemblyOutput {
     let mut output = AssemblyOutput::new();
     for statement in block.statements {
-        match statement {
+        output = output.extend(match statement {
             Statement::Assign { index, value } => {
                 let register = registers[&index];
-                output = output.extend(compile_value(value, register, memory, registers));
+                compile_value(value, register, memory, registers)
             }
             Statement::Store {
                 mem_binding,
                 binding,
                 byte_size,
-            } => todo!(),
-        }
+            } => match byte_size {
+                ByteSize::U64 => todo!("64-bit stores"),
+                ByteSize::U8 => todo!("one byte stores"),
+                ByteSize::U32 => assembly::Instruction::Str {
+                    register: assembly::Register::from_id(
+                        registers[&binding],
+                        assembly::BitSize::Bit32,
+                    ),
+                    address: memory[&mem_binding],
+                }
+                .into(),
+            },
+        });
     }
     match block.end {
         BlockEnd::Branch(branch) => match branch {
