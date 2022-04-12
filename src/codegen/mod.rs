@@ -156,7 +156,12 @@ fn compile_block(
     }
     match block.end {
         BlockEnd::Branch(branch) => match branch {
-            Branch::Unconditional { target } => todo!(),
+            Branch::Unconditional { target } => {
+                output = output.push(assembly::Branch::Unconditional {
+                    register: None,
+                    label: assembly::BasicBlockLabel::new(target.0),
+                })
+            }
             Branch::Conditional {
                 flag,
                 target_true,
