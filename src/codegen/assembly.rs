@@ -382,7 +382,7 @@ impl Condition {
     pub fn antidote(self) -> Self {
         match self {
             Self::Equals => Self::NotEquals,
-            Self::NotEquals => Self::NotEquals,
+            Self::NotEquals => Self::Equals,
             Self::GreaterThan => Self::LessEqual,
             Self::GreaterEqual => Self::LessThan,
             Self::LessThan => Self::GreaterEqual,
