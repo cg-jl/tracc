@@ -186,12 +186,12 @@ impl AllocatorState {
         binding: Binding,
         collides_with: &HashSet<Binding>,
         register: usize,
-    ) -> bool {
+    ) -> Option<usize> {
         if self.buckets[register].is_disjoint(collides_with) {
             self.buckets[register].insert(binding);
-            return true;
+            Some(register)
         } else {
-            return false;
+            None
         }
     }
 
@@ -199,18 +199,18 @@ impl AllocatorState {
         &mut self,
         binding: Binding,
         collides_with: &HashSet<Binding>,
-    ) -> bool {
+    ) -> Option<usize> {
         self.get_sorted_indices((0..9).chain(16..31))
-            .any(|bucket| self.try_register(binding, collides_with, bucket))
+            .find_map(|bucket| self.try_register(binding, collides_with, bucket))
     }
 
     pub fn try_saved_register(
         &mut self,
         binding: Binding,
         collides_with: &HashSet<Binding>,
-    ) -> bool {
+    ) -> Option<usize> {
         self.get_sorted_indices(9..=15)
-            .any(|bucket| self.try_register(binding, collides_with, bucket))
+            .find_map(|bucket| self.try_register(binding, collides_with, bucket))
     }
 
     // try non-saved; then follow by saved
@@ -218,9 +218,19 @@ impl AllocatorState {
         &mut self,
         binding: Binding,
         collides_with: &HashSet<Binding>,
-    ) -> bool {
+    ) -> Option<usize> {
         self.try_nonsaved_register(binding, collides_with)
-            || self.try_saved_register(binding, collides_with)
+            .or_else(|| self.try_saved_register(binding, collides_with))
+    }
+
+    pub fn get_allocation(&self, binding: Binding) -> Option<usize> {
+        self.buckets.iter().enumerate().find_map(|(index, set)| {
+            if set.contains(&binding) {
+                Some(index)
+            } else {
+                None
+            }
+        })
     }
 }
 
@@ -276,7 +286,7 @@ pub fn alloc_registers(
 
         let collisions = collisions.get(&binding).unwrap();
         allocated.insert(binding);
-        if is_call {
+        let hinted_alloc = if is_call {
             // if the binding is returned, we *probably* assigned a non-return register, so set it
             // to move to return
             if is_return {
@@ -284,29 +294,63 @@ pub fn alloc_registers(
             }
             // we're going to look through the buckets and check our collisions to find if we can
             // allocate a callee-saved register
-            if state.try_saved_register(binding, collisions) {
-                continue;
-            }
-            // could not find an empty bucket from the callee-saved ones, so we'll try an empty of
-            // the other ones:
-            else if state.try_nonsaved_register(binding, collisions) {
-                state.save_when_call.insert(binding);
-                continue;
-            } else {
-                // otherwise we'll have to use memory.
-                could_not_allocate.insert(binding);
-            }
-        } else if is_return {
-            // try to allocate the return register.
-            if !state.try_register(binding, collisions, 0) {
-                state.need_move_to_return_reg.insert(binding);
-                // try to allocate in a non-callee-saved register.
+            state.try_saved_register(binding, collisions).or_else(|| {
+                state.try_nonsaved_register(binding, collisions).map(|x| {
+                    state.save_when_call.insert(binding);
+                    x
+                })
+            })
+        } else if let Some(phi_nodes) = phi_nodes {
+            // NOTE: might have to reorder allocations so that collisions are resolved
+            // must have allocated everyone
+            let allocs: Vec<_> = phi_nodes
+                .iter()
+                .flat_map(|binding| state.get_allocation(*binding))
+                .collect();
 
-                if !state.try_standard_alloc(binding, collisions) {
-                    // otherwise we'll have to use memory.
-                    could_not_allocate.insert(binding);
-                }
-            }
+            debug_assert_eq!(
+                allocs.len(),
+                phi_nodes.len(),
+                "All phi nodes must have been previously allocated"
+            );
+
+            let allocs: HashSet<_> = allocs.into_iter().collect();
+
+            // NOTE: this will be removed if needed
+            debug_assert_eq!(
+                allocs.len(),
+                1,
+                "All allocated phi nodes must be on the same register"
+            );
+
+            let unique_alloc = allocs.into_iter().next().unwrap();
+
+            debug_assert!(
+                state
+                    .try_register(binding, collisions, unique_alloc)
+                    .is_some(),
+                "Must be able to allocate binding on same register as its phi nodes"
+            );
+            Some(unique_alloc)
+        } else {
+            None
+        };
+
+        let final_alloc = if is_return {
+            hinted_alloc
+                .or_else(|| state.try_register(binding, collisions, 0))
+                .or_else(|| {
+                    state.try_standard_alloc(binding, collisions).map(|x| {
+                        state.need_move_to_return_reg.insert(binding);
+                        x
+                    })
+                })
+        } else {
+            hinted_alloc
+        };
+
+        if final_alloc.is_none() {
+            could_not_allocate.insert(binding);
         }
     }
 
@@ -317,7 +361,7 @@ pub fn alloc_registers(
         .filter(|x| !allocated.contains(x))
     {
         let collisions = collisions.get(&binding).unwrap();
-        if !state.try_standard_alloc(binding, collisions) {
+        if state.try_standard_alloc(binding, collisions).is_none() {
             could_not_allocate.insert(binding);
         }
     }
