@@ -105,7 +105,13 @@ fn prune_unreached_blocks(ir: &mut IR) {
 
             // for the branches it may have, remove this block from its parents list
             // and if it ends up empty then add it to the queue
-            for branch_target in ir.forward_map.remove(&next).into_iter().flatten() {
+            for branch_target in ir
+                .forward_map
+                .remove(&next)
+                .into_iter()
+                .flatten()
+                .filter(|binding| binding.0 != 0)
+            {
                 // #1. Remove its parent
                 let parents = ir
                     .backwards_map
@@ -135,44 +141,3 @@ fn prune_unreached_blocks(ir: &mut IR) {
         unsafe { refactor::remove_block(ir, unused_binding) };
     }
 }
-
-///// Block aliasing occurs when a block only has a single branch as its code
-// fn remove_block_aliasing(ir: &mut IR) {
-//     // collect everything into a vec to end the ref
-//     let aliases: Vec<_> = ir
-//         .code
-//         .iter()
-//         .enumerate()
-//         .filter_map(|(block_index, block)| {
-//             // single branch
-//             if block.statements.is_empty() {
-//                 // jumps directly to a block
-//                 if let BlockEnd::Branch(Branch::Unconditional { target }) = block.end {
-//                     Some((BlockBinding(block_index), target))
-//                 } else {
-//                     None
-//                 }
-//             } else {
-//                 None
-//             }
-//         })
-//         .collect();
-//
-//     for (aliased_block, alias_target) in dbg!(aliases) {
-//         // #1. Patch the code
-//         rename_block(ir, aliased_block, alias_target);
-//         // #2. Patch the backwards map:
-//         // move the sources from `aliased_block` to `alias_target`
-//         if let Some(sources) = ir.backwards_map.remove(&aliased_block) {
-//             let target_sources = ir
-//                 .backwards_map
-//                 .get_mut(&alias_target)
-//                 .expect("Malformed backwards map: missing back reference to already detected jump");
-//             for source in sources {
-//                 if !target_sources.contains(&source) {
-//                     target_sources.push(source);
-//                 }
-//             }
-//         }
-//     }
-// }

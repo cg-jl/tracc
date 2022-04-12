@@ -200,7 +200,11 @@ impl<'ir> TopBottomTraversal<'ir> {
 
 impl<'code> From<&'code IR> for TopBottomTraversal<'code> {
     fn from(code: &'code IR) -> Self {
-        Self::new(code, vec![BlockBinding(0)])
+        if code.code.is_empty() {
+            Self::new(code, vec![])
+        } else {
+            Self::new(code, vec![BlockBinding(0)])
+        }
     }
 }
 
