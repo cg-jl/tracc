@@ -69,6 +69,18 @@ fn remove_aliases(code: &mut IRCode) {
         }
     }
 
+    let mut aliases: Vec<_> = aliases.into_iter().collect();
+
+    aliases.sort_unstable_by(
+        |(_, (_, block1, statement1)), (_, (_, block2, statement2))| {
+            if *block1 != *block2 {
+                std::cmp::Ordering::Equal
+            } else {
+                statement1.cmp(statement2).reverse()
+            }
+        },
+    );
+
     // #2. Rebind aliases
     for (from, (to, block_index, statement_index)) in aliases {
         code.rename(from, to); // rebind
