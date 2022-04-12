@@ -210,8 +210,12 @@ fn compile_value(
         }),
         Value::Load {
             mem_binding,
-            byte_size,
-        } => todo!(),
+            byte_size: _, // TODO: use different instruction/register size depending on byte size
+        } => assembly::Instruction::Ldr {
+            register: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
+            address: memory[&mem_binding],
+        }
+        .into(),
         Value::Negate { binding } => assembly::Instruction::Neg {
             target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
             source: assembly::Register::from_id(registers[&binding], assembly::BitSize::Bit32),
