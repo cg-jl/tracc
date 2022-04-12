@@ -129,6 +129,7 @@ impl fmt::Display for BlockEnd {
 
 impl fmt::Display for BasicBlock {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("\n")?;
         for stmt in &self.statements {
             writeln!(f, "  {}", stmt)?;
         }
@@ -160,7 +161,7 @@ impl fmt::Debug for IR {
         writeln!(f, "code: ")?;
         for (block_index, block) in self.code.iter().enumerate() {
             let bb = BlockBinding(block_index);
-            writeln!(f, "{}:", bb)?;
+            write!(f, "{}:", bb)?;
             write!(f, "{}", block)?;
         }
 
