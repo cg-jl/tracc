@@ -61,13 +61,34 @@ impl Into<assembly::Assembly> for BasicBlockLabel {
 pub fn codegen_function(function_name: String, ir: IR) -> AssemblyOutput {
     let collisions = crate::intermediate::analysis::compute_lifetime_collisions(&ir);
     // TODO: integrate register spill output
-    let register_info = registers::alloc_registers(
+    let registers::CodegenHints {
+        need_move_to_return_reg,
+        save_upon_call,
+        mut completely_spilled,
+        registers,
+    } = registers::alloc_registers(
+        &ir,
         &collisions,
-        collisions.keys().cloned().collect(),
+        dbg!(analysis::order_by_deps(&ir, collisions.keys().cloned())),
         registers::make_allocator_hints(&ir),
     );
-    let (memory, mem_size) =
-        memory::figure_out_allocations(&ir, memory::make_alloc_map(&ir.code), &collisions);
+
+    let alloc_map = memory::make_alloc_map(&ir.code);
+
+    alloc_map.keys().cloned().for_each(|allocated_binding| {
+        completely_spilled.remove(&allocated_binding);
+    });
+
+    debug_assert!(completely_spilled.is_empty(), "shouldn't have any spills");
+
+    let (memory, mem_size) = memory::figure_out_allocations(&ir, alloc_map, &collisions);
+
+    debug_assert!(save_upon_call.is_empty(), "TODO: implement save upon call");
+
+    debug_assert!(
+        need_move_to_return_reg.is_empty(),
+        "TODO: implement moves to return register (or generic move to register)"
+    );
 
     let mut output = AssemblyOutput::new()
         // declare function as global for linkage
@@ -81,7 +102,7 @@ pub fn codegen_function(function_name: String, ir: IR) -> AssemblyOutput {
     for (block_index, block) in ir.code.into_iter().enumerate() {
         output = output
             .push(BasicBlockLabel(block_index))
-            .extend(compile_block(block, &memory, &register_info.registers))
+            .extend(compile_block(block, &memory, &registers))
     }
 
     if mem_size != 0 {
@@ -123,7 +144,14 @@ fn compile_block(
         }
     }
     match block.end {
-        BlockEnd::Branch(_) => todo!(),
+        BlockEnd::Branch(branch) => match branch {
+            Branch::Unconditional { target } => todo!(),
+            Branch::Conditional {
+                flag,
+                target_true,
+                target_false,
+            } => todo!(),
+        },
         // TODO: make sure that the returned binding is in the place it should.
         BlockEnd::Return(ret) => output = output.push(assembly::Instruction::Ret),
     }

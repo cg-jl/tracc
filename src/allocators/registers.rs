@@ -115,6 +115,8 @@ pub struct AllocatorState {
     /// list of bindings that couldn't be allocated a callee-saved register so they need to be
     /// pre-saved before a call is met.
     save_when_call: HashSet<Binding>,
+    /// list of bindings that couldn't be allocated a register.
+    spills: HashSet<Binding>,
     /// buckets for allocations
     buckets: [HashSet<Binding>; 31],
 }
@@ -163,33 +165,46 @@ impl AllocatorState {
             save_during_usage_hints: HashSet::new(),
             need_move_to_return_reg: HashSet::new(),
             save_when_call: HashSet::new(),
+            spills: HashSet::new(),
+
             buckets: Default::default(),
         }
     }
 
-    fn get_sorted_indices(
-        &self,
-        range: impl Iterator<Item = usize>,
-    ) -> impl Iterator<Item = usize> {
+    fn get_sorted_indices(&self, range: impl Iterator<Item = u8>) -> impl Iterator<Item = u8> {
         let mut all: Vec<_> = range.into_iter().collect();
         all.sort_by(|a, b| {
-            self.buckets[*a]
+            self.buckets[*a as usize]
                 .len()
-                .cmp(&self.buckets[*b].len())
+                .cmp(&self.buckets[*b as usize].len())
                 .reverse()
         });
         all.into_iter()
+    }
+
+    pub fn try_alloc(
+        &mut self,
+        binding: Binding,
+        collides_with: &HashSet<Binding>,
+        alloc: RegisterID,
+    ) -> Option<RegisterID> {
+        match alloc {
+            RegisterID::GeneralPurpose { index } => {
+                self.try_register(binding, collides_with, index)
+            }
+            RegisterID::StackPointer => Some(self.spill(binding)),
+        }
     }
 
     pub fn try_register(
         &mut self,
         binding: Binding,
         collides_with: &HashSet<Binding>,
-        register: usize,
-    ) -> Option<usize> {
-        if self.buckets[register].is_disjoint(collides_with) {
-            self.buckets[register].insert(binding);
-            Some(register)
+        register: u8,
+    ) -> Option<RegisterID> {
+        if self.buckets[register as usize].is_disjoint(collides_with) {
+            self.buckets[register as usize].insert(binding);
+            Some(RegisterID::GeneralPurpose { index: register })
         } else {
             None
         }
@@ -199,18 +214,18 @@ impl AllocatorState {
         &mut self,
         binding: Binding,
         collides_with: &HashSet<Binding>,
-    ) -> Option<usize> {
+    ) -> Option<RegisterID> {
         self.get_sorted_indices((0..9).chain(16..31))
-            .find_map(|bucket| self.try_register(binding, collides_with, bucket))
+            .find_map(|bucket| self.try_register(binding, collides_with, bucket as u8))
     }
 
     pub fn try_saved_register(
         &mut self,
         binding: Binding,
         collides_with: &HashSet<Binding>,
-    ) -> Option<usize> {
+    ) -> Option<RegisterID> {
         self.get_sorted_indices(9..=15)
-            .find_map(|bucket| self.try_register(binding, collides_with, bucket))
+            .find_map(|bucket| self.try_register(binding, collides_with, bucket as u8))
     }
 
     // try non-saved; then follow by saved
@@ -218,35 +233,57 @@ impl AllocatorState {
         &mut self,
         binding: Binding,
         collides_with: &HashSet<Binding>,
-    ) -> Option<usize> {
+    ) -> Option<RegisterID> {
         self.try_nonsaved_register(binding, collides_with)
             .or_else(|| self.try_saved_register(binding, collides_with))
     }
 
-    pub fn get_allocation(&self, binding: Binding) -> Option<usize> {
-        self.buckets.iter().enumerate().find_map(|(index, set)| {
-            if set.contains(&binding) {
-                Some(index)
-            } else {
-                None
-            }
-        })
+    pub fn spill(&mut self, binding: Binding) -> RegisterID {
+        self.spills.insert(binding);
+        RegisterID::StackPointer
+    }
+
+    pub fn get_allocation(&self, binding: Binding) -> Option<RegisterID> {
+        self.spills
+            .get(&binding)
+            .map(|_| RegisterID::StackPointer)
+            .or_else(|| {
+                self.buckets.iter().enumerate().find_map(|(index, set)| {
+                    if set.contains(&binding) {
+                        Some(RegisterID::GeneralPurpose { index: index as u8 })
+                    } else {
+                        None
+                    }
+                })
+            })
     }
 }
 
 pub fn alloc_registers(
+    ir: &IR,
     collisions: &CollisionMap,
     need_allocation: Vec<Binding>,
-    alloc_hints: HashMap<Binding, Vec<AllocatorHint>>,
+    mut alloc_hints: HashMap<Binding, Vec<AllocatorHint>>,
 ) -> CodegenHints {
     let mut state = AllocatorState::new();
+    let alloc_hints = {
+        let keys = crate::intermediate::analysis::order_by_deps(ir, alloc_hints.keys().cloned());
+
+        keys.into_iter()
+            // UNSAFE: safe, the keys were already on the map
+            .map(|key| (key, unsafe { alloc_hints.remove(&key).unwrap_unchecked() }))
+    };
     // strategy #1: For non-returned bindings, non-phi bindings, bindings that don't need to live after a call
     // we're just going to try and allocate
     // those to non-callee-saved registers.
     // returns the bindings that it could not allocate.
-    let mut could_not_allocate = HashSet::new();
     let mut allocated = HashSet::new();
     'hints: for (binding, mut hints) in alloc_hints {
+        if allocated.contains(&binding) {
+            eprintln!("already allocated {}", binding);
+            continue 'hints;
+        }
+        eprintln!("allocating {} with hints: {:?}", binding, &hints);
         hints.sort();
         let mut is_call = false;
         let mut is_return = false;
@@ -278,7 +315,7 @@ pub fn alloc_registers(
                 AllocatorHint::LivesThroughCall => is_call = true,
                 // Spill already since it's set to be in memory.
                 AllocatorHint::AlreadyInMemory => {
-                    could_not_allocate.insert(binding);
+                    state.spill(binding);
                     continue 'hints;
                 }
             }
@@ -308,6 +345,8 @@ pub fn alloc_registers(
                 .flat_map(|binding| state.get_allocation(*binding))
                 .collect();
 
+            dbg!(&allocs, &phi_nodes);
+
             debug_assert_eq!(
                 allocs.len(),
                 phi_nodes.len(),
@@ -326,9 +365,7 @@ pub fn alloc_registers(
             let unique_alloc = allocs.into_iter().next().unwrap();
 
             debug_assert!(
-                state
-                    .try_register(binding, collisions, unique_alloc)
-                    .is_some(),
+                state.try_alloc(binding, collisions, unique_alloc).is_some(),
                 "Must be able to allocate binding on same register as its phi nodes"
             );
             Some(unique_alloc)
@@ -350,7 +387,7 @@ pub fn alloc_registers(
         };
 
         if final_alloc.is_none() {
-            could_not_allocate.insert(binding);
+            state.spill(binding);
         }
     }
 
@@ -362,30 +399,27 @@ pub fn alloc_registers(
     {
         let collisions = collisions.get(&binding).unwrap();
         if state.try_standard_alloc(binding, collisions).is_none() {
-            could_not_allocate.insert(binding);
+            state.spill(binding);
         }
     }
 
-    debug_assert!(
-        could_not_allocate.is_empty(),
-        "spills aren't yet implemented"
-    );
-    debug_assert!(
-        state.save_when_call.is_empty(),
-        "save when call spill kinds are not yet implemented"
-    );
     CodegenHints {
         need_move_to_return_reg: state.need_move_to_return_reg,
         save_upon_call: state.save_when_call,
-        completely_spilled: could_not_allocate,
+        completely_spilled: state.spills,
         registers: state
             .buckets
             .into_iter()
             .enumerate()
             .flat_map(|(register, bindings)| {
-                bindings
-                    .into_iter()
-                    .map(move |binding| (binding, RegisterID(register as u8)))
+                bindings.into_iter().map(move |binding| {
+                    (
+                        binding,
+                        RegisterID::GeneralPurpose {
+                            index: register as u8,
+                        },
+                    )
+                })
             })
             .collect(),
     }
@@ -462,6 +496,7 @@ int main() {
         // TODO: test traversal for allocator hints
         let hints = crate::codegen::registers::make_allocator_hints(&ir);
         let result = crate::codegen::registers::alloc_registers(
+            &ir,
             &collisions,
             collisions.keys().cloned().collect(),
             hints,

@@ -349,7 +349,7 @@ pub enum Data {
 impl fmt::Display for Data {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Immediate(value) => write!(f, "#{:08X}", value),
+            Self::Immediate(value) => write!(f, "#0x{:08X}", value),
             Self::Register(reg) => write!(f, "{}", reg),
             Self::StackOffset(_) => unreachable!("stack offsets must be determined before"),
         }
@@ -411,8 +411,11 @@ pub enum Register {
     StackPointer,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct RegisterID(pub u8);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RegisterID {
+    GeneralPurpose { index: u8 },
+    StackPointer,
+}
 
 impl fmt::Display for Register {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -426,8 +429,10 @@ impl fmt::Display for Register {
 
 impl Register {
     pub const fn from_id(id: RegisterID, bit_size: BitSize) -> Self {
-        let RegisterID(index) = id;
-        Self::GeneralPurpose { index, bit_size }
+        match id {
+            RegisterID::GeneralPurpose { index } => Self::GeneralPurpose { index, bit_size },
+            RegisterID::StackPointer => Self::StackPointer,
+        }
     }
     pub const fn bit_size(self) -> BitSize {
         match self {

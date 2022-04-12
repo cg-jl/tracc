@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 use super::{BasicBlock, Binding, BlockBinding, BranchingMap, Statement, Value, IR};
