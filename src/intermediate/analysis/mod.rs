@@ -11,6 +11,37 @@ pub use lifetimes::{
 
 pub use binding_usage::{get_usage_map, BindingUsage, UsageMap};
 
+pub fn order_by_deps(ir: &IR, bindings: impl Iterator<Item = Binding>) -> Vec<Binding> {
+    let mut all_bindings: HashMap<_, HashSet<_>> = bindings
+        .map(|binding| {
+            (
+                binding,
+                find_assignment_value(&ir.code, binding)
+                    .unwrap()
+                    .binding_deps()
+                    .into_iter()
+                    .collect(),
+            )
+        })
+        .collect();
+
+    let mut result = Vec::new();
+
+    while let Some(next) = all_bindings
+        .keys()
+        .cloned()
+        .find(|binding| all_bindings[binding].is_empty())
+    {
+        all_bindings.remove(&next);
+        all_bindings.values_mut().for_each(|set| {
+            set.remove(&next);
+        });
+        result.push(next);
+    }
+
+    result
+}
+
 pub fn can_block_be_removed(ir: &IR, block: BlockBinding) -> bool {
     // a block can be deleted if all the blocks that refer to it come before it
     if let Some(backwards) = ir.backwards_map.get(&block) {
