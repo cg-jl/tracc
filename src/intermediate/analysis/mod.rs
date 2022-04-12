@@ -5,6 +5,8 @@ use super::{BasicBlock, Binding, BlockBinding, BranchingMap, Statement, Value, I
 mod binding_usage;
 pub mod lifetimes;
 
+// TODO: output some information on phi nodes per block edge between parent/child.
+
 pub use lifetimes::{
     compute_lifetime_collisions, compute_lifetimes, CollisionMap, Lifetime, LifetimeMap,
 };
