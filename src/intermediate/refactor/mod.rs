@@ -1,4 +1,4 @@
-use super::{BasicBlock, BlockBinding, IR};
+use super::{BasicBlock, BlockBinding, Statement, Value, IR};
 
 pub mod redefine;
 

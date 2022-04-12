@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use super::{
     refactor::{self, redefine::Rename},
-    BasicBlock, Binding, BlockBinding, IRCode, Statement, Value, IR,
+    BasicBlock, Binding, BlockBinding, BlockEnd, Branch, IRCode, Statement, Value, IR,
 };
 
 pub fn run_cleanup(ir: &mut IR) {

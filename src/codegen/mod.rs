@@ -199,7 +199,8 @@ fn compile_value(
             target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
             lhs: assembly::Register::from_id(registers[&lhs], assembly::BitSize::Bit32),
             rhs: could_be_constant_to_data(rhs, registers),
-        }.into(),
+        }
+        .into(),
         Value::Multiply { lhs, rhs } => assembly::Instruction::Mul {
             target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
             lhs: assembly::Register::from_id(registers[&lhs], assembly::BitSize::Bit32),

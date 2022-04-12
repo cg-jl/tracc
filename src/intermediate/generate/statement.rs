@@ -41,15 +41,9 @@ pub fn compile_statement<'code>(
             builder.allocate(memory, 4); // all variables are 4-byte right now
                                          // compile init
             let builder = if let Some((init, init_span)) = init {
-                let (mut builder, expr) = expr::compile_expr(
-                    state,
-                    builder,
-                    init,
-                    bindings,
-                    variables,
-                    source_meta,
-                )
-                .map_err(|e| e.with_backup_source(init_span, source_meta))?;
+                let (mut builder, expr) =
+                    expr::compile_expr(state, builder, init, bindings, variables, source_meta)
+                        .map_err(|e| e.with_backup_source(init_span, source_meta))?;
                 let compute_init = bindings.next_binding();
                 builder.assign(compute_init, expr);
                 builder.store(compute_init, memory, ByteSize::U32);

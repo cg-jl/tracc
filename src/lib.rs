@@ -3,6 +3,8 @@
 #![feature(const_convert)]
 #![feature(negative_impls)]
 #[allow(unused)]
+pub mod allocators;
+#[allow(unused)]
 pub mod ast;
 #[allow(unused)]
 pub mod codegen;
@@ -14,5 +16,3 @@ pub mod grammar;
 pub mod intermediate;
 #[allow(unused)]
 pub mod output;
-#[allow(unused)]
-pub mod allocators;

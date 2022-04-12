@@ -10,7 +10,6 @@ pub fn compile_block<'code>(
     block_depth: usize,
     source_info: &SourceMetadata,
 ) -> Result<BlockBuilder, VarE> {
-    
     // clean the variables for now
     variables.variables_at_depth(block_depth).clear();
 
