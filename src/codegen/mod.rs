@@ -182,7 +182,8 @@ fn compile_value(
     registers: &registers::RegisterMap,
 ) -> AssemblyOutput {
     match value {
-        Value::Allocate { size } => todo!(),
+        // codegen has nothing to do with this.
+        Value::Allocate { .. } => AssemblyOutput::new(),
         Value::Phi { nodes } => todo!(),
         Value::Cmp {
             condition,
