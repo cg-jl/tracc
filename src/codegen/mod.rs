@@ -69,7 +69,7 @@ pub fn codegen_function(function_name: String, ir: IR) -> AssemblyOutput {
     } = registers::alloc_registers(
         &ir,
         &collisions,
-        dbg!(analysis::order_by_deps(&ir, collisions.keys().cloned())),
+        analysis::order_by_deps(&ir, collisions.keys().cloned()),
         registers::make_allocator_hints(&ir),
     );
 

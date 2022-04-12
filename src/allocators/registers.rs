@@ -280,10 +280,8 @@ pub fn alloc_registers(
     let mut allocated = HashSet::new();
     'hints: for (binding, mut hints) in alloc_hints {
         if allocated.contains(&binding) {
-            eprintln!("already allocated {}", binding);
             continue 'hints;
         }
-        eprintln!("allocating {} with hints: {:?}", binding, &hints);
         hints.sort();
         let mut is_call = false;
         let mut is_return = false;
