@@ -11,8 +11,8 @@ pub unsafe fn remove_block(ir: &mut IR, target: BlockBinding) -> BasicBlock {
     let BlockBinding(index) = target;
 
     // shift the names of the blocks to the right to be 1 less.
-    for i in index + 1..ir.code.len() {
-        rename_block(ir, BlockBinding(i), BlockBinding(i - 1));
+    for i in index..ir.code.len() {
+        rename_block(ir, BlockBinding(i + 1), BlockBinding(i));
     }
 
     // now we can remove that basic block
@@ -26,6 +26,20 @@ pub unsafe fn remove_block(ir: &mut IR, target: BlockBinding) -> BasicBlock {
 pub unsafe fn rename_block(ir: &mut IR, target: BlockBinding, replace_with: BlockBinding) {
     // rename refs in the code
     for block in ir.code.iter_mut() {
+        for statement in &mut block.statements {
+            // rename phi nodes
+            if let Statement::Assign {
+                value: Value::Phi { nodes },
+                ..
+            } = statement
+            {
+                for node in nodes {
+                    if node.block_from == target {
+                        node.block_from = replace_with;
+                    }
+                }
+            }
+        }
         match block.end {
             super::BlockEnd::Branch(ref mut branch) => match branch {
                 super::Branch::Unconditional {

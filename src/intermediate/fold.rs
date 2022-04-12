@@ -44,34 +44,28 @@ fn try_merge(ir: &mut IR) -> bool {
     cleanup::run_cleanup(ir);
 
     // if I find a direct mapping somewhere, I inline
-    let mut jumps: Vec<_> = find_unique_jumps(ir).collect();
+    let mut jumps: HashMap<_, _> = find_unique_jumps(ir).collect();
 
-    // let's order the operations to make our merges valid.
-    // All merges for one block should happen *after* all the merges for the indices *before* that
-    // block.
-    jumps.sort_unstable_by(|merge1, merge2| {
-        use std::cmp::Ordering;
-        // #1. Two merges won't have the same target
-        debug_assert_ne!(merge1.1, merge2.1, "Two merges won't have the same target");
-        // #2. if the target of one is the parent of another, we must run the child first and
-        // rename the parent
-        if merge1.1 == merge2.0 {
-            Ordering::Greater // do `merge1` later
-        } else if merge1.0 == merge2.1 {
-            Ordering::Less // do `merge1` first
-        } else {
-            // #3. Otherwise they're independent
-            Ordering::Equal
-        }
-    });
     let did_merge = !jumps.is_empty();
 
-    for (parent, child) in jumps {
-        // because it was sorted correctly, we can go through the blocks and remove them.
-        let child = unsafe { refactor::remove_block(ir, child) };
+    fn find_noncolliding_merge(
+        jumps: &mut HashMap<BlockBinding, BlockBinding>,
+    ) -> Option<(BlockBinding, BlockBinding)> {
+        for (parent, child) in jumps.iter().map(|(a, b)| (*a, *b)) {
+            if !jumps.contains_key(&child) {
+                jumps.remove(&parent);
+                return Some((parent, child));
+            }
+        }
+        None
+    }
 
-        // inline the blocks
-        merge_blocks(&mut ir[parent], child, parent);
+    while let Some((parent, child)) = find_noncolliding_merge(&mut jumps) {
+        // rename the child block to the block it's inlined before removing it
+        unsafe { refactor::rename_block(ir, child, parent) };
+        let child_block = unsafe { refactor::remove_block(ir, child) };
+        merge_blocks(&mut ir[parent], child_block, parent);
+        cleanup::run_cleanup(ir);
     }
 
     did_merge
@@ -97,16 +91,16 @@ fn block_set_only_predecessor(block: &mut BasicBlock, predecessor: BlockBinding)
             value: Value::Phi { nodes },
         } = statement
         {
-            // if we can find the binding that
             let value = nodes
                 .into_iter()
                 .find_map(|descriptor| {
                     if descriptor.block_from == predecessor {
                         Some(descriptor.value)
-                    } else { None }
+                    } else {
+                        None
+                    }
                 })
-                .expect("Setting only predecessor but one binding depends on a phi node that doesn't include said predecessor");
-
+                .expect("Inlining with no idea of phi node");
             *statement = Statement::Assign {
                 index: *index,
                 value: match value {
