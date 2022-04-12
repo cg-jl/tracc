@@ -390,7 +390,30 @@ fn value_propagate_constant(
 
             (lhs, rhs) => PropagationResult::unchanged(value),
         },
-        Value::Subtract { lhs, rhs } => todo!(),
+        Value::Subtract { lhs, rhs } => match rhs {
+            CouldBeConstant::Constant(c) if lhs == known_binding => {
+                PropagationResult::modified(Value::Constant(binding_value.wrapping_sub(c)))
+            }
+            CouldBeConstant::Binding(other) => {
+                if lhs == known_binding && other == known_binding {
+                    PropagationResult::modified(Value::Constant(0))
+                } else if lhs == known_binding {
+                    // since subtraction is anticommutative, I'd have to generate more values to
+                    // accomodate a reorder. I'll just fail so that the order of evaluation for
+                    // folds changes
+                    PropagationResult::unchanged(value)
+                } else if other == known_binding {
+                    // here I can change the rhs to be a constant
+                    PropagationResult::modified(Value::Subtract {
+                        lhs,
+                        rhs: CouldBeConstant::Constant(binding_value),
+                    })
+                } else {
+                    PropagationResult::unchanged(value)
+                }
+            }
+            CouldBeConstant::Constant(_) => PropagationResult::unchanged(value),
+        },
         Value::Multiply { lhs, rhs } => match (lhs, rhs) {
             (a, CouldBeConstant::Constant(c)) if a == known_binding => {
                 PropagationResult::modified(Value::Constant(binding_value.wrapping_mul(c)))
