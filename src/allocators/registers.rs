@@ -7,7 +7,6 @@ use std::collections::HashSet;
 // TODO: when failing to produce same register on phi nodes, make sure after allocations
 // that those registers that go to phi nodes are put correctly before each branch.
 
-
 pub type RegisterMap = HashMap<Binding, RegisterID>;
 
 #[derive(Debug, PartialEq, Eq)]
