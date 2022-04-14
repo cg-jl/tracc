@@ -339,7 +339,12 @@ fn compile_value(
         .into(),
         Value::Lsl { lhs, rhs } => todo!(),
         Value::Lsr { lhs, rhs } => todo!(),
-        Value::And { lhs, rhs } => todo!(),
+        Value::And { lhs, rhs } => assembly::Instruction::And {
+            target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
+            lhs: assembly::Register::from_id(registers[&lhs], assembly::BitSize::Bit32),
+            rhs: could_be_constant_to_data(rhs, registers),
+        }
+        .into(),
         Value::Or { lhs, rhs } => todo!(),
         Value::Xor { lhs, rhs } => assembly::Instruction::Eor {
             target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),

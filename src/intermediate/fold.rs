@@ -92,7 +92,7 @@ fn block_set_only_predecessor(block: &mut BasicBlock, predecessor: BlockBinding)
         } = statement
         {
             let bind = nodes
-                .into_iter()
+                .iter_mut()
                 .find_map(|descriptor| {
                     if descriptor.block_from == predecessor {
                         Some(descriptor.value)
@@ -109,12 +109,12 @@ fn block_set_only_predecessor(block: &mut BasicBlock, predecessor: BlockBinding)
     }
 }
 
-fn find_potential_folds<'code>(code: &[Statement]) -> impl Iterator<Item = (usize, Binding, u64)> {
+fn find_potential_folds(code: &[Statement]) -> impl Iterator<Item = (usize, Binding, u64)> {
     let mut found_constants = HashMap::new();
 
     let mut folds = Vec::new();
 
-    for (index, statement) in code.into_iter().enumerate() {
+    for (index, statement) in code.iter().enumerate() {
         if let Statement::Assign {
             index,
             value: Value::Constant(c),
@@ -144,7 +144,7 @@ fn fold_block(ir: &mut IR, block: BlockBinding) {
         let mut potential_folds: Vec<_> = find_potential_folds(&ir[block].statements)
             .filter(|(index, binding, value)| {
                 failed_folds
-                    .get(&index)
+                    .get(index)
                     .filter(|set| set.contains(&(*binding, *value)))
                     .is_none()
             })
