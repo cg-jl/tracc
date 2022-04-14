@@ -22,6 +22,12 @@ pub fn constant_fold(mut ir: IR) -> IR {
     ir
 }
 
+fn repr_into_i32(repr: u64) -> i32 {
+    // safely converts to u32 representation so no bits are missed and then interprets the
+    // resulting 32-bits as two's complement.
+    unsafe { std::mem::transmute(repr as u32) }
+}
+
 // find places where a block jumps to another (child) block and this child only has that parent
 fn find_unique_jumps(ir: &IR) -> impl Iterator<Item = (BlockBinding, BlockBinding)> + '_ {
     ir.forward_map.iter().filter_map(|(parent, children)| {
@@ -295,7 +301,7 @@ fn value_propagate_constant(
             lhs,
             rhs,
         } => {
-            fn eval_condition(condition: Condition, lhs: u64, rhs: u64) -> u64 {
+            fn eval_condition(condition: Condition, lhs: i32, rhs: i32) -> u64 {
                 match condition {
                     Condition::Equals => {
                         if lhs == rhs {
@@ -318,42 +324,62 @@ fn value_propagate_constant(
                             0
                         }
                     }
-                    other => eval_condition(other.antidote(), rhs, lhs),
+                    Condition::LessThan => {
+                        if lhs < rhs {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    Condition::GreaterThan => {
+                        if lhs > rhs {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    Condition::NotEquals => {
+                        if lhs != rhs {
+                            1
+                        } else {
+                            0
+                        }
+                    }
                 }
             }
-            match (lhs, rhs) {
-                (a, CouldBeConstant::Binding(b)) => {
-                    if a == b && a == known_binding {
+            match rhs {
+                CouldBeConstant::Constant(ctant) if lhs == known_binding => {
+                    PropagationResult::modified(Value::Constant(eval_condition(
+                        condition,
+                        repr_into_i32(binding_value),
+                        repr_into_i32(ctant),
+                    )))
+                }
+                CouldBeConstant::Binding(other) => {
+                    if lhs == known_binding && other == known_binding {
+                        let i32_value: i32 = repr_into_i32(binding_value);
                         PropagationResult::modified(Value::Constant(eval_condition(
-                            condition,
-                            binding_value,
-                            binding_value,
+                            condition, i32_value, i32_value,
                         )))
-                    } else if a == known_binding {
+                    } else if other == known_binding {
+                        // we know half the thing.
                         PropagationResult::modified(Value::Cmp {
-                            // flip the condition and the arguments
-                            condition: condition.antidote(),
-                            lhs: b,
+                            condition,
+                            lhs,
                             rhs: CouldBeConstant::Constant(binding_value),
                         })
-                    } else if b == known_binding {
+                    } else if lhs == known_binding && condition.is_commutative() {
+                        // if the condition is commutative, we can flip the thing.
                         PropagationResult::modified(Value::Cmp {
                             condition,
-                            lhs: a,
+                            lhs: other,
                             rhs: CouldBeConstant::Constant(binding_value),
                         })
                     } else {
                         PropagationResult::unchanged(value)
                     }
                 }
-                (a, CouldBeConstant::Constant(other)) if a == known_binding => {
-                    PropagationResult::modified(Value::Constant(eval_condition(
-                        condition,
-                        binding_value,
-                        other,
-                    )))
-                }
-                (lhs, rhs) => PropagationResult::unchanged(value),
+                CouldBeConstant::Constant(_) => PropagationResult::unchanged(value),
             }
         }
         Value::Load {
