@@ -268,7 +268,9 @@ fn compile_value(
     match value {
         // codegen has nothing to do with this.
         Value::Allocate { .. } => AssemblyOutput::new(),
-        Value::Phi { nodes } => todo!(),
+        // codegen won't do anything here with phi nodes. They are analyzed separately
+        // and the register allocator is responsible for putting all the bindings in the same place
+        Value::Phi { .. } => AssemblyOutput::new(),
         Value::Cmp {
             condition,
             lhs,
