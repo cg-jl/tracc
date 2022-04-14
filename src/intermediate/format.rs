@@ -151,21 +151,19 @@ impl fmt::Display for Branch {
                 flag,
                 target_true,
                 target_false,
-            } => write_instruction!(f, "br", flag, target_true, target_false),
+            } => write_instruction!(f, "br-cond", flag, target_true, target_false),
         }
     }
 }
 
 impl fmt::Debug for IR {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "code: ")?;
+        f.write_str("\n")?;
         for (block_index, block) in self.code.iter().enumerate() {
             let bb = BlockBinding(block_index);
             write!(f, "{}:", bb)?;
             write!(f, "{}", block)?;
         }
-
-        writeln!(f, "backwards map: {:?}", self.backwards_map)?;
-        writeln!(f, "forward map: {:?}", self.forward_map)
+        Ok(())
     }
 }
