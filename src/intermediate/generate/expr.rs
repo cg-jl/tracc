@@ -133,7 +133,7 @@ pub fn compile_expr<'code>(
                     (rhs_block, start, rhs)
                 };
                 // create the new block that will start with a phi node to merge the two branches
-                let end_builder = state.new_block();
+                let mut end_builder = state.new_block();
                 // finish rhs by telling it to jump directly to the end
                 let rhs_block = rhs_builder.finish_block(
                     state,
@@ -164,20 +164,30 @@ pub fn compile_expr<'code>(
                     },
                 );
 
-                let end = Value::Phi {
-                    nodes: vec![
-                        PhiDescriptor {
-                            value: lhs.into(),
-                            block_from: lhs_block,
-                        },
-                        PhiDescriptor {
-                            value: rhs.into(),
-                            block_from: rhs_block,
-                        },
-                    ],
-                };
+                let end = bindings.next_binding();
+                end_builder.assign(
+                    end,
+                    Value::Phi {
+                        nodes: vec![
+                            PhiDescriptor {
+                                value: lhs,
+                                block_from: lhs_block,
+                            },
+                            PhiDescriptor {
+                                value: rhs,
+                                block_from: rhs_block,
+                            },
+                        ],
+                    },
+                );
 
-                Ok((end_builder, end))
+                Ok((
+                    end_builder,
+                    Value::And {
+                        lhs: end,
+                        rhs: (1).into(),
+                    },
+                ))
             }
             ast::BinaryOp::Assignment { op } => {
                 // compute rhs

@@ -104,6 +104,7 @@ pub enum Value {
         lhs: Binding,
         rhs: CouldBeConstant,
     },
+    // NOTE: `rhs` should be a binding since `udiv` only accepts registers.
     Divide {
         lhs: Binding,
         rhs: CouldBeConstant,

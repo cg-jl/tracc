@@ -483,7 +483,31 @@ fn value_propagate_constant(
         },
         Value::Lsl { lhs, rhs } => todo!(),
         Value::Lsr { lhs, rhs } => todo!(),
-        Value::And { lhs, rhs } => todo!(),
+        Value::And { lhs, rhs } => match rhs {
+            CouldBeConstant::Constant(ctant) if lhs == known_binding => {
+                PropagationResult::modified(Value::Constant(binding_value & ctant))
+            }
+            CouldBeConstant::Binding(other) => {
+                if lhs == known_binding && other == known_binding {
+                    PropagationResult::modified(Value::Constant(binding_value))
+                } else if lhs == known_binding {
+                    // reorder the AND
+                    PropagationResult::modified(Value::And {
+                        lhs: other,
+                        rhs: binding_value.into(),
+                    })
+                } else if other == known_binding {
+                    // we could evaluate half of it.
+                    PropagationResult::modified(Value::And {
+                        lhs,
+                        rhs: binding_value.into(),
+                    })
+                } else {
+                    PropagationResult::unchanged(value)
+                }
+            }
+            CouldBeConstant::Constant(_) => PropagationResult::unchanged(value),
+        },
         Value::Or { lhs, rhs } => todo!(),
         Value::Xor { lhs, rhs } => todo!(),
         // already a constant, cannot fold further
