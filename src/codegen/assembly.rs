@@ -271,7 +271,7 @@ impl fmt::Display for Branch {
 
 impl fmt::Display for BasicBlockLabel {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, ".L{}", self.num)
+        write!(f, ".LBB{}", self.num)
     }
 }
 
