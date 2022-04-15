@@ -22,6 +22,8 @@ pub enum AllocatorHint {
     LivesThroughCall,
     /// Already destined to be a memory allocation.
     AlreadyInMemory,
+    /// Is zero.
+    IsZero,
 }
 
 impl PartialOrd for AllocatorHint {
@@ -58,6 +60,9 @@ pub fn make_allocator_hints(code: &IR) -> HashMap<Binding, Vec<AllocatorHint>> {
         for statement in &code[block].statements {
             if let crate::intermediate::Statement::Assign { index, value } = statement {
                 match value {
+                    crate::intermediate::Value::Constant(0) => {
+                        map.entry(*index).or_default().push(AllocatorHint::IsZero)
+                    }
                     crate::intermediate::Value::Phi { nodes } => {
                         let other_bindings: HashSet<_> = nodes
                             .into_iter()
@@ -118,6 +123,8 @@ pub struct AllocatorState {
     save_when_call: HashSet<Binding>,
     /// list of bindings that couldn't be allocated a register.
     spills: HashSet<Binding>,
+    /// list of bindings that got allocated the zero register.
+    got_zero: HashSet<Binding>,
     /// buckets for allocations
     buckets: [HashSet<Binding>; 31],
 }
@@ -160,6 +167,12 @@ impl std::fmt::Debug for AllocatorState {
     }
 }
 
+impl Default for AllocatorState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AllocatorState {
     pub fn new() -> Self {
         Self {
@@ -167,7 +180,7 @@ impl AllocatorState {
             need_move_to_return_reg: HashSet::new(),
             save_when_call: HashSet::new(),
             spills: HashSet::new(),
-
+            got_zero: HashSet::new(),
             buckets: Default::default(),
         }
     }
@@ -183,6 +196,11 @@ impl AllocatorState {
         all.into_iter()
     }
 
+    pub fn is_zero(&mut self, binding: Binding) -> RegisterID {
+        self.got_zero.insert(binding);
+        RegisterID::ZeroRegister
+    }
+
     pub fn try_alloc(
         &mut self,
         binding: Binding,
@@ -190,6 +208,7 @@ impl AllocatorState {
         alloc: RegisterID,
     ) -> Option<RegisterID> {
         match alloc {
+            RegisterID::ZeroRegister => Some(self.is_zero(binding)),
             RegisterID::GeneralPurpose { index } => {
                 self.try_register(binding, collides_with, index)
             }
@@ -287,9 +306,11 @@ pub fn alloc_registers(
         let mut is_call = false;
         let mut is_return = false;
         let mut phi_nodes: Option<HashSet<Binding>> = None;
+        let mut is_zero = false;
         let mut locked_phi_nodes = false;
         for hint in hints {
             match hint {
+                AllocatorHint::IsZero => is_zero = true,
                 AllocatorHint::UsedInReturn => is_return = true,
                 AllocatorHint::UsedInPhiNode(others) => {
                     if !locked_phi_nodes {
@@ -381,6 +402,8 @@ pub fn alloc_registers(
                         x
                     })
                 })
+        } else if is_zero {
+            Some(hinted_alloc.unwrap_or_else(|| state.is_zero(binding)))
         } else {
             hinted_alloc
         };
@@ -420,6 +443,12 @@ pub fn alloc_registers(
                     )
                 })
             })
+            .chain(
+                state
+                    .got_zero
+                    .into_iter()
+                    .map(|binding| (binding, RegisterID::ZeroRegister)),
+            )
             .collect(),
     }
 }

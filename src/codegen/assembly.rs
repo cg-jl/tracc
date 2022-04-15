@@ -400,6 +400,7 @@ pub enum Register {
 pub enum RegisterID {
     GeneralPurpose { index: u8 },
     StackPointer,
+    ZeroRegister,
 }
 
 impl fmt::Display for Register {
@@ -417,6 +418,7 @@ impl Register {
         match id {
             RegisterID::GeneralPurpose { index } => Self::GeneralPurpose { index, bit_size },
             RegisterID::StackPointer => Self::StackPointer,
+            RegisterID::ZeroRegister => Self::ZeroRegister { bit_size },
         }
     }
     pub const fn bit_size(self) -> BitSize {

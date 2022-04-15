@@ -99,7 +99,7 @@ impl Into<assembly::Assembly> for BasicBlockLabel {
     }
 }
 
-pub fn codegen_function(function_name: String, ir: IR) -> AssemblyOutput {
+pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
     let collisions = crate::intermediate::analysis::compute_lifetime_collisions(&ir);
     // TODO: integrate register spill output
     let registers::CodegenHints {
@@ -113,6 +113,17 @@ pub fn codegen_function(function_name: String, ir: IR) -> AssemblyOutput {
         analysis::order_by_deps(&ir, collisions.keys().cloned()),
         registers::make_allocator_hints(&ir),
     );
+
+    for binding in registers.iter().filter_map(|(binding, reg)| {
+        if matches!(reg, assembly::RegisterID::ZeroRegister) {
+            Some(*binding)
+        } else {
+            None
+        }
+    }) {
+        // UNSAFE: the binding is allocated to a read-only register.
+        unsafe { crate::intermediate::refactor::remove_binding(&mut ir, binding) };
+    }
 
     let alloc_map = memory::make_alloc_map(&ir.code);
 

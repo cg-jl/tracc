@@ -1,6 +1,34 @@
-use super::{BasicBlock, BlockBinding, Statement, Value, IR};
+use super::{BasicBlock, Binding, BlockBinding, Statement, Value, IR};
 
 pub mod redefine;
+
+/// Remove a binding from the IR
+///
+/// # Safety
+/// The binding must either be already allocated to a read-only register or not used elsewhere
+pub unsafe fn remove_binding(ir: &mut IR, target: Binding) {
+    for block in &mut ir.code {
+        if let Some(index) = block
+            .statements
+            .iter()
+            .enumerate()
+            .find_map(|(index, stmt)| {
+                if let Statement::Assign {
+                    index: assign_target,
+                    ..
+                } = stmt
+                {
+                    if assign_target == &target {
+                        return Some(index);
+                    }
+                }
+                None
+            })
+        {
+            block.statements.remove(index);
+        }
+    }
+}
 
 /// Remove a block from the IR
 ///
