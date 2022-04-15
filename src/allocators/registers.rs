@@ -64,10 +64,8 @@ pub fn make_allocator_hints(code: &IR) -> HashMap<Binding, Vec<AllocatorHint>> {
                         map.entry(*index).or_default().push(AllocatorHint::IsZero)
                     }
                     crate::intermediate::Value::Phi { nodes } => {
-                        let other_bindings: HashSet<_> = nodes
-                            .into_iter()
-                            .map(|descriptor| descriptor.value)
-                            .collect();
+                        let other_bindings: HashSet<_> =
+                            nodes.iter().map(|descriptor| descriptor.value).collect();
                         map.entry(*index)
                             .or_default()
                             .push(AllocatorHint::UsedInPhiNode(other_bindings));
@@ -523,8 +521,8 @@ int main() {
         .unwrap();
         let collisions = crate::intermediate::analysis::compute_lifetime_collisions(&ir);
         // TODO: test traversal for allocator hints
-        let hints = crate::codegen::registers::make_allocator_hints(&ir);
-        let result = crate::codegen::registers::alloc_registers(
+        let hints = make_allocator_hints(&ir);
+        let result = alloc_registers(
             &ir,
             &collisions,
             collisions.keys().cloned().collect(),

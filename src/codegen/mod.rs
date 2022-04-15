@@ -8,6 +8,12 @@ use std::collections::VecDeque;
 
 pub struct AssemblyOutput(VecDeque<assembly::Assembly>);
 
+impl Default for AssemblyOutput {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AssemblyOutput {
     pub fn new() -> Self {
         Self(VecDeque::new())
@@ -93,9 +99,9 @@ impl FromIterator<assembly::Assembly> for AssemblyOutput {
 
 pub struct BasicBlockLabel(usize);
 
-impl Into<assembly::Assembly> for BasicBlockLabel {
-    fn into(self) -> assembly::Assembly {
-        assembly::Assembly::Label(format!(".LBB{}", self.0))
+impl From<BasicBlockLabel> for assembly::Assembly {
+    fn from(val: BasicBlockLabel) -> Self {
+        assembly::Assembly::Label(format!(".LBB{}", val.0))
     }
 }
 

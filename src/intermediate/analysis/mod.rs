@@ -48,7 +48,7 @@ pub fn order_by_deps(ir: &IR, bindings: impl Iterator<Item = Binding>) -> Vec<Bi
 pub fn can_block_be_removed(ir: &IR, block: BlockBinding) -> bool {
     // a block can be deleted if all the blocks that refer to it come before it
     if let Some(backwards) = ir.backwards_map.get(&block) {
-        backwards.iter().find(|b| **b > block).is_none()
+        !backwards.iter().any(|b| *b > block)
     } else {
         true
     }
