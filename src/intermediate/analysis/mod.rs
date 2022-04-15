@@ -31,9 +31,10 @@ pub fn order_by_deps(ir: &IR, bindings: impl Iterator<Item = Binding>) -> Vec<Bi
     let mut result = Vec::new();
 
     while let Some(next) = all_bindings.keys().cloned().find(|binding| {
-        all_bindings[binding]
-            .iter()
-            .all(|other| !all_bindings.contains_key(other))
+        all_bindings[binding].is_empty()
+            || all_bindings[binding]
+                .iter()
+                .all(|other| !all_bindings.contains_key(other))
     }) {
         all_bindings.remove(&next);
         all_bindings.values_mut().for_each(|set| {

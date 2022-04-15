@@ -112,7 +112,7 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
         need_move_to_return_reg,
         save_upon_call,
         mut completely_spilled,
-        registers,
+        mut registers,
     } = registers::alloc_registers(
         &ir,
         &collisions,
@@ -134,6 +134,7 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
     }
 
     alloc_map.keys().cloned().for_each(|allocated_binding| {
+        registers.insert(allocated_binding, assembly::RegisterID::StackPointer);
         completely_spilled.remove(&allocated_binding);
     });
 
