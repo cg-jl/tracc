@@ -148,6 +148,9 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
         "TODO: implement moves to return register (or generic move to register)"
     );
 
+    // align the stack to 16 bytes
+    let mem_size = 16 * ((mem_size as f64 / 16.0f64).ceil() as usize);
+
     let r#final: AssemblyOutput = ir
         .code
         .into_iter()
