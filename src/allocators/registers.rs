@@ -9,83 +9,120 @@ use std::collections::HashSet;
 
 pub type RegisterMap = HashMap<Binding, RegisterID>;
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum AllocatorHint {
-    /// Returned from a function, which means that the binding will
-    /// get an allocation for w0 immediately.
-    UsedInReturn,
-    /// The binding is declared by a phi node of other bindings.
-    /// If all of the other bindings share the same allocation,
-    /// the target binding is ensured to share it as well.
-    UsedInPhiNode(HashSet<Binding>),
-    /// There's at least one call while the binding is alive.
-    LivesThroughCall,
-    /// Already destined to be a memory allocation.
-    AlreadyInMemory,
-    /// Is zero.
-    IsZero,
+pub enum AllocatorHints {
+    InMemory,
+    Usable {
+        used_in_return: bool,
+        is_zero: bool,
+        used_through_call: bool,
+        from_phi_node: Option<HashSet<Binding>>,
+    },
 }
 
-impl PartialOrd for AllocatorHint {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match (self, other) {
-            (Self::LivesThroughCall, Self::LivesThroughCall) => Some(std::cmp::Ordering::Equal),
-            (Self::LivesThroughCall, _) => Some(std::cmp::Ordering::Greater),
-            (_, Self::LivesThroughCall) => Some(std::cmp::Ordering::Less),
-            (Self::UsedInReturn, Self::UsedInPhiNode(_)) => Some(std::cmp::Ordering::Greater),
-            (Self::UsedInReturn, _) => Some(std::cmp::Ordering::Equal),
-            (Self::UsedInPhiNode(_), Self::UsedInPhiNode(_)) => Some(std::cmp::Ordering::Equal),
-            _ => None,
+struct HintBuilder {
+    phi_nodes_locked: bool,
+    hints: AllocatorHints,
+}
+
+impl HintBuilder {
+    pub fn new() -> Self {
+        Self {
+            phi_nodes_locked: false,
+            hints: AllocatorHints::Usable {
+                used_through_call: false,
+                used_in_return: false,
+                is_zero: false,
+                from_phi_node: None,
+            },
         }
+    }
+
+    pub fn caught_used_through_call(&mut self) {
+        if let AllocatorHints::Usable {
+            used_through_call, ..
+        } = &mut self.hints
+        {
+            *used_through_call = true;
+        }
+    }
+
+    pub fn caught_returned(&mut self) {
+        if let AllocatorHints::Usable { used_in_return, .. } = &mut self.hints {
+            *used_in_return = true;
+        }
+    }
+
+    pub fn caught_zero(&mut self) {
+        if let AllocatorHints::Usable { is_zero, .. } = &mut self.hints {
+            *is_zero = true;
+        }
+    }
+
+    pub fn add_phi_node(&mut self, others: HashSet<Binding>) {
+        if !self.phi_nodes_locked {
+            if let AllocatorHints::Usable { from_phi_node, .. } = &mut self.hints {
+                match from_phi_node {
+                    Some(ref mut already_in) => {
+                        // we can have more
+                        if already_in.is_subset(&others) {
+                            already_in.extend(others);
+                        } else if !already_in.is_superset(&others) {
+                            // since we've got discrepancies, phi nodes will be locked
+                            // to `None`, since I don't know what to do here.
+                            self.phi_nodes_locked = true;
+                            *from_phi_node = None;
+                        }
+                    }
+                    None => *from_phi_node = Some(others),
+                }
+            }
+        }
+    }
+
+    pub fn finish(self) -> AllocatorHints {
+        self.hints
+    }
+
+    pub fn value_is_memory(&mut self) {
+        self.hints = AllocatorHints::InMemory;
     }
 }
 
-impl Ord for AllocatorHint {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (Self::LivesThroughCall, Self::LivesThroughCall) => std::cmp::Ordering::Equal,
-            (Self::LivesThroughCall, _) => std::cmp::Ordering::Greater,
-            (_, Self::LivesThroughCall) => std::cmp::Ordering::Less,
-            (Self::UsedInReturn, Self::UsedInPhiNode(_)) => std::cmp::Ordering::Greater,
-            (Self::UsedInReturn, _) => std::cmp::Ordering::Equal,
-            (Self::UsedInPhiNode(_), Self::UsedInPhiNode(_)) => std::cmp::Ordering::Equal,
-            _ => std::cmp::Ordering::Equal,
-        }
+impl Default for HintBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-pub fn make_allocator_hints(code: &IR) -> HashMap<Binding, Vec<AllocatorHint>> {
-    let mut map = HashMap::<Binding, Vec<AllocatorHint>>::new();
+pub fn make_allocator_hints(code: &IR) -> HashMap<Binding, AllocatorHints> {
+    let mut map = HashMap::<Binding, HintBuilder>::new();
     for block in crate::intermediate::analysis::TopBottomTraversal::from(code) {
         for statement in &code[block].statements {
             if let crate::intermediate::Statement::Assign { index, value } = statement {
                 match value {
                     crate::intermediate::Value::Constant(0) => {
-                        map.entry(*index).or_default().push(AllocatorHint::IsZero)
+                        map.entry(*index).or_default().caught_zero();
                     }
                     crate::intermediate::Value::Phi { nodes } => {
                         let other_bindings: HashSet<_> =
                             nodes.iter().map(|descriptor| descriptor.value).collect();
-                        map.entry(*index)
-                            .or_default()
-                            .push(AllocatorHint::UsedInPhiNode(other_bindings));
+                        map.entry(*index).or_default().add_phi_node(other_bindings);
                     }
-                    crate::intermediate::Value::Allocate { .. } => map
-                        .entry(*index)
-                        .or_default()
-                        .push(AllocatorHint::AlreadyInMemory),
+                    crate::intermediate::Value::Allocate { .. } => {
+                        map.entry(*index).or_default().value_is_memory()
+                    }
                     _ => (),
                 }
                 // TODO: match call
             }
         }
         if let BlockEnd::Return(binding) = code[block].end {
-            map.entry(binding)
-                .or_default()
-                .push(AllocatorHint::UsedInReturn)
+            map.entry(binding).or_default().caught_returned();
         }
     }
-    map
+    map.into_iter()
+        .map(|(binding, builder)| (binding, builder.finish()))
+        .collect()
 }
 
 #[allow(dead_code)] // this function will be used upon having calls, don't worry
@@ -281,144 +318,96 @@ pub fn alloc_registers(
     ir: &IR,
     collisions: &CollisionMap,
     need_allocation: Vec<Binding>,
-    mut alloc_hints: HashMap<Binding, Vec<AllocatorHint>>,
+    mut alloc_hints: HashMap<Binding, AllocatorHints>,
 ) -> CodegenHints {
+    // TODO: reserve phi nodes hints for later, when all of its dependencies are allocated.
+    // and so on.
     let mut state = AllocatorState::new();
-    let alloc_hints = {
-        let keys = crate::intermediate::analysis::order_by_deps(ir, alloc_hints.keys().cloned());
-
-        keys.into_iter()
-            // UNSAFE: safe, the keys were already on the map
-            .map(|key| (key, unsafe { alloc_hints.remove(&key).unwrap_unchecked() }))
-    };
     // strategy #1: For non-returned bindings, non-phi bindings, bindings that don't need to live after a call
     // we're just going to try and allocate
     // those to non-callee-saved registers.
     // returns the bindings that it could not allocate.
     let mut allocated = HashSet::new();
-    'hints: for (binding, mut hints) in alloc_hints {
+    'hints: for binding in need_allocation {
         if allocated.contains(&binding) {
-            continue 'hints;
+            continue;
         }
-        hints.sort();
-        let mut is_call = false;
-        let mut is_return = false;
-        let mut phi_nodes: Option<HashSet<Binding>> = None;
-        let mut is_zero = false;
-        let mut locked_phi_nodes = false;
-        for hint in hints {
-            match hint {
-                AllocatorHint::IsZero => is_zero = true,
-                AllocatorHint::UsedInReturn => is_return = true,
-                AllocatorHint::UsedInPhiNode(others) => {
-                    if !locked_phi_nodes {
-                        phi_nodes = match phi_nodes {
-                            Some(already_in) => {
-                                // we can have more!
-                                if already_in.is_superset(&others) || already_in.is_subset(&others)
-                                {
-                                    Some(already_in.union(&others).cloned().collect())
-                                } else {
-                                    // but if not, we're not going to accept more phi suggestions, just
-                                    // allocate to another register and that's it.
-                                    locked_phi_nodes = true;
-                                    None
-                                }
-                            }
-                            // we haven't had any other phi suggestions.
-                            None => Some(others),
+        allocated.insert(binding);
+        let collisions = collisions.get(&binding).unwrap();
+        let hinted_alloc = match alloc_hints.remove(&binding) {
+            Some(hints) => match hints {
+                AllocatorHints::Usable {
+                    used_in_return,
+                    is_zero,
+                    used_through_call,
+                    from_phi_node,
+                } => {
+                    if used_through_call {
+                        // if the binding is returned, we *probably* assigned a non-return register, so set it
+                        // to move to return
+                        if used_in_return {
+                            state.need_move_to_return_reg.insert(binding);
                         }
+                        // we're going to look through the buckets and check our collisions to find if we can
+                        // allocate a callee-saved register
+                        state.try_saved_register(binding, collisions).or_else(|| {
+                            state.try_nonsaved_register(binding, collisions).map(|x| {
+                                state.save_when_call.insert(binding);
+                                x
+                            })
+                        })
+                    } else if let Some(phi_nodes) = from_phi_node {
+                        // NOTE: might have to reorder allocations so that collisions are resolved
+                        // must have allocated everyone
+                        let allocs: Vec<_> = phi_nodes
+                            .iter()
+                            .flat_map(|binding| state.get_allocation(*binding))
+                            .collect();
+
+                        debug_assert_eq!(
+                            allocs.len(),
+                            phi_nodes.len(),
+                            "All phi nodes must have been previously allocated"
+                        );
+
+                        let allocs: HashSet<_> = allocs.into_iter().collect();
+
+                        // NOTE: this will be removed if needed
+                        debug_assert_eq!(
+                            allocs.len(),
+                            1,
+                            "All allocated phi nodes must be on the same register"
+                        );
+
+                        let unique_alloc = allocs.into_iter().next().unwrap();
+
+                        debug_assert!(
+                            state.try_alloc(binding, collisions, unique_alloc).is_some(),
+                            "Must be able to allocate binding on same register as its phi nodes"
+                        );
+                        Some(unique_alloc)
+                    } else if used_in_return {
+                        state.try_register(binding, collisions, 0).or_else(|| {
+                            state.try_standard_alloc(binding, collisions).map(|x| {
+                                state.need_move_to_return_reg.insert(binding);
+                                x
+                            })
+                        })
+                    } else {
+                        is_zero.then(|| state.is_zero(binding))
                     }
                 }
-                AllocatorHint::LivesThroughCall => is_call = true,
-                // Spill already since it's set to be in memory.
-                AllocatorHint::AlreadyInMemory => {
+                AllocatorHints::InMemory => {
                     state.spill(binding);
                     continue 'hints;
                 }
-            }
-        }
-
-        let collisions = collisions.get(&binding).unwrap();
-        allocated.insert(binding);
-        let hinted_alloc = if is_call {
-            // if the binding is returned, we *probably* assigned a non-return register, so set it
-            // to move to return
-            if is_return {
-                state.need_move_to_return_reg.insert(binding);
-            }
-            // we're going to look through the buckets and check our collisions to find if we can
-            // allocate a callee-saved register
-            state.try_saved_register(binding, collisions).or_else(|| {
-                state.try_nonsaved_register(binding, collisions).map(|x| {
-                    state.save_when_call.insert(binding);
-                    x
-                })
-            })
-        } else if let Some(phi_nodes) = phi_nodes {
-            // NOTE: might have to reorder allocations so that collisions are resolved
-            // must have allocated everyone
-            let allocs: Vec<_> = phi_nodes
-                .iter()
-                .flat_map(|binding| state.get_allocation(*binding))
-                .collect();
-
-            dbg!(&allocs, &phi_nodes);
-
-            debug_assert_eq!(
-                allocs.len(),
-                phi_nodes.len(),
-                "All phi nodes must have been previously allocated"
-            );
-
-            let allocs: HashSet<_> = allocs.into_iter().collect();
-
-            // NOTE: this will be removed if needed
-            debug_assert_eq!(
-                allocs.len(),
-                1,
-                "All allocated phi nodes must be on the same register"
-            );
-
-            let unique_alloc = allocs.into_iter().next().unwrap();
-
-            debug_assert!(
-                state.try_alloc(binding, collisions, unique_alloc).is_some(),
-                "Must be able to allocate binding on same register as its phi nodes"
-            );
-            Some(unique_alloc)
-        } else {
-            None
+            },
+            None => None,
         };
 
-        let final_alloc = if is_return {
-            hinted_alloc
-                .or_else(|| state.try_register(binding, collisions, 0))
-                .or_else(|| {
-                    state.try_standard_alloc(binding, collisions).map(|x| {
-                        state.need_move_to_return_reg.insert(binding);
-                        x
-                    })
-                })
-        } else if is_zero {
-            Some(hinted_alloc.unwrap_or_else(|| state.is_zero(binding)))
-        } else {
-            hinted_alloc
-        };
+        let final_alloc = hinted_alloc.or_else(|| state.try_standard_alloc(binding, collisions));
 
         if final_alloc.is_none() {
-            state.spill(binding);
-        }
-    }
-
-    // now we'll walk the rest of the bindings without hints and try a standard strategy: Allocate
-    // non-callee-saved and then callee-saved or nothing.
-    'bindings: for binding in need_allocation
-        .into_iter()
-        .filter(|x| !allocated.contains(x))
-    {
-        let collisions = collisions.get(&binding).unwrap();
-        if state.try_standard_alloc(binding, collisions).is_none() {
             state.spill(binding);
         }
     }
