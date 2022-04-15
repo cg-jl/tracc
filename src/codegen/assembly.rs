@@ -211,7 +211,7 @@ impl fmt::Display for Instruction {
                 lhs,
                 rhs,
                 bitmask,
-            } => write_instruction!(f, "eor", target, lhs, rhs, Data::Immediate(*bitmask)),
+            } => write_instruction!(f, "eor", target, lhs, rhs, Data::Immediate(*bitmask as u32)),
             Self::Orr { target, lhs, rhs } => write_instruction!(f, "orr", target, lhs, rhs),
             Self::And { target, lhs, rhs } => write_instruction!(f, "and", target, lhs, rhs),
             Self::Lsr { target, lhs, rhs } => write_instruction!(f, "lsr", target, lhs, rhs),
@@ -339,7 +339,7 @@ pub enum Data {
     /// Take data from register
     Register(Register),
     /// Take data from an immediate value
-    Immediate(u64),
+    Immediate(u32),
     /// Stack offset
     StackOffset(u64),
 }
@@ -347,7 +347,7 @@ pub enum Data {
 impl fmt::Display for Data {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Immediate(value) => write!(f, "#{}", value),
+            Self::Immediate(value) => write!(f, "#0x{:X}", value),
             Self::Register(reg) => write!(f, "{}", reg),
             Self::StackOffset(_) => unreachable!("stack offsets must be determined before"),
         }
@@ -355,7 +355,7 @@ impl fmt::Display for Data {
 }
 
 impl Data {
-    pub const fn immediate(immediate: u64, bit_size: BitSize) -> Self {
+    pub const fn immediate(immediate: u32, bit_size: BitSize) -> Self {
         if immediate == 0 {
             Self::Register(Register::ZeroRegister { bit_size })
         } else {
@@ -464,7 +464,7 @@ impl fmt::Display for Memory {
         if offset == 0 {
             write!(f, "[{}]", self.register)
         } else {
-            write!(f, "[{}, {}]", self.register, Data::Immediate(offset as u64))
+            write!(f, "[{}, {}]", self.register, Data::Immediate(offset as u32))
         }
     }
 }

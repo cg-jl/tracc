@@ -164,7 +164,7 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
                     assembly::Instruction::Add {
                         target: assembly::Register::StackPointer,
                         lhs: assembly::Register::StackPointer,
-                        rhs: assembly::Data::Immediate(mem_size as u64),
+                        rhs: assembly::Data::Immediate(mem_size as u32),
                     }
                     .into(),
                 );
@@ -181,7 +181,7 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
             Some(assembly::Instruction::Sub {
                 target: assembly::Register::StackPointer,
                 lhs: assembly::Register::StackPointer,
-                rhs: assembly::Data::Immediate(mem_size as u64),
+                rhs: assembly::Data::Immediate(mem_size as u32),
             })
         })
         // declare function as global for linkage
@@ -274,7 +274,7 @@ fn could_be_constant_to_data(
             assembly::BitSize::Bit32,
         )),
         CouldBeConstant::Constant(constant) => {
-            assembly::Data::immediate(constant as u64, assembly::BitSize::Bit32)
+            assembly::Data::immediate(constant as u32, assembly::BitSize::Bit32)
         }
     }
 }
@@ -320,7 +320,7 @@ fn compile_value(
         Value::FlipBits { binding } => assembly::Instruction::Eor {
             target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
             lhs: assembly::Register::from_id(registers[&binding], assembly::BitSize::Bit32),
-            rhs: assembly::Data::Immediate(std::u32::MAX as u64),
+            rhs: assembly::Data::Immediate(std::u32::MAX),
             bitmask: std::u32::MAX as u64,
         }
         .into(),
@@ -378,7 +378,7 @@ fn compile_value(
                 target_register,
                 assembly::BitSize::Bit32, // NOTE: the constant is 32 bit.
             ),
-            source: assembly::Data::immediate(ctant as u64, assembly::BitSize::Bit32),
+            source: assembly::Data::immediate(ctant as u32, assembly::BitSize::Bit32),
         }
         .into(),
         Value::Binding(_) => todo!(),
