@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -14,7 +15,7 @@ pub use lifetimes::{
 pub use binding_usage::{get_usage_map, BindingUsage, UsageMap};
 
 pub fn order_by_deps(ir: &IR, bindings: impl Iterator<Item = Binding>) -> Vec<Binding> {
-    let mut all_bindings: HashMap<_, HashSet<_>> = bindings
+    let mut all_bindings: BTreeMap<_, HashSet<_>> = bindings
         .map(|binding| {
             (
                 binding,
@@ -47,7 +48,7 @@ pub fn order_by_deps(ir: &IR, bindings: impl Iterator<Item = Binding>) -> Vec<Bi
 pub fn can_block_be_removed(ir: &IR, block: BlockBinding) -> bool {
     // a block can be deleted if all the blocks that refer to it come before it
     if let Some(backwards) = ir.backwards_map.get(&block) {
-        backwards.into_iter().find(|b| **b > block).is_none()
+        backwards.iter().find(|b| **b > block).is_none()
     } else {
         true
     }

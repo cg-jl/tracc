@@ -470,6 +470,7 @@ pub fn alloc_registers(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     // This function does not test anything. Only serves as a mediant to get through the previous
     // parsing & compilation steps that already work correctly.

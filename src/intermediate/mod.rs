@@ -141,7 +141,7 @@ pub enum Value {
     Binding(Binding),
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Binding(pub usize);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
