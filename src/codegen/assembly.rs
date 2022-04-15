@@ -81,6 +81,7 @@ pub enum Instruction {
     Mov { target: Register, source: Data },
     /// Move (with applied not) data to a register
     MvN { target: Register, source: Data },
+
     /// Compare a register with some data
     Cmp { register: Register, data: Data },
     /// Sets register 1 or 0 depending on condition
@@ -211,7 +212,7 @@ impl fmt::Display for Instruction {
                 lhs,
                 rhs,
                 bitmask,
-            } => write_instruction!(f, "eor", target, lhs, rhs, Data::Immediate(*bitmask as u32)),
+            } => write_instruction!(f, "eor", target, lhs, rhs, Data::Immediate(*bitmask as i32)),
             Self::Orr { target, lhs, rhs } => write_instruction!(f, "orr", target, lhs, rhs),
             Self::And { target, lhs, rhs } => write_instruction!(f, "and", target, lhs, rhs),
             Self::Lsr { target, lhs, rhs } => write_instruction!(f, "lsr", target, lhs, rhs),
@@ -223,8 +224,12 @@ impl fmt::Display for Instruction {
                 minuend,
             } => write_instruction!(f, "msub", target, multiplicand, multiplier, minuend),
             Self::Ret => write_instruction!(f, "ret"),
-            Self::Mov { target, source } => write_instruction!(f, "mov", target, source),
-            Self::MvN { target, source } => write_instruction!(f, "mvn", target, source),
+            Self::Mov { target, source } => {
+                write_instruction!(f, "mov", target, source)
+            }
+            Self::MvN { target, source } => {
+                write_instruction!(f, "mvn", target, source)
+            }
             Self::Cmp { register, data } => write_instruction!(f, "cmp", register, data),
             Self::Cset { target, condition } => write_instruction!(f, "cset", target, condition),
             Self::Neg { target, source } => write_instruction!(f, "neg", target, source),
@@ -339,7 +344,7 @@ pub enum Data {
     /// Take data from register
     Register(Register),
     /// Take data from an immediate value
-    Immediate(u32),
+    Immediate(i32),
     /// Stack offset
     StackOffset(u64),
 }
@@ -355,7 +360,7 @@ impl fmt::Display for Data {
 }
 
 impl Data {
-    pub const fn immediate(immediate: u32, bit_size: BitSize) -> Self {
+    pub const fn immediate(immediate: i32, bit_size: BitSize) -> Self {
         if immediate == 0 {
             Self::Register(Register::ZeroRegister { bit_size })
         } else {
@@ -464,7 +469,7 @@ impl fmt::Display for Memory {
         if offset == 0 {
             write!(f, "[{}]", self.register)
         } else {
-            write!(f, "[{}, {}]", self.register, Data::Immediate(offset as u32))
+            write!(f, "[{}, {}]", self.register, Data::Immediate(offset as i32))
         }
     }
 }

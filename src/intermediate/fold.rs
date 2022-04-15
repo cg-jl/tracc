@@ -22,10 +22,10 @@ pub fn constant_fold(mut ir: IR) -> IR {
     ir
 }
 
-fn repr_into_i32(repr: u64) -> i32 {
+fn repr_into_i32(repr: u32) -> i32 {
     // safely converts to u32 representation so no bits are missed and then interprets the
     // resulting 32-bits as two's complement.
-    unsafe { std::mem::transmute(repr as u32) }
+    unsafe { std::mem::transmute(repr) }
 }
 
 // find places where a block jumps to another (child) block and this child only has that parent
@@ -115,7 +115,7 @@ fn block_set_only_predecessor(block: &mut BasicBlock, predecessor: BlockBinding)
     }
 }
 
-fn find_potential_folds(code: &[Statement]) -> impl Iterator<Item = (usize, Binding, u64)> {
+fn find_potential_folds(code: &[Statement]) -> impl Iterator<Item = (usize, Binding, i32)> {
     let mut found_constants = HashMap::new();
 
     let mut folds = Vec::new();
@@ -144,7 +144,7 @@ fn find_potential_folds(code: &[Statement]) -> impl Iterator<Item = (usize, Bind
 fn fold_block(ir: &mut IR, block: BlockBinding) {
     // fold as much of the statements as possible
     // let mut start_index = 0;
-    let mut failed_folds: HashMap<usize, HashSet<(Binding, u64)>> = HashMap::new();
+    let mut failed_folds: HashMap<usize, HashSet<(Binding, i32)>> = HashMap::new();
     loop {
         // collect into a vec to avoid reference issues
         let mut potential_folds: Vec<_> = find_potential_folds(&ir[block].statements)
@@ -245,7 +245,7 @@ impl<T> PropagationResult<T> {
 
 fn statement_propagate_constant(
     known_binding: Binding,
-    known_value: u64,
+    known_value: i32,
     statement: Statement,
 ) -> PropagationResult<Statement> {
     match statement {
@@ -260,7 +260,7 @@ fn statement_propagate_constant(
 
 fn could_be_constant_propagate(
     known_binding: Binding,
-    known_value: u64,
+    known_value: i32,
     c: CouldBeConstant,
 ) -> PropagationResult<CouldBeConstant> {
     match c {
@@ -287,7 +287,7 @@ impl<T> FromIterator<PropagationResult<T>> for PropagationResult<Vec<T>> {
 #[allow(unused)]
 fn value_propagate_constant(
     known_binding: Binding,
-    binding_value: u64,
+    binding_value: i32,
     value: Value,
 ) -> PropagationResult<Value> {
     match value {
@@ -301,7 +301,7 @@ fn value_propagate_constant(
             lhs,
             rhs,
         } => {
-            fn eval_condition(condition: Condition, lhs: i32, rhs: i32) -> u64 {
+            fn eval_condition(condition: Condition, lhs: i32, rhs: i32) -> i32 {
                 match condition {
                     Condition::Equals => {
                         if lhs == rhs {
@@ -351,15 +351,16 @@ fn value_propagate_constant(
                 CouldBeConstant::Constant(ctant) if lhs == known_binding => {
                     PropagationResult::modified(Value::Constant(eval_condition(
                         condition,
-                        repr_into_i32(binding_value),
-                        repr_into_i32(ctant),
+                        binding_value,
+                        ctant,
                     )))
                 }
                 CouldBeConstant::Binding(other) => {
                     if lhs == known_binding && other == known_binding {
-                        let i32_value: i32 = repr_into_i32(binding_value);
                         PropagationResult::modified(Value::Constant(eval_condition(
-                            condition, i32_value, i32_value,
+                            condition,
+                            binding_value,
+                            binding_value,
                         )))
                     } else if other == known_binding {
                         // we know half the thing.

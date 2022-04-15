@@ -18,8 +18,8 @@ impl const From<Binding> for CouldBeConstant {
     }
 }
 
-impl const From<u64> for CouldBeConstant {
-    fn from(value: u64) -> Self {
+impl const From<i32> for CouldBeConstant {
+    fn from(value: i32) -> Self {
         Self::Constant(value)
     }
 }
@@ -30,8 +30,8 @@ impl const From<Binding> for Value {
     }
 }
 
-impl const From<u64> for Value {
-    fn from(c: u64) -> Self {
+impl const From<i32> for Value {
+    fn from(c: i32) -> Self {
         Self::Constant(c)
     }
 }

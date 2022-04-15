@@ -136,7 +136,7 @@ pub enum Value {
         rhs: CouldBeConstant,
     },
     // Constant value
-    Constant(u64),
+    Constant(i32),
     // Other binding. Used by frontend, then cleaned up by next stage
     Binding(Binding),
 }
@@ -147,7 +147,7 @@ pub struct Binding(pub usize);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CouldBeConstant {
     Binding(Binding),
-    Constant(u64),
+    Constant(i32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

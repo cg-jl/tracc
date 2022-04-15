@@ -28,7 +28,7 @@ pub fn compile_expr<'code>(
                 },
             ))
         }
-        ast::Expr::Constant(constant) => Ok((builder, Value::Constant(constant as u64))),
+        ast::Expr::Constant(constant) => Ok((builder, Value::Constant(constant))),
         ast::Expr::Unary {
             operator,
             expr: (expr, expr_span),
