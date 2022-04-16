@@ -3,6 +3,24 @@ use std::collections::{HashMap, HashSet};
 
 pub type LifetimeMap = HashMap<Binding, Lifetime>;
 
+// BUG: detects wrong collisions from phi nodes/branches:
+/*
+BB0:
+  %0 = 2
+  %1 = cmp eq, %0, 1
+  br-cond %1, BB2, BB1
+BB1:
+  %3 = 3
+  store %0, u32 %3
+  br  BB2
+BB2:
+  %6 = phi [ %1, BB0 ], [ %3, BB1 ]
+  ret %6
+
+given this code, %1 does *NOT* collide with %3 because the path selected by the phi node
+doesn't contain %3's lifetime.
+  */
+
 pub fn compute_lifetimes(ir: &IR) -> LifetimeMap {
     let mut lifetime_map = LifetimeMap::new();
 
