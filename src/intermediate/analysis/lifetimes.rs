@@ -27,9 +27,12 @@ pub fn compute_lifetimes(ir: &IR) -> LifetimeMap {
     let mut die_map = get_lifetime_ends(ir);
 
     for (key, def) in get_defs(ir) {
-        let die = die_map
-            .remove(&key)
-            .expect("every variable defined must die");
+        let die = match die_map.remove(&key) {
+            Some(die) => die,
+            // if a defined value wasn't caught on another statement, then it wasn't used.
+            // therefore we can skip it.
+            None => continue,
+        };
         debug_assert!(
             lifetime_map
                 .insert(
@@ -203,9 +206,9 @@ impl Lifetime {
                     //          - otherwise, they won't intersect (since one is defined after the other is
                     //          already dead)
                 } else {
-                    //      - otherwise, there is at least one that passes through the whole block, fully
-                    //      intersecting the other one.
-                    true
+                    // if no one dies here with the other being defined in the same block, then
+                    // this not a collision
+                    false
                 }
             })
     }
@@ -388,59 +391,27 @@ mod tests {
         assert!(!lifetimes[2].intersects(&lifetimes[0], &ir));
     }
 
-    #[test]
-    fn correct_branch_pass_through_list() {
-        const MESSAGE: &str = r#"
-given this code, %0 does *NOT* collide with %1 because the path selected by the phi node
-doesn't contain %1's lifetime.
-        "#;
-        let ir = IR::from(vec![
-            BasicBlock {
-                statements: vec![Statement::Assign {
-                    index: Binding(0),
-                    value: Value::Constant(2),
-                }],
-                end: BlockEnd::Branch(Branch::Conditional {
-                    flag: Binding(0),
-                    target_true: BlockBinding(1),
-                    target_false: BlockBinding(2),
-                }),
-            },
-            BasicBlock {
-                statements: vec![Statement::Assign {
-                    index: Binding(3),
-                    value: Value::Constant(3),
-                }],
-                end: BlockEnd::Branch(Branch::Unconditional {
-                    target: BlockBinding(1),
-                }),
-            },
-            BasicBlock {
-                statements: vec![Statement::Assign {
-                    index: Binding(2),
-                    value: Value::Phi {
-                        nodes: vec![
-                            PhiDescriptor {
-                                value: Binding(0),
-                                block_from: BlockBinding(0),
-                            },
-                            PhiDescriptor {
-                                value: Binding(1),
-                                block_from: BlockBinding(1),
-                            },
-                        ],
-                    },
-                }],
-                end: BlockEnd::Return(Binding(2)),
-            },
-        ]);
+    fn compile_source_into_ir(source: &str) -> anyhow::Result<crate::intermediate::IR> {
+        let meta = crate::error::SourceMetadata::new(source).with_file("<test program>".into());
+        let program = crate::grammar::Parser::new(&meta).parse()?;
+        let (_function_name, ir) = crate::intermediate::generate::compile_program(program, &meta)?;
+        Ok(ir)
+    }
 
-        let lifetimes = compute_lifetimes(&ir);
-        assert!(
-            !lifetimes[&Binding(0)].intersects(&lifetimes[&Binding(1)], &ir),
-            "{:?}\n{}",
-            ir,
-            MESSAGE,
+    #[test]
+    fn correct_branch_pass_through() -> anyhow::Result<()> {
+        const SOURCE_CODE: &str = include_str!(
+            "../../../write_a_c_compiler/stage_4/valid/skip_on_failure_multi_short_circuit.c"
         );
+
+        let ir = compile_source_into_ir(SOURCE_CODE)?;
+        let lifetimes = analysis::compute_lifetimes(&ir);
+        assert!(
+            !lifetimes[&Binding(2)].intersects(&lifetimes[&Binding(3)], &ir),
+            "{:?}\n%2 and %3 should *NOT* collide",
+            ir
+        );
+
+        Ok(())
     }
 }
