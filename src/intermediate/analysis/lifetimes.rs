@@ -35,6 +35,7 @@ pub fn compute_lifetimes(ir: &IR) -> LifetimeMap {
                 .insert(
                     key,
                     Lifetime {
+                        attached_binding: key,
                         start: def,
                         ends: die
                             .into_iter()
@@ -57,14 +58,12 @@ pub fn compute_lifetime_collisions(ir: &IR) -> CollisionMap {
     lifetime_map
         .iter()
         .map(|(k, lifetime)| {
-            //eprintln!("checking {}", k);
             (
                 *k,
                 lifetime_map
                     .iter()
                     .filter_map(|(k2, l2)| {
-                        //           eprintln!("\tagainst: {}", k2);
-                        if k2 != k && /*dbg!*/(lifetime.intersects(l2, ir)) {
+                        if k2 != k && lifetime.intersects(l2, ir) {
                             Some(*k2)
                         } else {
                             None
@@ -178,8 +177,6 @@ impl Lifetime {
         let self_passes_through: HashSet<_> = self.pass_through_list(ir).collect();
         let other_passes_through: HashSet<_> = other.pass_through_list(ir).collect();
 
-        //        dbg!(&self_passes_through, &other_passes_through);
-
         // they won't intersect if:
         //  - the blocks they pass through never coincide.
         self_passes_through
@@ -217,13 +214,15 @@ impl Lifetime {
         &'ir self,
         ir: &'ir IR,
     ) -> impl Iterator<Item = BlockBinding> + 'ir {
-        super::predecessors_filtering_branches(ir, self.start.block, |block| {
-            !self.ends.contains_key(&block)
+        super::predecessors(ir, self.start.block).filter(|block| {
+            use super::BindingUsage;
+            ir[*block].contains_binding(self.attached_binding)
         })
     }
 }
 #[derive(Clone)]
 pub struct Lifetime {
+    pub attached_binding: Binding,
     pub start: BlockAddress,
     pub ends: HashMap<BlockBinding, usize>,
 }
@@ -300,6 +299,7 @@ mod tests {
             end: BlockEnd::Return(Binding(1)),
         }]);
         let lifetime_1 = Lifetime {
+            attached_binding: Binding(0),
             start: BlockAddress {
                 block: BlockBinding(0),
                 statement: 0,
@@ -307,6 +307,7 @@ mod tests {
             ends: vec![(BlockBinding(0), 2)].into_iter().collect(),
         };
         let lifetime_2 = Lifetime {
+            attached_binding: Binding(2),
             start: BlockAddress {
                 block: BlockBinding(0),
                 statement: 3,
@@ -385,5 +386,61 @@ mod tests {
 
         assert!(!lifetimes[2].intersects(&lifetimes[1], &ir));
         assert!(!lifetimes[2].intersects(&lifetimes[0], &ir));
+    }
+
+    #[test]
+    fn correct_branch_pass_through_list() {
+        const MESSAGE: &str = r#"
+given this code, %0 does *NOT* collide with %1 because the path selected by the phi node
+doesn't contain %1's lifetime.
+        "#;
+        let ir = IR::from(vec![
+            BasicBlock {
+                statements: vec![Statement::Assign {
+                    index: Binding(0),
+                    value: Value::Constant(2),
+                }],
+                end: BlockEnd::Branch(Branch::Conditional {
+                    flag: Binding(0),
+                    target_true: BlockBinding(1),
+                    target_false: BlockBinding(2),
+                }),
+            },
+            BasicBlock {
+                statements: vec![Statement::Assign {
+                    index: Binding(3),
+                    value: Value::Constant(3),
+                }],
+                end: BlockEnd::Branch(Branch::Unconditional {
+                    target: BlockBinding(1),
+                }),
+            },
+            BasicBlock {
+                statements: vec![Statement::Assign {
+                    index: Binding(2),
+                    value: Value::Phi {
+                        nodes: vec![
+                            PhiDescriptor {
+                                value: Binding(0),
+                                block_from: BlockBinding(0),
+                            },
+                            PhiDescriptor {
+                                value: Binding(1),
+                                block_from: BlockBinding(1),
+                            },
+                        ],
+                    },
+                }],
+                end: BlockEnd::Return(Binding(2)),
+            },
+        ]);
+
+        let lifetimes = compute_lifetimes(&ir);
+        assert!(
+            !lifetimes[&Binding(0)].intersects(&lifetimes[&Binding(1)], &ir),
+            "{:?}\n{}",
+            ir,
+            MESSAGE,
+        );
     }
 }
