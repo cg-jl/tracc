@@ -30,8 +30,22 @@ pub fn compute_lifetimes(ir: &IR) -> LifetimeMap {
         let die = match die_map.remove(&key) {
             Some(die) => die,
             // if a defined value wasn't caught on another statement, then it wasn't used.
-            // therefore we can skip it.
-            None => continue,
+            // therefore we can set it to end as soon as it starts
+            None => {
+                lifetime_map.insert(
+                    key,
+                    Lifetime {
+                        attached_binding: key,
+                        start: def,
+                        ends: {
+                            let mut map = HashMap::new();
+                            map.insert(def.block, def.statement);
+                            map
+                        },
+                    },
+                );
+                continue;
+            }
         };
         debug_assert!(
             lifetime_map
