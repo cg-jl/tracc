@@ -77,31 +77,34 @@ pub fn compile_statement<'code>(
             true_branch: (true_stmt, true_span),
             false_branch,
         } => {
-            let (mut builder, condition_result) = expr::compile_expr(
-                state,
-                builder,
-                condition_expr,
-                bindings,
-                variables,
-                source_meta,
-            )
-            .map_err(|e| e.with_backup_source(condition_span, source_meta))?;
-            let condition = bindings.next_binding();
-            builder.assign(condition, condition_result);
-            let flag = bindings.next_binding();
-            builder.assign(
-                flag,
-                Value::Cmp {
-                    condition: Condition::NotEquals,
-                    lhs: condition,
-                    rhs: 0.into(),
-                },
-            );
-            let end_block = state.new_block();
-            let true_block = {
+            let (compute_condition, cond_flag) = {
+                let (mut compute, cond_value) = expr::compile_expr(
+                    state,
+                    builder, // continue the builder we had previously
+                    condition_expr,
+                    bindings,
+                    variables,
+                    source_meta,
+                )
+                .map_err(|e| e.with_backup_source(condition_span, source_meta))?;
+                let value_binding = bindings.next_binding();
+                compute.assign(value_binding, cond_value);
+                let flag_value = bindings.next_binding();
+                // ensure a cmp is met. This will be cleaned up by next phases
+                compute.assign(
+                    flag_value,
+                    Value::Cmp {
+                        condition: Condition::Equals,
+                        lhs: value_binding,
+                        rhs: (0).into(),
+                    },
+                );
+                (compute, flag_value)
+            };
+
+            let compute_if_true = {
                 let block = state.new_block();
-                let start = block.block();
-                let true_block_end = compile_statement(
+                compile_statement(
                     state,
                     block,
                     bindings,
@@ -110,48 +113,69 @@ pub fn compile_statement<'code>(
                     block_depth,
                     source_meta,
                 )
-                .map_err(|e| e.with_backup_source(true_span, source_meta))?;
-                true_block_end.finish_block(
-                    state,
-                    Branch::Unconditional {
-                        target: end_block.block(),
-                    },
-                );
-                start
-            };
-            let false_block = if let Some((false_stmt, false_span)) = false_branch {
-                let block = state.new_block();
-                let start = block.block();
-                compile_statement(
-                    state,
-                    block,
-                    bindings,
-                    *false_stmt,
-                    variables,
-                    block_depth,
-                    source_meta,
-                )
-                .map_err(|e| e.with_backup_source(false_span, source_meta))?
-                .finish_block(
-                    state,
-                    Branch::Unconditional {
-                        target: end_block.block(),
-                    },
-                );
-                start // give the start of the block to branch
-            } else {
-                end_block.block()
+                .map_err(|e| e.with_backup_source(true_span, source_meta))?
             };
 
-            builder.finish_block(
+            let compute_if_false = {
+                let block = state.new_block();
+                if let Some((false_stmt, false_span)) = false_branch {
+                    compile_statement(
+                        state,
+                        block,
+                        bindings,
+                        *false_stmt,
+                        variables,
+                        block_depth,
+                        source_meta,
+                    )
+                    .map_err(|e| e.with_backup_source(false_span, source_meta))?
+                } else {
+                    block
+                }
+            };
+
+            Ok(merge_branches(
                 state,
-                Branch::Conditional {
-                    flag,
-                    target_true: true_block,
-                    target_false: false_block,
-                },
-            );
-            Ok(end_block)
+                compute_condition,
+                cond_flag,
+                compute_if_true,
+                compute_if_false,
+            ))
         }
     }
+}
+
+/// Wire up branches so that they are merged in
+pub fn merge_branches(
+    state: &mut IRGenState,
+    compute_condition: BlockBuilder,
+    branch_flag: Binding,
+    true_branch: BlockBuilder,
+    false_branch: BlockBuilder,
+) -> BlockBuilder {
+    let mut end_block = state.new_block();
+    // wire up the stuff so that the correct diamond graph is generated
+    compute_condition.finish_block(
+        state,
+        Branch::Conditional {
+            flag: branch_flag,
+            target_true: true_branch.block(),
+            target_false: false_branch.block(),
+        },
+    );
+
+    true_branch.finish_block(
+        state,
+        Branch::Unconditional {
+            target: end_block.block(),
+        },
+    );
+    false_branch.finish_block(
+        state,
+        Branch::Unconditional {
+            target: end_block.block(),
+        },
+    );
+
+    end_block
 }
