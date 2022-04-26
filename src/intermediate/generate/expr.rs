@@ -1,9 +1,13 @@
 use super::{
-    Binding, BindingCounter, BlockBuilder, Branch, ByteSize, Condition, IRGenState, PhiDescriptor,
-    Source, SourceMetadata, Value, VarE, VarError, VariableTracker,
+    statement, Binding, BindingCounter, BlockBuilder, Branch, ByteSize, Condition, IRGenState,
+    PhiDescriptor, Source, SourceMetadata, Value, VarE, VarError, VariableTracker,
 };
 use crate::ast;
 
+// TODO: consider refactoring logic expressions to use `merge_branches` or even a new utility that
+// spits out a phi node (from ternary expression).
+// XXX: consider moving from `Value` to `Binding` due to codegen not having to make any
+// optimization decisions
 pub fn compile_expr<'code>(
     state: &mut IRGenState,
     builder: BlockBuilder,
@@ -29,6 +33,87 @@ pub fn compile_expr<'code>(
             ))
         }
         ast::Expr::Constant(constant) => Ok((builder, Value::Constant(constant))),
+        ast::Expr::Ternary {
+            condition: (condition_expr, condition_span),
+            value_true: (true_expr, true_span),
+            value_false: (false_expr, false_span),
+        } => {
+            let (compute_condition, cond_flag) = {
+                let (mut compute, cond_value) = compile_expr(
+                    state,
+                    builder, // continue the builder we had previously
+                    *condition_expr,
+                    bindings,
+                    variables,
+                    source_info,
+                )
+                .map_err(|e| e.with_backup_source(condition_span, source_info))?;
+                let value_binding = bindings.next_binding();
+                compute.assign(value_binding, cond_value);
+                let flag_value = bindings.next_binding();
+                // ensure a cmp is met. This will be cleaned up by next phases
+                compute.assign(
+                    flag_value,
+                    Value::Cmp {
+                        condition: Condition::Equals,
+                        lhs: value_binding,
+                        rhs: (0).into(),
+                    },
+                );
+                (compute, flag_value)
+            };
+
+            let (compute_if_true, true_binding) = {
+                let builder = state.new_block();
+                let (mut compute, expr_value) =
+                    compile_expr(state, builder, *true_expr, bindings, variables, source_info)
+                        .map_err(|e| e.with_backup_source(true_span, source_info))?;
+                let value_binding = bindings.next_binding();
+                compute.assign(value_binding, expr_value);
+                (compute, value_binding)
+            };
+
+            let (compute_if_false, false_binding) = {
+                let builder = state.new_block();
+                let (mut compute, expr_value) = compile_expr(
+                    state,
+                    builder,
+                    *false_expr,
+                    bindings,
+                    variables,
+                    source_info,
+                )
+                .map_err(|e| e.with_backup_source(false_span, source_info))?;
+                let value_binding = bindings.next_binding();
+                compute.assign(value_binding, expr_value);
+                (compute, value_binding)
+            };
+
+            let true_block = compute_if_true.block();
+            let false_block = compute_if_false.block();
+
+            Ok((
+                statement::merge_branches(
+                    state,
+                    compute_condition,
+                    cond_flag,
+                    compute_if_true,
+                    compute_if_false,
+                ),
+                Value::Phi {
+                    nodes: vec![
+                        PhiDescriptor {
+                            value: true_binding,
+                            block_from: true_block,
+                        },
+                        PhiDescriptor {
+                            value: false_binding,
+                            block_from: false_block,
+                        },
+                    ],
+                },
+            ))
+        }
         ast::Expr::Unary {
             operator,
             expr: (expr, expr_span),
