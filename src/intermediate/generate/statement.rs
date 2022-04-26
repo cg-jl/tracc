@@ -89,17 +89,7 @@ pub fn compile_statement<'code>(
                 .map_err(|e| e.with_backup_source(condition_span, source_meta))?;
                 let value_binding = bindings.next_binding();
                 compute.assign(value_binding, cond_value);
-                let flag_value = bindings.next_binding();
-                // ensure a cmp is met. This will be cleaned up by next phases
-                compute.assign(
-                    flag_value,
-                    Value::Cmp {
-                        condition: Condition::Equals,
-                        lhs: value_binding,
-                        rhs: (0).into(),
-                    },
-                );
-                (compute, flag_value)
+                (compute, value_binding)
             };
 
             let compute_if_true = {
