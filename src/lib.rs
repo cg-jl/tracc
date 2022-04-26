@@ -1,8 +1,3 @@
-#![feature(try_trait_v2)]
-#![feature(const_trait_impl)]
-#![feature(const_convert)]
-#![feature(negative_impls)]
-#![feature(is_some_with)]
 #[allow(unused)]
 pub mod allocators;
 #[allow(unused)]

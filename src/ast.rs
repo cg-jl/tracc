@@ -241,7 +241,7 @@ pub enum UnaryOp {
 }
 
 impl UnaryOp {
-    pub const fn from_operator((op, _): (Operator, bool)) -> Option<Self> {
+    pub fn from_operator((op, _): (Operator, bool)) -> Option<Self> {
         Some(match op {
             Operator::Minus => Self::Negate,
             Operator::ExclamationMark => Self::LogicNot,
@@ -281,11 +281,11 @@ pub enum ArithmeticOp {
     Modulo,
 }
 
-impl const Eq for ArithmeticOp {
+impl Eq for ArithmeticOp {
     fn assert_receiver_is_total_eq(&self) {}
 }
 
-impl const PartialEq for ArithmeticOp {
+impl PartialEq for ArithmeticOp {
     fn eq(&self, other: &Self) -> bool {
         matches!(
             (self, other),
@@ -313,11 +313,11 @@ pub enum BitOp {
     LeftShift,
 }
 
-impl const Eq for BitOp {
+impl Eq for BitOp {
     fn assert_receiver_is_total_eq(&self) {}
 }
 
-impl const PartialEq for BitOp {
+impl PartialEq for BitOp {
     fn eq(&self, other: &Self) -> bool {
         matches!(
             (self, other),
@@ -338,11 +338,11 @@ pub enum LogicOp {
     Or,
 }
 
-impl const Eq for LogicOp {
+impl Eq for LogicOp {
     fn assert_receiver_is_total_eq(&self) {}
 }
 
-impl const PartialEq for LogicOp {
+impl PartialEq for LogicOp {
     fn eq(&self, other: &Self) -> bool {
         matches!((self, other), (Self::And, Self::And) | (Self::Or, Self::Or))
     }
@@ -358,7 +358,7 @@ pub enum BinaryOp {
     Assignment { op: Option<AssignmentEnabledOp> },
 }
 
-impl const PartialEq<BinaryOp> for ArithmeticOp {
+impl PartialEq<BinaryOp> for ArithmeticOp {
     fn eq(&self, other: &BinaryOp) -> bool {
         if let BinaryOp::Arithmetic(a) = other {
             self.eq(a)
@@ -368,7 +368,7 @@ impl const PartialEq<BinaryOp> for ArithmeticOp {
     }
 }
 
-impl const PartialEq<BinaryOp> for LogicOp {
+impl PartialEq<BinaryOp> for LogicOp {
     fn eq(&self, other: &BinaryOp) -> bool {
         if let BinaryOp::Logic(l) = other {
             self.eq(l)
@@ -378,7 +378,7 @@ impl const PartialEq<BinaryOp> for LogicOp {
     }
 }
 
-impl const PartialEq<BinaryOp> for BitOp {
+impl PartialEq<BinaryOp> for BitOp {
     fn eq(&self, other: &BinaryOp) -> bool {
         if let BinaryOp::Bit(bit) = other {
             self.eq(bit)
@@ -395,7 +395,7 @@ pub enum AssignmentEnabledOp {
     Bit(BitOp),
 }
 
-impl const From<AssignmentEnabledOp> for BinaryOp {
+impl From<AssignmentEnabledOp> for BinaryOp {
     fn from(op: AssignmentEnabledOp) -> Self {
         match op {
             AssignmentEnabledOp::Arithmetic(a) => Self::Arithmetic(a),
@@ -427,14 +427,14 @@ pub enum Equality {
 }
 
 // convert easily to AssignmentEnabledOp
-impl const From<ArithmeticOp> for AssignmentEnabledOp {
+impl From<ArithmeticOp> for AssignmentEnabledOp {
     #[inline]
     fn from(a: ArithmeticOp) -> Self {
         Self::Arithmetic(a)
     }
 }
 
-impl const From<BitOp> for AssignmentEnabledOp {
+impl From<BitOp> for AssignmentEnabledOp {
     #[inline]
     fn from(val: BitOp) -> Self {
         AssignmentEnabledOp::Bit(val)
@@ -442,7 +442,7 @@ impl const From<BitOp> for AssignmentEnabledOp {
 }
 
 impl Equality {
-    pub const fn to_condition(self) -> crate::codegen::assembly::Condition {
+    pub fn to_condition(self) -> crate::codegen::assembly::Condition {
         use crate::codegen::assembly::Condition;
         match self {
             Self::Equals => Condition::Equals,
@@ -510,7 +510,7 @@ impl ArithmeticOp {
     }
 }
 
-impl const OpFlags for BinaryOp {
+impl OpFlags for BinaryOp {
     fn is_commutative(&self) -> bool {
         match self {
             BinaryOp::Arithmetic(a) => a.is_commutative(),
@@ -550,7 +550,7 @@ impl const OpFlags for BinaryOp {
     }
 }
 
-impl const OpFlags for BitOp {
+impl OpFlags for BitOp {
     fn is_commutative(&self) -> bool {
         matches!(self, Self::Or | Self::And | Self::Xor)
     }
@@ -560,7 +560,7 @@ impl const OpFlags for BitOp {
     }
 }
 
-impl const OpFlags for ArithmeticOp {
+impl OpFlags for ArithmeticOp {
     fn is_commutative(&self) -> bool {
         matches!(self, Self::Add | Self::Subtract)
     }
@@ -606,7 +606,7 @@ impl BinaryOp {
             Self::Assignment { .. } => 15 - 14,
         }
     }
-    pub const fn from_operator((op, has_equal): (Operator, bool)) -> Option<Self> {
+    pub fn from_operator((op, has_equal): (Operator, bool)) -> Option<Self> {
         Some(match op {
             // question mark is treated...specially.
             Operator::Ternary => return None,

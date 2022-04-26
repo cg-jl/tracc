@@ -188,7 +188,7 @@ pub struct Source<'source> {
     pub source: &'source str,
 }
 
-impl const From<Source<'_>> for Span {
+impl From<Source<'_>> for Span {
     fn from(s: Source<'_>) -> Self {
         s.span
     }

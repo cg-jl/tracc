@@ -57,7 +57,7 @@ pub enum Directive {
     Architecture(String),
 }
 
-impl const From<Directive> for Assembly {
+impl From<Directive> for Assembly {
     fn from(d: Directive) -> Self {
         Self::Directive(d)
     }

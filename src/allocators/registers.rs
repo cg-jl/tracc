@@ -521,19 +521,22 @@ pub fn alloc_registers(
 
         if might_need_move_to_x0.contains(&binding)
             && final_alloc
-                .is_some_and(|alloc| !matches!(alloc, RegisterID::GeneralPurpose { index: 0 }))
+                .filter(|alloc| !matches!(alloc, RegisterID::GeneralPurpose { index: 0 }))
+                .is_some()
         {
             state.need_move_to_return_reg.insert(binding);
         }
 
         if might_need_call_save.contains(&binding)
-            && final_alloc.is_some_and(|alloc| {
-                if let RegisterID::GeneralPurpose { index } = alloc {
-                    !is_callee_saved(*index)
-                } else {
-                    false /* non-gp registers are not read-only */
-                }
-            })
+            && final_alloc
+                .filter(|alloc| {
+                    if let RegisterID::GeneralPurpose { index } = alloc {
+                        !is_callee_saved(*index)
+                    } else {
+                        false /* non-gp registers are not read-only */
+                    }
+                })
+                .is_some()
         {
             state.save_when_call.insert(binding);
         }

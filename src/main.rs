@@ -1,4 +1,3 @@
-#![feature(try_trait_v2)]
 use std::error::Error;
 use structopt::StructOpt;
 use tracc::ast::Program;
