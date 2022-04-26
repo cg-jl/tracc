@@ -89,18 +89,72 @@ fn parse_primary<'source>(parser: &mut Parser<'source>) -> ParseRes<(Expr<'sourc
     })
 }
 
+// Use a mid step to detect ternary operator
+enum PreBinaryOp<'code> {
+    NormalOp(BinaryOp),
+    Ternary { middle: (Expr<'code>, Span) },
+}
+
+impl<'code> PreBinaryOp<'code> {
+    fn build(
+        self,
+        (lhs_expr, lhs_span): (Expr<'code>, Span),
+        (rhs_expr, rhs_span): (Expr<'code>, Span),
+    ) -> Expr<'code> {
+        match self {
+            Self::NormalOp(operator) => Expr::Binary {
+                operator,
+                lhs: (Box::new(lhs_expr), lhs_span),
+                rhs: (Box::new(rhs_expr), rhs_span),
+            },
+            Self::Ternary {
+                middle: (true_expr, true_span),
+            } => Expr::Ternary {
+                condition: (Box::new(lhs_expr), lhs_span),
+                value_true: (Box::new(true_expr), true_span),
+                value_false: (Box::new(rhs_expr), rhs_span),
+            },
+        }
+    }
+
+    fn precedence(&self) -> u8 {
+        match self {
+            Self::NormalOp(op) => op.precedence(),
+            Self::Ternary { .. } => 15 - 13,
+        }
+    }
+}
+
+fn next_binary_op<'code>(parser: &mut Parser<'code>) -> ParseRes<Option<PreBinaryOp<'code>>> {
+    use super::lexer::Operator::Ternary;
+    if let Some(op) = parser.peek_token()?.and_then(TokenKind::as_operator) {
+        if let Ternary = op.0 {
+            parser.accept_current();
+            let middle = parser.parse()?;
+            parser
+                .expect_token(TokenKind::Colon)
+                .map_err(|e| e.add_context("parsing ternary expression"))?;
+            parser.accept_current();
+            Ok(Some(PreBinaryOp::Ternary { middle }))
+        } else {
+            BinaryOp::from_operator(op)
+                .map(|op| {
+                    parser.accept_current();
+                    Ok(PreBinaryOp::NormalOp(op))
+                })
+                .transpose()
+        }
+    } else {
+        Ok(None)
+    }
+}
+
 fn parse_binary_expression<'source>(
     parser: &mut Parser<'source>,
     mut lhs: (Expr<'source>, Span),
     min_precedence: u8,
 ) -> ParseRes<(Expr<'source>, Span)> {
-    while let Some(op) = parser
-        .peek_token()?
-        .and_then(TokenKind::as_operator)
-        .and_then(BinaryOp::from_operator)
-        .filter(|x| x.precedence() >= min_precedence)
-    {
-        parser.accept_current();
+    while let Some(op) = next_binary_op(parser)?.filter(|x| x.precedence() >= min_precedence) {
         let mut rhs = parse_primary(parser)?;
         let this_precedence = op.precedence();
         #[allow(clippy::blocks_in_if_conditions)]
@@ -122,17 +176,11 @@ fn parse_binary_expression<'source>(
         {
             rhs = parse_binary_expression(parser, rhs, min_precedence + 1)?;
         }
-        lhs = (
-            Expr::Binary {
-                operator: op,
-                lhs: (Box::new(lhs.0), lhs.1),
-                rhs: (Box::new(rhs.0), rhs.1),
-            },
-            Span {
-                offset: lhs.1.offset,
-                len: rhs.1.offset + rhs.1.len - lhs.1.offset,
-            },
-        );
+        let span = Span {
+            offset: lhs.1.offset,
+            len: rhs.1.offset + rhs.1.len - lhs.1.offset,
+        };
+        lhs = (op.build(lhs, rhs), span);
     }
     Ok(lhs)
 }
