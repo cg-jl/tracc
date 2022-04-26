@@ -251,6 +251,7 @@ impl UnaryOp {
             | Operator::Star
             | Operator::And
             | Operator::DoubleAngleLeft
+            | Operator::Ternary
             | Operator::DoubleAngleRight
             | Operator::Hat
             | Operator::Pipe
@@ -607,6 +608,8 @@ impl BinaryOp {
     }
     pub const fn from_operator((op, has_equal): (Operator, bool)) -> Option<Self> {
         Some(match op {
+            // question mark is treated...specially.
+            Operator::Ternary => return None,
             Operator::Plus => {
                 let op = ArithmeticOp::Add;
                 if has_equal {

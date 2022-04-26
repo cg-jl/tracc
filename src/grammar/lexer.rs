@@ -7,6 +7,7 @@ impl Error for LexErrorKind {}
 impl fmt::Display for TokenKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Colon => write!(f, "colon ':'"),
             Self::CloseBrace => write!(f, "closing brace '}}'"),
             Self::OpenBrace => write!(f, "opening brace '{{'"),
             Self::Identifier => write!(f, "identifier"),
@@ -28,6 +29,7 @@ impl fmt::Display for TokenKind {
 impl fmt::Display for Operator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {
+            Operator::Ternary => "?:",
             Operator::Plus => "+",
             Operator::Minus => "=",
             Operator::ExclamationMark => "!",
@@ -122,6 +124,9 @@ impl<'a> Token<'a> {
     pub const fn semi(source: Source<'a>) -> Self {
         Self::new(TokenKind::Semicolon, source)
     }
+    pub const fn colon(source: Source<'a>) -> Self {
+        Self::new(TokenKind::Colon, source)
+    }
     pub const fn close_brace(source: Source<'a>) -> Self {
         Self::new(TokenKind::CloseBrace, source)
     }
@@ -140,6 +145,7 @@ pub enum TokenKind {
     Identifier,
     Semicolon,
     Whitespace,
+    Colon,
     Operator { kind: Operator, has_equal: bool },
 }
 
@@ -167,6 +173,7 @@ pub enum Operator {
     Pipe,
     Hat,
     DoubleAnd,
+    Ternary,
     DoublePipe,
     DoubleAngleRight,
     DoubleAngleLeft,
@@ -232,6 +239,10 @@ impl<'source> Lexer<'source> {
             self.advance();
             return Ok(Some(Token::semi(self.source_from_len(pos, 1))));
         }
+        if let Some(pos) = self.eat_char(':') {
+            self.advance();
+            return Ok(Some(Token::colon(self.source_from_len(pos, 1))));
+        }
         if let Some(src) = self.identifier() {
             return Ok(Some(Token::identifier(src)));
         }
@@ -255,6 +266,10 @@ impl<'source> Lexer<'source> {
     fn operator(&mut self) -> Option<(usize, Operator)> {
         let start = self.current_offset();
         let op = match self.input.peek()?.1 {
+            '?' => {
+                self.advance();
+                Operator::Ternary
+            }
             '<' => {
                 self.advance();
                 if self.eat_char('<').is_some() {
