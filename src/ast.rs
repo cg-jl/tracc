@@ -147,6 +147,34 @@ fn format_statement(
 fn format_expr(expr: &Expr, expr_span: Span, f: &mut fmt::Formatter, depth: usize) -> fmt::Result {
     let spacing = " ".repeat(depth);
     match expr {
+        Expr::Ternary {
+            condition,
+            value_true,
+            value_false,
+        } => {
+            writeln!(f, "TernaryExpression@{:?}", expr_span.as_range())?;
+            write!(
+                f,
+                "{}  condition:\n{}",
+                spacing.clone(),
+                spacing.clone() + "    "
+            )?;
+            format_expr(&condition.0, condition.1, f, depth + 2)?;
+            write!(
+                f,
+                "{}  value if true:\n{}",
+                spacing.clone(),
+                spacing.clone() + "    "
+            )?;
+            format_expr(&value_true.0, value_true.1, f, depth + 2)?;
+            write!(
+                f,
+                "{}  value if false:\n{}",
+                spacing.clone(),
+                spacing.clone() + "    "
+            )?;
+            format_expr(&value_false.0, value_false.1, f, depth + 2)
+        }
         Expr::Variable {
             name: Source { source: name, .. },
         } => writeln!(f, "Variable@{:?} {:?}", expr_span.as_range(), name),
@@ -189,6 +217,11 @@ pub enum Expr<'source> {
         operator: BinaryOp,
         lhs: (Box<Expr<'source>>, Span),
         rhs: (Box<Expr<'source>>, Span),
+    },
+    Ternary {
+        condition: (Box<Expr<'source>>, Span),
+        value_true: (Box<Expr<'source>>, Span),
+        value_false: (Box<Expr<'source>>, Span),
     },
 }
 
