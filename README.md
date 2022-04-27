@@ -39,24 +39,25 @@ Output assembly:
 	.global foo
 	.type foo, %function
 foo:
-	sub sp, sp, #32
-	mov w0, #1
-	str w0, [sp, #20]
-	mov w0, #2
-	str w0, [sp, #16]
-	ldr w0, [sp, #20]
-	ldr w1, [sp, #16]
-	cmp w0, w1
-	ble .L0
-	ldr w0, [sp, #20]
-	ldr w1, [sp, #16]
-	sub w0, w0, w1
-	b   .L1
-.L0:
-	ldr w0, [sp, #20]
-	ldr w1, [sp, #16]
-	add w0, w0, w1
-.L1:
-	add sp, sp, #32
+	sub sp, sp, #16
+.LBB0:
+	mov w1, #1
+	str w1, [sp]
+	mov w3, #2
+	str w3, [sp, #4]
+	ldr w4, [sp]
+	ldr w5, [sp, #4]
+	cmp w4, w5
+	cset w6, gt
+	cmp w6, wzr
+	beq .LBB2
+	b   .LBB1
+.LBB1:
+	b   .LBB3
+.LBB2:
+	b   .LBB3
+.LBB3:
+	mov w0, wzr
+	add sp, sp, #16
 	ret
 ```
