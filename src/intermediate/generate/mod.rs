@@ -76,7 +76,8 @@ pub fn compile_program<'code>(
 
     // run some cleanup on the generated code, because we might have generated
     // too much garbage
-    super::cleanup::run_cleanup(&mut ir);
+    super::cleanup::run_safe_cleanup(&mut ir);
+    super::cleanup::prune_unreached_blocks(&mut ir);
 
     Ok((name, ir))
 }

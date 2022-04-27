@@ -6,13 +6,12 @@ use super::{
     BasicBlock, Binding, BlockBinding, BlockEnd, Branch, IRCode, Statement, Value, IR,
 };
 
-pub fn run_cleanup(ir: &mut IR) {
-    prune_unreached_blocks(ir);
+pub fn run_safe_cleanup(ir: &mut IR) {
     remove_aliases(&mut ir.code);
     remove_unused_bindings(ir);
 }
 
-fn remove_unused_bindings(ir: &mut IR) {
+pub fn remove_unused_bindings(ir: &mut IR) {
     // #1. Catch all the definitions
 
     use super::analysis::lifetimes::BlockAddress;
@@ -44,16 +43,72 @@ fn remove_unused_bindings(ir: &mut IR) {
     // #5. Do the liberations
     for (block, mut indices) in blocks {
         // sort the indices so that deletion can be done while keeping all indices correct
-        indices.sort_unstable();
+        indices.sort_unstable_by(|a, b| a.cmp(b).reverse());
 
-        for index in indices.into_iter().rev() {
+        for index in indices.into_iter() {
             ir[block].statements.remove(index);
         }
     }
 }
 
-/// final cleanup before codegen: Remove all aliasing behavior
-fn remove_aliases(code: &mut IRCode) {
+fn order_by_dependency<K: Copy + Eq + std::hash::Hash>(mut map: HashMap<K, K>) -> Vec<(K, K)> {
+    let mut v = Vec::new();
+    while let Some(k) = map.keys().find(|k| !map.contains_key(&map[k])).copied() {
+        let value = map.remove(&k).unwrap();
+        v.push((k, value))
+    }
+    v
+}
+
+/// More efficient routine when it is known that the expected aliases are in the same block.
+pub fn remove_aliases_in_same_block(block: &mut BasicBlock) {
+    let aliases = block
+        .statements
+        .iter()
+        .filter_map(|statement| {
+            if let Statement::Assign {
+                index: target,
+                value: Value::Binding(bind),
+            } = statement
+            {
+                Some((*target, *bind))
+            } else {
+                None
+            }
+        })
+        .collect::<HashMap<_, _>>();
+
+    let mut to_remove = HashSet::new();
+
+    for (from, to) in order_by_dependency(aliases) {
+        to_remove.insert(
+            block
+                .statements
+                .iter()
+                .enumerate()
+                .find_map(|(index, stmt)| {
+                    if let Statement::Assign { index: target, .. } = stmt {
+                        if target == &from {
+                            Some(index)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .unwrap(),
+        );
+        block.rename(from, to);
+    }
+    let mut to_remove = to_remove.into_iter().collect::<Vec<_>>();
+    to_remove.sort_unstable();
+    for index in to_remove.into_iter().rev() {
+        block.statements.remove(index);
+    }
+}
+
+pub fn remove_aliases(code: &mut IRCode) {
     // #1. Catch all the aliases
     let mut aliases = HashMap::new();
 
@@ -96,7 +151,7 @@ fn remove_aliases(code: &mut IRCode) {
 }
 
 /// prune not reached blocks
-fn prune_unreached_blocks(ir: &mut IR) {
+pub fn prune_unreached_blocks(ir: &mut IR) {
     // #1. Walk the CFG and prune unreached blocks from the map
     let unused_blocks = {
         let mut unreached = Vec::new();

@@ -10,15 +10,15 @@ fn fold_ir_blocks(ir: &mut IR) {
 
     // now recompute the backward/forward map
     (ir.forward_map, ir.backwards_map) = generate::generate_branching_graphs(&ir.code);
+
+    // and prune the unreached blocks
+    cleanup::prune_unreached_blocks(ir);
 }
 
 pub fn constant_fold(mut ir: IR) -> IR {
-    cleanup::run_cleanup(&mut ir);
-    while try_merge(&mut ir) {
-        // run cleanup to remove unused blocks/repeated aliases through the blocks
-        cleanup::run_cleanup(&mut ir);
-    }
-    cleanup::run_cleanup(&mut ir);
+    cleanup::run_safe_cleanup(&mut ir);
+    while try_merge(&mut ir) {}
+    cleanup::run_safe_cleanup(&mut ir);
     ir
 }
 
@@ -47,7 +47,7 @@ fn try_merge(ir: &mut IR) -> bool {
     fold_ir_blocks(ir);
 
     // cleanup the code after the fold
-    cleanup::run_cleanup(ir);
+    cleanup::run_safe_cleanup(ir);
 
     // if I find a direct mapping somewhere, I inline
     let mut jumps: HashMap<_, _> = find_unique_jumps(ir).collect();
@@ -68,13 +68,44 @@ fn try_merge(ir: &mut IR) -> bool {
 
     while let Some((parent, child)) = find_noncolliding_merge(&mut jumps) {
         // rename the child block to the block it's inlined before removing it
+        // before renaming, we set the predecessor
+        block_set_predecessor(&mut ir[child], parent);
         unsafe { refactor::rename_block(ir, child, parent) };
         let child_block = unsafe { refactor::remove_block(ir, child) };
         merge_blocks(&mut ir[parent], child_block, parent);
-        cleanup::run_cleanup(ir);
     }
 
     did_merge
+}
+
+fn block_set_predecessor(block: &mut BasicBlock, predecessor: BlockBinding) {
+    block.statements = std::mem::take(&mut block.statements)
+        .into_iter()
+        .map(|statement| {
+            if let Statement::Assign {
+                index,
+                value: Value::Phi { nodes },
+            } = statement
+            {
+                let bind = nodes
+                    .into_iter()
+                    .find_map(|descriptor| {
+                        if descriptor.block_from == predecessor {
+                            Some(descriptor.value)
+                        } else {
+                            None
+                        }
+                    })
+                    .expect("Inlining with no phi node data");
+                Statement::Assign {
+                    index,
+                    value: Value::Binding(bind),
+                }
+            } else {
+                statement
+            }
+        })
+        .collect();
 }
 
 fn merge_blocks(
@@ -83,36 +114,9 @@ fn merge_blocks(
     predecessor_binding: BlockBinding,
 ) {
     predecessor.end = next.end;
-    block_set_only_predecessor(&mut next, predecessor_binding);
     predecessor.statements.extend(next.statements);
+    cleanup::remove_aliases_in_same_block(predecessor);
     // TODO: set predecessor to the other basic block in the predecessor if there's a loop between
-    // them.
-}
-
-fn block_set_only_predecessor(block: &mut BasicBlock, predecessor: BlockBinding) {
-    for statement in &mut block.statements {
-        // set phi nodes to that predecessor
-        if let Statement::Assign {
-            index,
-            value: Value::Phi { nodes },
-        } = statement
-        {
-            let bind = nodes
-                .iter_mut()
-                .find_map(|descriptor| {
-                    if descriptor.block_from == predecessor {
-                        Some(descriptor.value)
-                    } else {
-                        None
-                    }
-                })
-                .expect("Inlining with no idea of phi node");
-            *statement = Statement::Assign {
-                index: *index,
-                value: Value::Binding(bind),
-            };
-        }
-    }
 }
 
 fn find_potential_folds(code: &[Statement]) -> impl Iterator<Item = (usize, Binding, i32)> {

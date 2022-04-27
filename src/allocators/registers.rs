@@ -400,7 +400,7 @@ pub fn alloc_registers(
     let mut starting_allocs: HashMap<_, _> = immediate_alloc_hints
         .into_iter()
         .flat_map(|(binding, hint)| {
-            let collisions = collisions.get(&binding).unwrap();
+            let collisions = &collisions.get(&binding).unwrap();
             match hint {
                 ImmediateHint::InMemory => {
                     state.spill(binding);
@@ -455,17 +455,14 @@ pub fn alloc_registers(
         let phi_alloc = phi_edges
             .remove(&binding)
             .and_then(|edges| {
-                eprintln!("allocating edge {} with edges: {:?}", binding, &edges);
                 let allocs: HashSet<_> = edges
                     .iter()
                     .flat_map(|binding| state.get_allocation(*binding))
                     .collect();
 
                 if allocs.is_empty() {
-                    eprintln!("empty");
                     None // not going to do anything, use another hint
                 } else {
-                    dbg!(&allocs);
                     // allocate the same as the rest of bindings that it is target to
                     debug_assert_eq!(
                         allocs.len(),
@@ -473,7 +470,6 @@ pub fn alloc_registers(
                         "Expecting all allocated edges to be in the same place"
                     );
                     let unique_alloc = allocs.into_iter().next().unwrap();
-                    dbg!(&collisions);
                     debug_assert!(
                         state.try_alloc(binding, collisions, unique_alloc).is_some(),
                         "Must be able to allocate binding on same register as its phi edges"

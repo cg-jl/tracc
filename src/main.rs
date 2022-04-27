@@ -27,12 +27,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     let program: Program = Parser::new(&meta).parse()?;
     let (function_name, ir) = tracc::intermediate::generate::compile_program(program, &meta)?;
 
-    dbg!(&ir);
-
     let output = tracc::codegen::codegen_function(
         function_name.to_string(),
-        /*tracc::intermediate::fold::constant_fold(ir),*/
-        ir,
+        dbg!(tracc::intermediate::fold::constant_fold(dbg!(ir))),
     )
     .cons(tracc::codegen::assembly::Directive::Architecture(
         "armv8-a".into(),
