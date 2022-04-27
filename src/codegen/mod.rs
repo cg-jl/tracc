@@ -1,5 +1,4 @@
 pub mod assembly;
-pub mod flags;
 pub mod has_binding;
 use crate::allocators::{memory, registers};
 use crate::intermediate::*;

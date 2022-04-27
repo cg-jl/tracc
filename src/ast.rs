@@ -6,7 +6,7 @@ use std::fmt;
 
 // TODO: spans
 
-pub struct Program<'source>(pub Function<'source>);
+pub struct Program<'source>(pub Vec<Function<'source>>);
 
 impl fmt::Debug for Program<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -55,6 +55,13 @@ pub enum Statement<'source> {
         true_branch: (Box<Statement<'source>>, Span),
         false_branch: Option<(Box<Statement<'source>>, Span)>,
     },
+    Loop {
+        condition: (Expr<'source>, Span),
+        body: Vec<(Statement<'source>, Span)>,
+        is_do_while: bool,
+    },
+    LoopBreak,
+    LoopContinue,
 }
 
 fn format_block(block: &[(Statement, Span)], f: &mut fmt::Formatter, depth: usize) -> fmt::Result {
@@ -78,6 +85,21 @@ fn format_statement(
         Statement::Return((expr, expr_span)) => {
             write!(f, "Return@{:?}\n{}", stmt_span.as_range(), spacing + "    ")?;
             format_expr(expr, *expr_span, f, depth + 1)
+        }
+        Statement::Loop {
+            condition: (expr, expr_span),
+            body,
+            is_do_while,
+        } => {
+            write!(
+                f,
+                "{}Loop@{:?}\n{}",
+                if *is_do_while { "DoWhile" } else { "" },
+                stmt_span.as_range(),
+                spacing + "    "
+            )?;
+            format_expr(expr, *expr_span, f, depth + 1)?;
+            format_block(body, f, depth + 1)
         }
         Statement::SingleExpr((expr, expr_span)) => {
             write!(
@@ -141,6 +163,18 @@ fn format_statement(
                 Ok(())
             }
         }
+        Statement::LoopBreak => write!(
+            f,
+            "LoopBreak@{:?}\n{}",
+            stmt_span.as_range(),
+            spacing + "    "
+        ),
+        Statement::LoopContinue => write!(
+            f,
+            "LoopContinue@{:?}\n{}",
+            stmt_span.as_range(),
+            spacing + "    "
+        ),
     }
 }
 
@@ -562,11 +596,11 @@ impl OpFlags for BitOp {
 
 impl OpFlags for ArithmeticOp {
     fn is_commutative(&self) -> bool {
-        matches!(self, Self::Add | Self::Subtract)
+        matches!(self, Self::Add | Self::Multiply)
     }
 
     fn is_associative(&self) -> bool {
-        matches!(self, Self::Add | Self::Subtract)
+        matches!(self, Self::Add | Self::Subtract | Self::Multiply)
     }
 }
 

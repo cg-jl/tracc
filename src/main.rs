@@ -25,7 +25,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
-    let (function_name, ir) = tracc::intermediate::generate::compile_program(program, &meta)?;
+    let (function_name, ir) = tracc::intermediate::generate::compile_function(program.0.into_iter().next().unwrap(), &meta)?;
 
     let output = tracc::codegen::codegen_function(
         function_name.to_string(),

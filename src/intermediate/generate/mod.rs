@@ -41,14 +41,14 @@ impl From<Vec<BasicBlock>> for IR {
     }
 }
 
-pub fn compile_program<'code>(
-    p: ast::Program<'code>,
+pub fn compile_function<'code>(
+    f: ast::Function<'code>,
     source_meta: &SourceMetadata<'code>,
 ) -> Result<(&'code str, IR), VarE> {
-    let ast::Program(ast::Function {
+    let ast::Function {
         name: ast::Identifier(name),
         body: ast::Block { statements },
-    }) = p;
+    } = f;
     let mut state = IRGenState::default();
     let mut binding_counter = BindingCounter::default();
     let mut env = VariableTracker::default();

@@ -11,6 +11,9 @@ pub fn compile_statement<'code>(
     source_meta: &SourceMetadata,
 ) -> Result<BlockBuilder, VarE> {
     match statement {
+        ast::Statement::LoopBreak | ast::Statement::Loop { .. } | ast::Statement::LoopContinue => {
+            todo!("loops")
+        }
         ast::Statement::Return((expr, expr_span)) => {
             let ret_value = bindings.next_binding();
             {
