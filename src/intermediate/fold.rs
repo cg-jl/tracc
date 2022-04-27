@@ -11,13 +11,13 @@ fn fold_ir_blocks(ir: &mut IR) {
     // now recompute the backward/forward map
     (ir.forward_map, ir.backwards_map) = generate::generate_branching_graphs(&ir.code);
 
-    // and prune the unreached blocks
-    cleanup::prune_unreached_blocks(ir);
 }
 
 pub fn constant_fold(mut ir: IR) -> IR {
     cleanup::run_safe_cleanup(&mut ir);
-    while try_merge(&mut ir) {}
+    while try_merge(&mut ir) {
+        cleanup::prune_unreached_blocks(&mut ir);
+    }
     cleanup::run_safe_cleanup(&mut ir);
     ir
 }
