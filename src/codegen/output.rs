@@ -12,6 +12,10 @@ impl AssemblyOutput {
         Self(VecDeque::new())
     }
 
+    pub fn into_inner(self) -> VecDeque<assembly::Assembly> {
+        self.0
+    }
+
     pub fn cons(mut self, value: impl Into<assembly::Assembly>) -> Self {
         self.push_front(value);
         self
