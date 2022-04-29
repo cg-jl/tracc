@@ -10,5 +10,3 @@ pub mod error;
 pub mod grammar;
 #[allow(unused)]
 pub mod intermediate;
-#[allow(unused)]
-pub mod output;
