@@ -176,32 +176,18 @@ pub enum Branch {
     /// normal (unconditional) branch, always executed
     Unconditional {
         register: Option<Register>,
-        label: BasicBlockLabel,
+        label: Label,
     },
     /// branch with link (aka call)
-    Linked { label: BasicBlockLabel },
+    Linked { label: Label },
     /// Conditional branch
-    Conditional {
-        condition: Condition,
-        label: BasicBlockLabel,
-    },
+    Conditional { condition: Condition, label: Label },
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct BasicBlockLabel {
-    num: usize,
-}
-
-impl From<BasicBlockLabel> for Assembly {
-    fn from(val: BasicBlockLabel) -> Self {
-        Assembly::Label(val.to_string())
-    }
-}
-
-impl BasicBlockLabel {
-    pub const fn new(num: usize) -> Self {
-        Self { num }
-    }
+pub enum Label {
+    Block { num: usize },
+    Epilogue,
 }
 
 impl fmt::Display for Instruction {
@@ -255,6 +241,21 @@ impl fmt::Display for Instruction {
     }
 }
 
+impl fmt::Display for Label {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Block { num } => write!(f, ".LBB{}", num),
+            Self::Epilogue => f.write_str(".epilogue"),
+        }
+    }
+}
+
+impl From<Label> for Assembly {
+    fn from(label: Label) -> Self {
+        Self::Label(label.to_string())
+    }
+}
+
 impl fmt::Display for Branch {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -271,12 +272,6 @@ impl fmt::Display for Branch {
             } => write_instruction!(f, "b", label),
             Self::Linked { label } => write_instruction!(f, "bl", label),
         }
-    }
-}
-
-impl fmt::Display for BasicBlockLabel {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, ".LBB{}", self.num)
     }
 }
 

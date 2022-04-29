@@ -1,22 +1,11 @@
 pub mod assembly;
 pub mod has_binding;
 mod output; // TODO: change output for a better builder (block based, receives IR branching maps for finishing)
+use super::allocators::*;
+use super::intermediate::*;
 use output::AssemblyOutput;
-use crate::allocators::{memory, registers};
-use crate::intermediate::*;
 
 use std::collections::VecDeque;
-
-
-
-
-pub struct BasicBlockLabel(usize);
-
-impl From<BasicBlockLabel> for assembly::Assembly {
-    fn from(val: BasicBlockLabel) -> Self {
-        assembly::Assembly::Label(format!(".LBB{}", val.0))
-    }
-}
 
 pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
     let collisions = crate::intermediate::analysis::compute_lifetime_collisions(&ir);
@@ -65,38 +54,54 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
     // align the stack to 16 bytes
     let mem_size = 16 * ((mem_size as f64 / 16.0f64).ceil() as usize);
 
-    let r#final: AssemblyOutput = ir
+    // if mem size is not zero, create an epilogue  block with a label and
+    // move all returns to the epilogue block.
+
+    let mut blocks: AssemblyOutput = ir
         .code
         .into_iter()
         .enumerate()
         .flat_map(|(block_index, block)| {
-            let has_return = matches!(block.end, BlockEnd::Return(_));
-            let mut compiled_block = compile_block(block, &memory, &registers);
-            if has_return && mem_size != 0 {
-                compiled_block.0.insert(
-                    compiled_block.0.len() - 1,
-                    assembly::Instruction::Add {
-                        target: assembly::Register::StackPointer,
-                        lhs: assembly::Register::StackPointer,
-                        rhs: assembly::Data::Immediate(mem_size as i32),
-                    }
-                    .into(),
-                );
-            }
-
-            compiled_block.cons(BasicBlockLabel(block_index))
+            let mut block = compile_block(block, &memory, &registers);
+            block.push_front(assembly::Label::Block { num: block_index });
+            block
         })
         .collect();
 
-    r#final
+    // change all blocks to be epilogue
+    if mem_size != 0 {
+        blocks.iter_mut().for_each(|asm| {
+            use assembly::{
+                Assembly::Instruction,
+                Branch::Unconditional,
+                Instruction::{Branch, Ret},
+                Label::Epilogue,
+            };
+            if let Instruction(Ret) = asm {
+                *asm = Instruction(Branch(Unconditional {
+                    register: None,
+                    label: Epilogue,
+                }));
+            }
+        });
+        blocks.push_back(assembly::Label::Epilogue);
+        blocks.push_back(assembly::Instruction::Add {
+            target: assembly::Register::StackPointer,
+            lhs: assembly::Register::StackPointer,
+            rhs: assembly::Data::Register(assembly::Register::StackPointer),
+        });
+        blocks.push_back(assembly::Instruction::Ret);
+    }
+
+    blocks
         .chain_back(if mem_size == 0 {
-            None
+            Vec::new()
         } else {
-            Some(assembly::Instruction::Sub {
+            vec![assembly::Instruction::Sub {
                 target: assembly::Register::StackPointer,
                 lhs: assembly::Register::StackPointer,
                 rhs: assembly::Data::Immediate(mem_size as i32),
-            })
+            }]
         })
         // declare function as global for linkage
         .cons(assembly::Assembly::Label(function_name.clone()))
@@ -137,12 +142,13 @@ fn compile_block(
             },
         });
     }
+    use assembly::Label;
     match block.end {
         BlockEnd::Branch(branch) => match branch {
             Branch::Unconditional { target } => {
                 output = output.chain_one(assembly::Branch::Unconditional {
                     register: None,
-                    label: assembly::BasicBlockLabel::new(target.0),
+                    label: Label::Block { num: target.0 },
                 })
             }
             Branch::Conditional {
@@ -162,11 +168,13 @@ fn compile_block(
                     })
                     .chain_one(assembly::Branch::Conditional {
                         condition: assembly::Condition::Equals,
-                        label: assembly::BasicBlockLabel::new(target_false.0),
+                        label: Label::Block {
+                            num: target_false.0,
+                        },
                     })
                     .chain_one(assembly::Branch::Unconditional {
                         register: None,
-                        label: assembly::BasicBlockLabel::new(target_true.0),
+                        label: Label::Block { num: target_true.0 },
                     });
             }
         },

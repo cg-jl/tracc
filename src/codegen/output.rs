@@ -57,6 +57,10 @@ impl AssemblyOutput {
         self.0.extend(values.into_iter().map(T::into));
         self
     }
+
+    pub fn iter_mut<'out>(&'out mut self) -> impl Iterator<Item = &'out mut assembly::Assembly> {
+        self.0.iter_mut()
+    }
 }
 impl IntoIterator for AssemblyOutput {
     type Item = assembly::Assembly;
