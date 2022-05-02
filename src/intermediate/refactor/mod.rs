@@ -47,6 +47,43 @@ pub unsafe fn remove_block(ir: &mut IR, target: BlockBinding) -> BasicBlock {
     ir.code.remove(index)
 }
 
+/// Rename a block inside a block end.
+///
+/// # Safety
+/// The new block name must not collide with other block names
+pub unsafe fn end_rename_block(
+    end: &mut super::BlockEnd,
+    target: BlockBinding,
+    replace_with: BlockBinding,
+) {
+    match end {
+        super::BlockEnd::Branch(ref mut branch) => match branch {
+            super::Branch::Unconditional {
+                target: branch_target,
+            } => {
+                if target == *branch_target {
+                    *branch_target = replace_with;
+                }
+            }
+            super::Branch::Conditional {
+                flag: _,
+                target_true,
+                target_false,
+            } => {
+                if *target_true == target {
+                    *target_true = replace_with;
+                }
+
+                if *target_false == target {
+                    *target_false = replace_with;
+                }
+            }
+        },
+        // nothing to do here
+        super::BlockEnd::Return(_) => (),
+    }
+}
+
 /// Rename a block
 ///
 /// # Safety
@@ -68,32 +105,7 @@ pub unsafe fn rename_block(ir: &mut IR, target: BlockBinding, replace_with: Bloc
                 }
             }
         }
-        match block.end {
-            super::BlockEnd::Branch(ref mut branch) => match branch {
-                super::Branch::Unconditional {
-                    target: branch_target,
-                } => {
-                    if target == *branch_target {
-                        *branch_target = replace_with;
-                    }
-                }
-                super::Branch::Conditional {
-                    flag: _,
-                    target_true,
-                    target_false,
-                } => {
-                    if *target_true == target {
-                        *target_true = replace_with;
-                    }
-
-                    if *target_false == target {
-                        *target_false = replace_with;
-                    }
-                }
-            },
-            // nothing to do here
-            super::BlockEnd::Return(_) => (),
-        }
+        end_rename_block(&mut block.end, target, replace_with);
     }
     // rename refs in the branching maps
     for list in ir

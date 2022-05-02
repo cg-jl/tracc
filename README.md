@@ -40,24 +40,25 @@ Output assembly:
 	.type foo, %function
 foo:
 	sub sp, sp, #16
-.LBB0:
 	mov w1, #1
 	str w1, [sp]
-	mov w3, #2
-	str w3, [sp, #4]
+	mov w2, #2
+	str w2, [sp]
+	ldr w3, [sp]
 	ldr w4, [sp]
-	ldr w5, [sp, #4]
-	cmp w4, w5
-	cset w6, gt
-	cmp w6, wzr
+	cmp w3, w4
+	cset w5, gt
+	cmp w5, wzr
 	beq .LBB2
-	b   .LBB1
-.LBB1:
-	b   .LBB3
+	ldr w1, [sp]
+	ldr w0, [sp]
+	sub w0, w1, w0
+	b   .epilogue
 .LBB2:
-	b   .LBB3
-.LBB3:
-	mov w0, wzr
+	ldr w1, [sp]
+	ldr w0, [sp]
+	add w0, w1, w0
+.epilogue:
 	add sp, sp, #16
 	ret
 ```

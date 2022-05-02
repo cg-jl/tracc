@@ -1,5 +1,6 @@
 use super::assembly;
 use std::collections::VecDeque;
+use std::fmt;
 
 pub struct AssemblyOutput(VecDeque<assembly::Assembly>);
 impl Default for AssemblyOutput {
@@ -10,6 +11,10 @@ impl Default for AssemblyOutput {
 impl AssemblyOutput {
     pub fn new() -> Self {
         Self(VecDeque::new())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     pub fn into_inner(self) -> VecDeque<assembly::Assembly> {
@@ -91,5 +96,19 @@ impl FromIterator<AssemblyOutput> for AssemblyOutput {
 impl FromIterator<assembly::Assembly> for AssemblyOutput {
     fn from_iter<T: IntoIterator<Item = assembly::Assembly>>(iter: T) -> Self {
         Self(VecDeque::from_iter(iter))
+    }
+}
+
+impl fmt::Debug for AssemblyOutput {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        struct DoDisplay<'a>(&'a assembly::Assembly);
+
+        impl<'a> fmt::Debug for DoDisplay<'a> {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+
+        f.debug_list().entries(self.0.iter().map(DoDisplay)).finish()
     }
 }

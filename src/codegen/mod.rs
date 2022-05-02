@@ -5,6 +5,7 @@ use super::allocators::*;
 use super::intermediate::*;
 use output::AssemblyOutput;
 
+use std::collections::HashSet;
 use std::collections::VecDeque;
 
 pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
@@ -57,52 +58,184 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
     // if mem size is not zero, create an epilogue  block with a label and
     // move all returns to the epilogue block.
 
-    let mut blocks: AssemblyOutput = ir
+    // collect all the blocks and their ends
+    let (mut blocks, mut ends): (Vec<_>, Vec<_>) = ir
         .code
         .into_iter()
-        .enumerate()
-        .flat_map(|(block_index, block)| {
-            let mut block = compile_block(block, &memory, &registers);
-            block.push_front(assembly::Label::Block { num: block_index });
-            block
+        .map(|BasicBlock { statements, end }| {
+            let block = compile_block(statements, &memory, &registers);
+            (block, end)
         })
-        .collect();
+        .unzip();
 
-    // change all blocks to be epilogue
-    if mem_size != 0 {
-        blocks.iter_mut().for_each(|asm| {
-            use assembly::{
-                Assembly::Instruction,
-                Branch::Unconditional,
-                Instruction::{Branch, Ret},
-                Label::Epilogue,
-            };
-            if let Instruction(Ret) = asm {
-                *asm = Instruction(Branch(Unconditional {
-                    register: None,
-                    label: Epilogue,
-                }));
+    // change all blocks to branch to epilogue
+    let prologue = if mem_size != 0 {
+        ends.iter_mut().for_each(|end| {
+            use assembly::Label::Epilogue;
+
+            if let BlockEnd::Return(_) = end {
+                *end = BlockEnd::Branch(Branch::Unconditional {
+                    // block ID of epilogue is the new block.
+                    target: BlockBinding(blocks.len()),
+                });
             }
         });
-        blocks.push_back(assembly::Label::Epilogue);
-        blocks.push_back(assembly::Instruction::Add {
+
+        let epilogue = AssemblyOutput::from(assembly::Instruction::Add {
             target: assembly::Register::StackPointer,
             lhs: assembly::Register::StackPointer,
-            rhs: assembly::Data::Register(assembly::Register::StackPointer),
+            rhs: assembly::Data::Immediate(mem_size as i32),
+        })
+        .chain_one(assembly::Instruction::Ret);
+
+        blocks.push(epilogue);
+        AssemblyOutput::from(assembly::Instruction::Sub {
+            target: assembly::Register::StackPointer,
+            lhs: assembly::Register::StackPointer,
+            rhs: assembly::Data::Immediate(mem_size as i32),
+        })
+    } else {
+        AssemblyOutput::new()
+    };
+
+    // TODO: for each end, reverse the condition if true_branch == current_block + 1
+    // also reorder block names so that each block is nearest to the ones that branch to it.
+    // all thot to avoid beq; b
+    // but before that, add the epilogue block and change the return ends to branch to the
+    // epilogue.
+
+    // search backwards for empty blocks so we can delete them and make everything else branch to
+    // the next block of the empty one
+    {
+        let mut i = 0;
+        while i != blocks.len() {
+            let index = blocks.len() - i - 1;
+            if blocks[index].is_empty() {
+                // rewire all ends to one less
+                ends.iter_mut().for_each(|end| {
+                    for move_index in (index + 1..blocks.len()).rev() {
+                        // UNSAFE: safe. The block is about to be deleted.
+                        unsafe {
+                            refactor::end_rename_block(
+                                end,
+                                BlockBinding(move_index + 1),
+                                BlockBinding(move_index),
+                            )
+                        };
+                    }
+                    // if a conditional branch ends with both blocks being the same, it means it
+                    // was just executing conditionally a block that ended up not having any source
+                    // code. TODO: this probably happens due to phi nodes and their targets already
+                    // being there. When phi nodes can't be allocated the same target then these
+                    // blocks won't be empty.
+                    if let BlockEnd::Branch(Branch::Conditional {
+                        target_true,
+                        target_false,
+                        ..
+                    }) = end
+                    {
+                        debug_assert_ne!(
+                            target_true, target_false,
+                            "conditional branch ended up folded"
+                        );
+                        // if target_true == target_false {
+                        //     *end = BlockEnd::Branch(Branch::Unconditional {
+                        //         target: *target_true,
+                        //     })
+                        // }
+                    }
+                });
+                blocks.remove(index);
+                ends.remove(index);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+
+    let blocks_len = blocks.len();
+
+    let get_label = |index: usize| -> assembly::Label {
+        if index == blocks_len.saturating_sub(1) && mem_size != 0 {
+            assembly::Label::Epilogue
+        } else {
+            assembly::Label::Block { num: index }
+        }
+    };
+
+    let mut needed_labels = HashSet::new();
+    blocks
+        .iter_mut()
+        .enumerate()
+        .zip(ends)
+        .for_each(|((index, block), end)| {
+            match end {
+                BlockEnd::Return(_) => {
+                    block.push_back(assembly::Instruction::Ret);
+                }
+                BlockEnd::Branch(Branch::Unconditional { target }) => {
+                    if target.0 != index + 1 {
+                        needed_labels.insert(target.0);
+                        block.push_back(assembly::Instruction::Branch(
+                            assembly::Branch::Unconditional {
+                                register: None,
+                                label: get_label(target.0),
+                            },
+                        ));
+                    }
+                }
+                // TODO: flag condition hints to codegen
+                BlockEnd::Branch(Branch::Conditional {
+                    flag,
+                    target_true,
+                    target_false,
+                }) => {
+                    let (condition, condition_target, rest_target) = if target_true.0 == index + 1 {
+                        (assembly::Condition::Equals, target_false.0, target_true.0)
+                    } else {
+                        needed_labels.insert(target_true.0);
+                        (
+                            assembly::Condition::NotEquals,
+                            target_true.0,
+                            target_false.0,
+                        )
+                    };
+                    needed_labels.insert(condition_target);
+                    block.extend(vec![
+                        assembly::Instruction::Cmp {
+                            register: assembly::Register::from_id(
+                                registers[&flag],
+                                assembly::BitSize::Bit32,
+                            ),
+                            data: assembly::Data::Register(assembly::Register::ZeroRegister {
+                                bit_size: assembly::BitSize::Bit32,
+                            }),
+                        },
+                        assembly::Instruction::Branch(assembly::Branch::Conditional {
+                            condition,
+                            label: get_label(condition_target),
+                        }),
+                    ]);
+
+                    if rest_target != index + 1 {
+                        needed_labels.insert(rest_target);
+                        block.push_back(assembly::Branch::Unconditional {
+                            register: None,
+                            label: get_label(rest_target),
+                        });
+                    }
+                }
+            }
         });
-        blocks.push_back(assembly::Instruction::Ret);
+
+    for block in needed_labels {
+        blocks[block].push_front(get_label(block));
     }
 
     blocks
-        .chain_back(if mem_size == 0 {
-            Vec::new()
-        } else {
-            vec![assembly::Instruction::Sub {
-                target: assembly::Register::StackPointer,
-                lhs: assembly::Register::StackPointer,
-                rhs: assembly::Data::Immediate(mem_size as i32),
-            }]
-        })
+        .into_iter()
+        .fold(prologue, |acc, next| acc.chain(next))
         // declare function as global for linkage
         .cons(assembly::Assembly::Label(function_name.clone()))
         .cons(assembly::Directive::Type(
@@ -113,75 +246,36 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
 }
 
 fn compile_block(
-    block: BasicBlock,
+    block: Vec<Statement>,
     memory: &memory::MemoryMap,
     registers: &registers::RegisterMap,
 ) -> AssemblyOutput {
-    let mut output = AssemblyOutput::new();
-    for statement in block.statements {
-        output = output.chain(match statement {
-            Statement::Assign { index, value } => {
-                let register = registers[&index];
-                compile_value(value, register, memory, registers)
-            }
-            Statement::Store {
-                mem_binding,
-                binding,
-                byte_size,
-            } => match byte_size {
-                ByteSize::U64 => todo!("64-bit stores"),
-                ByteSize::U8 => todo!("one byte stores"),
-                ByteSize::U32 => assembly::Instruction::Str {
-                    register: assembly::Register::from_id(
-                        registers[&binding],
-                        assembly::BitSize::Bit32,
-                    ),
-                    address: memory[&mem_binding],
+    block
+        .into_iter()
+        .fold(AssemblyOutput::new(), |output, statement| {
+            output.chain(match statement {
+                Statement::Assign { index, value } => {
+                    let register = registers[&index];
+                    compile_value(value, register, memory, registers)
                 }
-                .into(),
-            },
-        });
-    }
-    use assembly::Label;
-    match block.end {
-        BlockEnd::Branch(branch) => match branch {
-            Branch::Unconditional { target } => {
-                output = output.chain_one(assembly::Branch::Unconditional {
-                    register: None,
-                    label: Label::Block { num: target.0 },
-                })
-            }
-            Branch::Conditional {
-                flag,
-                target_true,
-                target_false,
-            } => {
-                // TODO: map with known already touched CPU flags at the end of every block, and
-                // the result they computed, if any.
-                output = output
-                    .chain_one(assembly::Instruction::Cmp {
+                Statement::Store {
+                    mem_binding,
+                    binding,
+                    byte_size,
+                } => match byte_size {
+                    ByteSize::U64 => todo!("64-bit stores"),
+                    ByteSize::U8 => todo!("one byte stores"),
+                    ByteSize::U32 => assembly::Instruction::Str {
                         register: assembly::Register::from_id(
-                            registers[&flag],
+                            registers[&binding],
                             assembly::BitSize::Bit32,
                         ),
-                        data: assembly::Data::immediate(0, assembly::BitSize::Bit32),
-                    })
-                    .chain_one(assembly::Branch::Conditional {
-                        condition: assembly::Condition::Equals,
-                        label: Label::Block {
-                            num: target_false.0,
-                        },
-                    })
-                    .chain_one(assembly::Branch::Unconditional {
-                        register: None,
-                        label: Label::Block { num: target_true.0 },
-                    });
-            }
-        },
-        // TODO: make sure that the returned binding is in the place it should.
-        BlockEnd::Return(ret) => output = output.chain_one(assembly::Instruction::Ret),
-    }
-    output
+                        address: memory[&mem_binding],
+                    }
+                    .into(),
+                },
+            })
+        })
 }
 
 // NOTE: currently the size is always bit32 but there might be a moment in time
