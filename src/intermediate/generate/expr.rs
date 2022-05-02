@@ -53,18 +53,20 @@ pub fn compile_expr<'code>(
                 (compute, value_binding)
             };
 
-            let (compute_if_true, true_binding) = {
+            let (compute_if_true, true_binding, true_head) = {
                 let builder = state.new_block();
+                let head = builder.block();
                 let (mut compute, expr_value) =
                     compile_expr(state, builder, *true_expr, bindings, variables, source_info)
                         .map_err(|e| e.with_backup_source(true_span, source_info))?;
                 let value_binding = bindings.next_binding();
                 compute.assign(value_binding, expr_value);
-                (compute, value_binding)
+                (compute, value_binding, head)
             };
 
-            let (compute_if_false, false_binding) = {
+            let (compute_if_false, false_binding, false_head) = {
                 let builder = state.new_block();
+                let head = builder.block();
                 let (mut compute, expr_value) = compile_expr(
                     state,
                     builder,
@@ -76,7 +78,7 @@ pub fn compile_expr<'code>(
                 .map_err(|e| e.with_backup_source(false_span, source_info))?;
                 let value_binding = bindings.next_binding();
                 compute.assign(value_binding, expr_value);
-                (compute, value_binding)
+                (compute, value_binding, head)
             };
 
             let true_block = compute_if_true.block();
@@ -88,7 +90,9 @@ pub fn compile_expr<'code>(
                     compute_condition,
                     cond_flag,
                     compute_if_true,
+                    true_head,
                     compute_if_false,
+                    false_head,
                 ),
                 Value::Phi {
                     nodes: vec![

@@ -95,36 +95,44 @@ pub fn compile_statement<'code>(
                 (compute, value_binding)
             };
 
-            let compute_if_true = {
+            let (compute_if_true, true_head) = {
                 let block = state.new_block();
-                compile_statement(
-                    state,
-                    block,
-                    bindings,
-                    *true_stmt,
-                    variables,
-                    block_depth,
-                    source_meta,
-                )
-                .map_err(|e| e.with_backup_source(true_span, source_meta))?
-            };
-
-            let compute_if_false = {
-                let block = state.new_block();
-                if let Some((false_stmt, false_span)) = false_branch {
+                let head = block.block();
+                (
                     compile_statement(
                         state,
                         block,
                         bindings,
-                        *false_stmt,
+                        *true_stmt,
                         variables,
                         block_depth,
                         source_meta,
                     )
-                    .map_err(|e| e.with_backup_source(false_span, source_meta))?
-                } else {
-                    block
-                }
+                    .map_err(|e| e.with_backup_source(true_span, source_meta))?,
+                    head,
+                )
+            };
+
+            let (compute_if_false, false_head) = {
+                let block = state.new_block();
+                let head = block.block();
+                (
+                    if let Some((false_stmt, false_span)) = false_branch {
+                        compile_statement(
+                            state,
+                            block,
+                            bindings,
+                            *false_stmt,
+                            variables,
+                            block_depth,
+                            source_meta,
+                        )
+                        .map_err(|e| e.with_backup_source(false_span, source_meta))?
+                    } else {
+                        block
+                    },
+                    head,
+                )
             };
 
             Ok(merge_branches(
@@ -132,7 +140,9 @@ pub fn compile_statement<'code>(
                 compute_condition,
                 cond_flag,
                 compute_if_true,
+                true_head,
                 compute_if_false,
+                false_head,
             ))
         }
     }
@@ -144,7 +154,9 @@ pub fn merge_branches(
     compute_condition: BlockBuilder,
     branch_flag: Binding,
     true_branch: BlockBuilder,
+    true_branch_head: BlockBinding,
     false_branch: BlockBuilder,
+    false_branch_head: BlockBinding,
 ) -> BlockBuilder {
     let mut end_block = state.new_block();
     // wire up the stuff so that the correct diamond graph is generated
@@ -152,8 +164,8 @@ pub fn merge_branches(
         state,
         Branch::Conditional {
             flag: branch_flag,
-            target_true: true_branch.block(),
-            target_false: false_branch.block(),
+            target_true: true_branch_head,
+            target_false: false_branch_head,
         },
     );
 

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::mem::MaybeUninit;
 
 use super::{
@@ -89,6 +90,22 @@ pub fn compile_function<'code>(
 pub struct BlockBuilder {
     current_block: Vec<Statement>,
     block_id: usize,
+}
+
+impl fmt::Debug for BlockBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        struct DoDisplay<'a>(&'a Statement);
+
+        impl<'a> fmt::Debug for DoDisplay<'a> {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+        write!(f, "BlockBuilder(BB{}) ", self.block_id)?;
+        f.debug_set()
+            .entries(self.current_block.iter().map(DoDisplay))
+            .finish()
+    }
 }
 
 impl BlockBuilder {
