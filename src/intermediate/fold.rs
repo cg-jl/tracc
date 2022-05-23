@@ -49,6 +49,8 @@ fn try_merge(ir: &mut IR) -> bool {
     // cleanup the code after the fold
     cleanup::run_safe_cleanup(ir);
 
+    cleanup::prune_unreached_blocks(ir);
+
     // if I find a direct mapping somewhere, I inline
     let mut jumps: HashMap<_, _> = find_unique_jumps(ir).collect();
 
