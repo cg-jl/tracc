@@ -14,9 +14,9 @@ try_compile_normal() {
 }
 
 compare_results() {
-  ./$1.cc
+  qemu-aarch64 ./$1.cc
   local res1=$?
-  ./$1.gcc
+  qemu-aarch64 ./$1.gcc
   local res2=$?
   if [ $res1 -eq $res2 ]; then
     return 0

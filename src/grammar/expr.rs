@@ -90,12 +90,58 @@ fn parse_primary<'source>(parser: &mut Parser<'source>) -> ParseRes<(Expr<'sourc
 }
 
 // Use a mid step to detect ternary operator
-enum PreBinaryOp<'code> {
+#[derive(Clone, Copy, Debug)]
+enum DetectTernary {
+    NormalOp(BinaryOp),
+    Ternary,
+}
+
+impl DetectTernary {
+    const fn associativity(self) -> Associativity {
+        match self {
+            Self::NormalOp(op) => op.associativity(),
+            Self::Ternary => Associativity::RightToLeft,
+        }
+    }
+    fn from_operator((op, has_equal): (super::lexer::Operator, bool)) -> Option<Self> {
+        use super::lexer::Operator::Ternary;
+        if let Ternary = op {
+            Some(Self::Ternary)
+        } else {
+            BinaryOp::from_operator((op, has_equal)).map(Self::NormalOp)
+        }
+    }
+
+    const fn precedence(&self) -> u8 {
+        match self {
+            Self::NormalOp(op) => op.precedence(),
+            Self::Ternary => 15 - 13,
+        }
+    }
+
+    // consume more tokens if needed since we accepted the operator
+    fn builder<'code>(self, parser: &mut Parser<'code>) -> ParseRes<BinExprBuilder<'code>> {
+        parser.accept_current();
+        match self {
+            Self::NormalOp(op) => Ok(BinExprBuilder::NormalOp(op)),
+            Self::Ternary => {
+                let middle = parser.parse()?;
+                parser.expect_token(TokenKind::Colon).map_err(|err| {
+                    err.add_context("`?` from ternaary operator needs a `:` for the `else` part")
+                })?;
+                parser.accept_current();
+                Ok(BinExprBuilder::Ternary { middle })
+            }
+        }
+    }
+}
+
+enum BinExprBuilder<'code> {
     NormalOp(BinaryOp),
     Ternary { middle: (Expr<'code>, Span) },
 }
 
-impl<'code> PreBinaryOp<'code> {
+impl<'code> BinExprBuilder<'code> {
     fn build(
         self,
         (lhs_expr, lhs_span): (Expr<'code>, Span),
@@ -116,60 +162,65 @@ impl<'code> PreBinaryOp<'code> {
             },
         }
     }
-
-    fn precedence(&self) -> u8 {
-        match self {
-            Self::NormalOp(op) => op.precedence(),
-            Self::Ternary { .. } => 15 - 13,
-        }
-    }
 }
+//
+//     fn precedence(&self) -> u8 {
+//         match self {
+//             Self::NormalOp(op) => op.precedence(),
+//             Self::Ternary { .. } => 15 - 13,
+//         }
+//     }
+// }
 
-fn next_binary_op<'code>(parser: &mut Parser<'code>) -> ParseRes<Option<PreBinaryOp<'code>>> {
-    use super::lexer::Operator::Ternary;
-    if let Some(op) = parser.peek_token()?.and_then(TokenKind::as_operator) {
-        if let Ternary = op.0 {
-            parser.accept_current();
-            let middle = parser.parse()?;
-            parser
-                .expect_token(TokenKind::Colon)
-                .map_err(|e| e.add_context("parsing ternary expression"))?;
-            parser.accept_current();
-            Ok(Some(PreBinaryOp::Ternary { middle }))
-        } else {
-            BinaryOp::from_operator(op)
-                .map(|op| {
-                    parser.accept_current();
-                    Ok(PreBinaryOp::NormalOp(op))
-                })
-                .transpose()
-        }
-    } else {
-        Ok(None)
-    }
-}
+// fn next_binary_op<'code>(parser: &mut Parser<'code>) -> ParseRes<Option<PreBinaryOp<'code>>> {
+//     use super::lexer::Operator::Ternary;
+//     if let Some(op) = parser.peek_token()?.and_then(TokenKind::as_operator) {
+//         if let Ternary = op.0 {
+//             parser.accept_current();
+//             let middle = parser.parse()?;
+//             parser
+//                 .expect_token(TokenKind::Colon)
+//                 .map_err(|e| e.add_context("parsing ternary expression"))?;
+//             parser.accept_current();
+//             Ok(Some(PreBinaryOp::Ternary { middle }))
+//         } else {
+//             BinaryOp::from_operator(op)
+//                 .map(|op| {
+//                     parser.accept_current();
+//                     Ok(PreBinaryOp::NormalOp(op))
+//                 })
+//                 .transpose()
+//         }
+//     } else {
+//         Ok(None)
+//     }
+// }
 
 fn parse_binary_expression<'source>(
     parser: &mut Parser<'source>,
     mut lhs: (Expr<'source>, Span),
     min_precedence: u8,
 ) -> ParseRes<(Expr<'source>, Span)> {
-    while let Some(op) = next_binary_op(parser)?.filter(|x| x.precedence() >= min_precedence) {
-        let mut rhs = parse_primary(parser)?;
+    while let Some(op) = parser
+        .peek_token()?
+        .and_then(TokenKind::as_operator)
+        .and_then(DetectTernary::from_operator)
+        .filter(|x| x.precedence() >= min_precedence)
+    {
         let this_precedence = op.precedence();
+        let builder = op.builder(parser)?;
+        let mut rhs = parse_primary(parser)?;
         #[allow(clippy::blocks_in_if_conditions)]
         // XXX: I don't know what clippy is trying to tell me; that closure is fine.
         while parser
             .peek_token()?
             .and_then(TokenKind::as_operator)
-            .and_then(BinaryOp::from_operator)
+            .and_then(DetectTernary::from_operator)
             .filter(move |op2| {
                 let other_precedence = op2.precedence();
-                let assoc = op2.associativity();
-                if let Associativity::Left = assoc {
-                    other_precedence > this_precedence
-                } else {
-                    other_precedence == this_precedence
+                match op2.associativity() {
+                    Associativity::RightToLeft => other_precedence >= this_precedence,
+                    Associativity::LeftToRight => other_precedence > this_precedence,
                 }
             })
             .is_some()
@@ -180,7 +231,7 @@ fn parse_binary_expression<'source>(
             offset: lhs.1.offset,
             len: rhs.1.offset + rhs.1.len - lhs.1.offset,
         };
-        lhs = (op.build(lhs, rhs), span);
+        lhs = (builder.build(lhs, rhs), span);
     }
     Ok(lhs)
 }

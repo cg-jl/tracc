@@ -153,7 +153,6 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
         }
     }
 
-
     let blocks_len = blocks.len();
 
     let get_label = |index: usize| -> assembly::Label {

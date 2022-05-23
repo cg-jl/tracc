@@ -440,8 +440,8 @@ impl From<AssignmentEnabledOp> for BinaryOp {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Associativity {
-    Right,
-    Left,
+    RightToLeft,
+    LeftToRight,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -624,9 +624,9 @@ impl BinaryOp {
     pub const fn associativity(self) -> Associativity {
         match self {
             Self::Arithmetic(_) | Self::Logic(_) | Self::Bit(_) | Self::Relational(_) => {
-                Associativity::Left
+                Associativity::LeftToRight
             }
-            Self::Assignment { .. } => Associativity::Right,
+            Self::Assignment { .. } => Associativity::RightToLeft,
         }
     }
     pub const fn precedence(self) -> u8 {
