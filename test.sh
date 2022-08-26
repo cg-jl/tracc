@@ -5,12 +5,17 @@ try_run() {
   sh -c "$1" 2>test_run_failed
 }
 
+# source dest
+try_compile_with_gcc() {
+    try_run "~/sdks/gcc-arm/bin/gcc -static -o $2 $1"
+}
+
 try_compile_with_project() {
-  try_run "cargo run -- -o $1.s $1" && try_run "~/gcc-arm/bin/gcc -static -o $1.cc $1.s"
+  try_run "cargo run -- -o $1.s $1" && try_compile_with_gcc "$1.s" "$1.cc"
 }
 
 try_compile_normal() {
-  try_run "~/gcc-arm/bin/gcc -static -o $1.gcc $1"
+  try_compile_with_gcc $1 "$1.gcc"
 }
 
 compare_results() {
