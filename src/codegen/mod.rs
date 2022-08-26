@@ -106,52 +106,53 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
 
     // search backwards for empty blocks so we can delete them and make everything else branch to
     // the next block of the empty one
-    {
-        let mut i = 0;
-        while i != blocks.len() {
-            let index = blocks.len() - i - 1;
-            if blocks[index].is_empty() {
-                // rewire all ends to one less
-                ends.iter_mut().for_each(|end| {
-                    for move_index in (index + 1..blocks.len()).rev() {
-                        // UNSAFE: safe. The block is about to be deleted.
-                        unsafe {
-                            refactor::end_rename_block(
-                                end,
-                                BlockBinding(move_index + 1),
-                                BlockBinding(move_index),
-                            )
-                        };
-                    }
-                    // if a conditional branch ends with both blocks being the same, it means it
-                    // was just executing conditionally a block that ended up not having any source
-                    // code. TODO: this probably happens due to phi nodes and their targets already
-                    // being there. When phi nodes can't be allocated the same target then these
-                    // blocks won't be empty.
-                    if let BlockEnd::Branch(Branch::Conditional {
-                        target_true,
-                        target_false,
-                        ..
-                    }) = end
-                    {
-                        debug_assert_ne!(
-                            target_true, target_false,
-                            "conditional branch ended up folded"
-                        );
-                        // if target_true == target_false {
-                        //     *end = BlockEnd::Branch(Branch::Unconditional {
-                        //         target: *target_true,
-                        //     })
-                        // }
-                    }
-                });
-                blocks.remove(index);
-                ends.remove(index);
-            } else {
-                i += 1;
-            }
-        }
-    }
+    // {
+    //     let mut i = 0;
+    //     while i != blocks.len() {
+    //         let index = blocks.len() - i - 1;
+    //         if blocks[index].is_empty() {
+    //             // rewire all ends to one less
+    //             ends.iter_mut().for_each(|end| {
+    //                 for move_index in (index + 1..blocks.len()).rev() {
+    //                     // UNSAFE: safe. The block is about to be deleted.
+    //                     unsafe {
+    //                         refactor::end_rename_block(
+    //                             end,
+    //                             BlockBinding(move_index + 1),
+    //                             BlockBinding(move_index),
+    //                         )
+    //                     };
+    //                 }
+    //                 // if a conditional branch ends with both blocks being the same, it means it
+    //                 // was just executing conditionally a block that ended up not having any source
+    //                 // code. TODO: this probably happens due to phi nodes and their targets already
+    //                 // being there. When phi nodes can't be allocated the same target then these
+    //                 // blocks won't be empty.
+    //                 if let BlockEnd::Branch(Branch::Conditional {
+    //                     target_true,
+    //                     target_false,
+    //                     ..
+    //                 }) = end
+    //                 {
+    //                     debug_assert_ne!(
+    //                         target_true, target_false,
+    //                         "conditional branch ended up folded"
+    //                     );
+    //                     // if target_true == target_false {
+    //                     //     *end = BlockEnd::Branch(Branch::Unconditional {
+    //                     //         target: *target_true,
+    //                     //     })
+    //                     // }
+    //                 }
+    //             });
+    //             blocks.remove(index);
+    //             ends.remove(index);
+    //         } else {
+    //             i += 1;
+    //         }
+    //     }
+    // }
+    dbg!(&blocks);
 
     let blocks_len = blocks.len();
 
