@@ -10,7 +10,6 @@ fn fold_ir_blocks(ir: &mut IR) {
 
     // now recompute the backward/forward map
     (ir.forward_map, ir.backwards_map) = generate::generate_branching_graphs(&ir.code);
-
 }
 
 pub fn constant_fold(mut ir: IR) -> IR {

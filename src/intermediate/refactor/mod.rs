@@ -30,6 +30,27 @@ pub unsafe fn remove_binding(ir: &mut IR, target: Binding) {
     }
 }
 
+/// Remove a block from phi nodes, since it can't be reached
+/// # Safety
+/// The block must not be reached in any way.
+pub unsafe fn remove_unreached_block_from_phi_statements(ir: &mut IR, target: BlockBinding) {
+    for block in &mut ir.code {
+        for statement in &mut block.statements {
+            if let Statement::Assign {
+                index: _,
+                value: Value::Phi { nodes },
+            } = statement
+            {
+                for i in (0..nodes.len()).rev() {
+                    if nodes[i].block_from == target {
+                        nodes.remove(i);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Remove a block from the IR
 ///
 /// # Safety

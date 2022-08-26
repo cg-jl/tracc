@@ -152,7 +152,6 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
     //         }
     //     }
     // }
-    dbg!(&blocks);
 
     let blocks_len = blocks.len();
 

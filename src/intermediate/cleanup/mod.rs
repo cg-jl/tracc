@@ -203,6 +203,8 @@ pub fn prune_unreached_blocks(ir: &mut IR) {
 
     // for all unused blocks:
     for unused_binding in unused_blocks {
+        // SAFE: the block is proven to be unreachable.
+        unsafe { refactor::remove_unreached_block_from_phi_statements(ir, unused_binding) };
         // remove the block
         // UNSAFE: safe. the block is no longer used.
         unsafe { refactor::remove_block(ir, unused_binding) };
