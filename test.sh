@@ -55,4 +55,9 @@ test_stage() {
   return $res
 }
 
-test_stage $@
+if [ $1 -eq 6 ] && [ $# -eq 1 ]; then
+    test_stage 6 expression
+    test_stage 6 statement
+else
+    test_stage $@
+fi
