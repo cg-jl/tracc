@@ -16,6 +16,25 @@ impl<'source> Parse<'source> for (Statement<'source>, Span) {
                     let source = parser.current_token_source();
                     let start = parser.current_position();
                     match source {
+                        "while" => {
+                            let offset = parser.current_position();
+                            parser.accept_current();
+
+                            let (statement, statement_span, condition, condition_span) =
+                                while_loop(parser)?;
+
+                            (
+                                Statement::Loop {
+                                    condition: (condition, condition_span),
+                                    body: (Box::new(statement), statement_span),
+                                    is_do_while: false,
+                                },
+                                Span {
+                                    offset,
+                                    len: statement_span.offset - offset,
+                                },
+                            )
+                        }
                         "if" => {
                             let offset = parser.current_position();
                             parser.accept_current();
@@ -90,6 +109,32 @@ fn single_expr<'source>(parser: &mut Parser<'source>) -> ParseRes<(Statement<'so
     parser.accept_current();
     let expr_span = expr.1;
     Ok((Statement::SingleExpr(expr), expr_span))
+}
+
+fn while_loop<'code>(
+    parser: &mut Parser<'code>,
+) -> ParseRes<(Statement<'code>, Span, Expr<'code>, Span)> {
+    let (condition, condition_span) =
+        parser.with_context("parsing while loop's condition", |parser| {
+            parser.expect_token(TokenKind::OpenParen)?;
+            parser.accept_current();
+            let (condition, span): (_, Span) = parser.parse()?;
+            parser.expect_token(TokenKind::CloseParen)?;
+            let end = parser.current_position();
+            parser.accept_current();
+
+            Ok((
+                condition,
+                Span {
+                    offset: span.offset,
+                    len: end - span.offset,
+                },
+            ))
+        })?;
+
+    let (statement, statement_span) = parser.parse()?;
+
+    Ok((statement, statement_span, condition, condition_span))
 }
 
 fn if_statement<'code>(

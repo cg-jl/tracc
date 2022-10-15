@@ -57,7 +57,7 @@ pub enum Statement<'source> {
     },
     Loop {
         condition: (Expr<'source>, Span),
-        body: Vec<(Statement<'source>, Span)>,
+        body: (Box<Statement<'source>>, Span),
         is_do_while: bool,
     },
     LoopBreak,
@@ -88,7 +88,7 @@ fn format_statement(
         }
         Statement::Loop {
             condition: (expr, expr_span),
-            body,
+            body: (body, body_span),
             is_do_while,
         } => {
             write!(
@@ -99,7 +99,7 @@ fn format_statement(
                 spacing + "    "
             )?;
             format_expr(expr, *expr_span, f, depth + 1)?;
-            format_block(body, f, depth + 1)
+            format_statement(&body, *body_span, f, depth + 1)
         }
         Statement::SingleExpr((expr, expr_span)) => {
             write!(
