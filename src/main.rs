@@ -1,9 +1,10 @@
-use std::error::Error;
 use structopt::StructOpt;
 use tracc::ast::Program;
 
 use tracc::error::SourceMetadata;
 use tracc::grammar::Parser;
+
+use simplelog::{TermLogger, TerminalMode};
 
 // TODO(#3): structured formatting lib (error,warning,note,help, etc)
 // TODO(#4): create test crate
@@ -15,25 +16,40 @@ fn main() {
     }
 }
 
-fn run() -> Result<(), Box<dyn Error>> {
+fn run() -> Result<(), anyhow::Error> {
     use std::fs;
     use std::io::Write;
 
     let opt = Opt::from_args();
+    TermLogger::init(
+        if opt.verbose {
+            log::LevelFilter::Trace
+        } else {
+            log::LevelFilter::Info
+        },
+        Default::default(),
+        TerminalMode::Mixed,
+        simplelog::ColorChoice::Auto,
+    )?;
     let filename = opt.file;
     let file = fs::read_to_string(&filename)?;
     let out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
-    let (function_name, ir) = tracc::intermediate::generate::compile_function(program.0.into_iter().next().unwrap(), &meta)?;
+    let (function_name, ir) = tracc::intermediate::generate::compile_function(
+        program.0.into_iter().next().unwrap(),
+        &meta,
+    )?;
 
-    let output = tracc::codegen::codegen_function(
-        function_name.to_string(),
-        dbg!(tracc::intermediate::fold::constant_fold(dbg!(ir))),
-    )
-    .cons(tracc::codegen::assembly::Directive::Architecture(
-        "armv8-a".into(),
-    ));
+    log::debug!("before fold:{ir:?}");
+
+    let ir = tracc::intermediate::fold::constant_fold(ir);
+
+    log::debug!("after fold:{ir:?}");
+
+    let output = tracc::codegen::codegen_function(function_name.to_string(), ir).cons(
+        tracc::codegen::assembly::Directive::Architecture("armv8-a".into()),
+    );
 
     //tracc::codegen::registers::debug_what_im_doing(&ir);
     // dbg!(memory_map, stack_size);
@@ -56,4 +72,8 @@ struct Opt {
     /// The (optional) output file
     #[structopt(short = "o", long = "output", parse(from_os_str))]
     output: Option<std::path::PathBuf>,
+
+    /// Verbose output?
+    #[structopt(short = "v", long = "verbose")]
+    verbose: bool,
 }
