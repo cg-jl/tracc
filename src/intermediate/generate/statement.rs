@@ -11,8 +11,84 @@ pub fn compile_statement<'code>(
     source_meta: &SourceMetadata,
 ) -> Result<BlockBuilder, VarE> {
     match statement {
-        ast::Statement::LoopBreak | ast::Statement::Loop { .. } | ast::Statement::LoopContinue => {
-            todo!("loops")
+        ast::Statement::Loop {
+            condition: (condition, condition_span),
+            body: (body, body_span),
+            is_do_while,
+        } => {
+            let condition_block = state.new_block();
+            let body_block = state.new_block();
+            let exit = state.new_block();
+
+            let condition_entrypoint = condition_block.block();
+            let body_entrypoint = body_block.block();
+
+            // a do while executes the body at least once, while the 'while' loop first checks
+            // the condition.
+            let loop_entrypoint = if is_do_while {
+                body_entrypoint
+            } else {
+                condition_entrypoint
+            };
+
+            // finish the current block by making it jump to our loop entrypoint
+            builder.finish_block(
+                state,
+                Branch::Unconditional {
+                    target: loop_entrypoint,
+                },
+            );
+
+            // compile the condition
+            let (mut condition_block, condition_value) = expr::compile_expr(
+                state,
+                condition_block,
+                condition,
+                bindings,
+                variables,
+                block_depth,
+                source_meta,
+            )
+            .map_err(|e| e.with_backup_source(condition_span, source_meta))?;
+            // assign it to a binding
+            let condition_binding = bindings.next_binding();
+            condition_block.assign(condition_binding, condition_value);
+            // ...and redirect it conditionally either to the body or the end
+            condition_block.finish_block(
+                state,
+                Branch::Conditional {
+                    flag: condition_binding,
+                    target_true: body_entrypoint,
+                    target_false: exit.block(),
+                },
+            );
+
+            // compile the body
+            let mut body = compile_statement(
+                state,
+                body_block,
+                bindings,
+                *body,
+                variables,
+                block_depth,
+                source_meta,
+            )
+            .map_err(|e| e.with_backup_source(body_span, source_meta))?;
+
+            // the loop body always 'ends' at the condition to know whether to continue or not.
+            body.finish_block(
+                state,
+                Branch::Unconditional {
+                    target: condition_entrypoint,
+                },
+            );
+
+            // we end at the exit point
+            Ok(exit)
+        }
+        ast::Statement::LoopBreak | ast::Statement::LoopContinue => {
+            // first, we'll have to
+            todo!("loop break/continue")
         }
         ast::Statement::Return((expr, expr_span)) => {
             let ret_value = bindings.next_binding();
