@@ -17,8 +17,15 @@ pub fn compile_statement<'code>(
         ast::Statement::Return((expr, expr_span)) => {
             let ret_value = bindings.next_binding();
             {
-                let (mut block, resulting_value) =
-                    expr::compile_expr(state, builder, expr, bindings, variables, source_meta)?;
+                let (mut block, resulting_value) = expr::compile_expr(
+                    state,
+                    builder,
+                    expr,
+                    bindings,
+                    variables,
+                    block_depth,
+                    source_meta,
+                )?;
                 block.assign(ret_value, resulting_value);
                 Ok(block)
             }
@@ -29,9 +36,16 @@ pub fn compile_statement<'code>(
         ast::Statement::SingleExpr((expr, expr_span)) => {
             // create a dummy target that may or may not be cleaned up later,
             // depending on what it does
-            let (mut block, result_expr) =
-                expr::compile_expr(state, builder, expr, bindings, variables, source_meta)
-                    .map_err(|e| e.with_backup_source(expr_span, source_meta))?;
+            let (mut block, result_expr) = expr::compile_expr(
+                state,
+                builder,
+                expr,
+                bindings,
+                variables,
+                block_depth,
+                source_meta,
+            )
+            .map_err(|e| e.with_backup_source(expr_span, source_meta))?;
             let dummy = bindings.next_binding();
             block.assign(dummy, result_expr);
             Ok(block)
@@ -44,9 +58,16 @@ pub fn compile_statement<'code>(
             builder.allocate(memory, 4); // all variables are 4-byte right now
                                          // compile init
             let builder = if let Some((init, init_span)) = init {
-                let (mut builder, expr) =
-                    expr::compile_expr(state, builder, init, bindings, variables, source_meta)
-                        .map_err(|e| e.with_backup_source(init_span, source_meta))?;
+                let (mut builder, expr) = expr::compile_expr(
+                    state,
+                    builder,
+                    init,
+                    bindings,
+                    variables,
+                    block_depth,
+                    source_meta,
+                )
+                .map_err(|e| e.with_backup_source(init_span, source_meta))?;
                 let compute_init = bindings.next_binding();
                 builder.assign(compute_init, expr);
                 builder.store(compute_init, memory, ByteSize::U32);
@@ -87,6 +108,7 @@ pub fn compile_statement<'code>(
                     condition_expr,
                     bindings,
                     variables,
+                    block_depth,
                     source_meta,
                 )
                 .map_err(|e| e.with_backup_source(condition_span, source_meta))?;

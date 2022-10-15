@@ -14,6 +14,7 @@ pub fn compile_expr<'code>(
     expr: ast::Expr<'code>,
     bindings: &mut BindingCounter,
     variables: &VariableTracker<'code>,
+    block_depth: usize,
     source_info: &SourceMetadata<'code>,
 ) -> Result<(BlockBuilder, Value), VarE> {
     match expr {
@@ -22,7 +23,7 @@ pub fn compile_expr<'code>(
             name: Source { source: name, .. },
         } => {
             let (variable_mem, variable_size) = *variables
-                .get(name)
+                .get(name, block_depth)
                 .ok_or_else(|| VarE::new(VarError::UnknownVariable(name.to_string())))?;
             Ok((
                 builder,
@@ -45,6 +46,7 @@ pub fn compile_expr<'code>(
                     *condition_expr,
                     bindings,
                     variables,
+                    block_depth,
                     source_info,
                 )
                 .map_err(|e| e.with_backup_source(condition_span, source_info))?;
@@ -56,9 +58,16 @@ pub fn compile_expr<'code>(
             let (compute_if_true, true_binding, true_head) = {
                 let builder = state.new_block();
                 let head = builder.block();
-                let (mut compute, expr_value) =
-                    compile_expr(state, builder, *true_expr, bindings, variables, source_info)
-                        .map_err(|e| e.with_backup_source(true_span, source_info))?;
+                let (mut compute, expr_value) = compile_expr(
+                    state,
+                    builder,
+                    *true_expr,
+                    bindings,
+                    variables,
+                    block_depth,
+                    source_info,
+                )
+                .map_err(|e| e.with_backup_source(true_span, source_info))?;
                 let value_binding = bindings.next_binding();
                 compute.assign(value_binding, expr_value);
                 (compute, value_binding, head)
@@ -73,6 +82,7 @@ pub fn compile_expr<'code>(
                     *false_expr,
                     bindings,
                     variables,
+                    block_depth,
                     source_info,
                 )
                 .map_err(|e| e.with_backup_source(false_span, source_info))?;
@@ -113,9 +123,16 @@ pub fn compile_expr<'code>(
             expr: (expr, expr_span),
         } => {
             let expr_target = bindings.next_binding();
-            let (mut end, expr_value) =
-                compile_expr(state, builder, *expr, bindings, variables, source_info)
-                    .map_err(|e| e.with_backup_source(expr_span, source_info))?;
+            let (mut end, expr_value) = compile_expr(
+                state,
+                builder,
+                *expr,
+                bindings,
+                variables,
+                block_depth,
+                source_info,
+            )
+            .map_err(|e| e.with_backup_source(expr_span, source_info))?;
             end.assign(expr_target, expr_value);
             Ok((
                 end,
@@ -141,15 +158,29 @@ pub fn compile_expr<'code>(
         } => match operator {
             ast::BinaryOp::Arithmetic(arithmop) => {
                 // compute first lhs, then rhs
-                let (mut builder, lhs_result) =
-                    compile_expr(state, builder, *lhs_expr, bindings, variables, source_info)
-                        .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
+                let (mut builder, lhs_result) = compile_expr(
+                    state,
+                    builder,
+                    *lhs_expr,
+                    bindings,
+                    variables,
+                    block_depth,
+                    source_info,
+                )
+                .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
                 let lhs = bindings.next_binding();
                 builder.assign(lhs, lhs_result);
 
-                let (mut builder, rhs_result) =
-                    compile_expr(state, builder, *rhs_expr, bindings, variables, source_info)
-                        .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
+                let (mut builder, rhs_result) = compile_expr(
+                    state,
+                    builder,
+                    *rhs_expr,
+                    bindings,
+                    variables,
+                    block_depth,
+                    source_info,
+                )
+                .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
                 let rhs = bindings.next_binding();
                 builder.assign(rhs, rhs_result);
                 let result = compile_arithmetic(&mut builder, bindings, arithmop, lhs, rhs);
@@ -157,15 +188,29 @@ pub fn compile_expr<'code>(
             }
             ast::BinaryOp::Bit(bitop) => {
                 // compute first lhs, then rhs
-                let (mut builder, lhs_result) =
-                    compile_expr(state, builder, *lhs_expr, bindings, variables, source_info)
-                        .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
+                let (mut builder, lhs_result) = compile_expr(
+                    state,
+                    builder,
+                    *lhs_expr,
+                    bindings,
+                    variables,
+                    block_depth,
+                    source_info,
+                )
+                .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
                 let lhs = bindings.next_binding();
                 builder.assign(lhs, lhs_result);
 
-                let (mut builder, rhs_result) =
-                    compile_expr(state, builder, *rhs_expr, bindings, variables, source_info)
-                        .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
+                let (mut builder, rhs_result) = compile_expr(
+                    state,
+                    builder,
+                    *rhs_expr,
+                    bindings,
+                    variables,
+                    block_depth,
+                    source_info,
+                )
+                .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
 
                 let rhs = bindings.next_binding();
                 builder.assign(rhs, rhs_result);
@@ -175,16 +220,30 @@ pub fn compile_expr<'code>(
             }
             ast::BinaryOp::Relational(relational) => {
                 // compute first lhs, then rhs
-                let (mut builder, lhs_result) =
-                    compile_expr(state, builder, *lhs_expr, bindings, variables, source_info)
-                        .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
+                let (mut builder, lhs_result) = compile_expr(
+                    state,
+                    builder,
+                    *lhs_expr,
+                    bindings,
+                    variables,
+                    block_depth,
+                    source_info,
+                )
+                .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
 
                 let lhs = bindings.next_binding();
                 builder.assign(lhs, lhs_result);
 
-                let (mut builder, rhs_result) =
-                    compile_expr(state, builder, *rhs_expr, bindings, variables, source_info)
-                        .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
+                let (mut builder, rhs_result) = compile_expr(
+                    state,
+                    builder,
+                    *rhs_expr,
+                    bindings,
+                    variables,
+                    block_depth,
+                    source_info,
+                )
+                .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
                 let rhs = bindings.next_binding();
                 builder.assign(rhs, rhs_result);
                 let result = relational_as_value(relational, lhs, rhs);
@@ -192,9 +251,16 @@ pub fn compile_expr<'code>(
             }
             ast::BinaryOp::Logic(logicop) => {
                 // lhs is going to be computed straight ahead
-                let (mut lhs_builder, lhs_result) =
-                    compile_expr(state, builder, *lhs_expr, bindings, variables, source_info)
-                        .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
+                let (mut lhs_builder, lhs_result) = compile_expr(
+                    state,
+                    builder,
+                    *lhs_expr,
+                    bindings,
+                    variables,
+                    block_depth,
+                    source_info,
+                )
+                .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
 
                 let lhs = bindings.next_binding();
                 lhs_builder.assign(lhs, lhs_result);
@@ -203,9 +269,16 @@ pub fn compile_expr<'code>(
                 let (rhs_builder, compute_rhs, rhs) = {
                     let block = state.new_block();
                     let start = block.block(); // make sure that lhs jumps to the *start* of rhs's computation
-                    let (mut rhs_block, rhs_value) =
-                        compile_expr(state, block, *rhs_expr, bindings, variables, source_info)
-                            .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
+                    let (mut rhs_block, rhs_value) = compile_expr(
+                        state,
+                        block,
+                        *rhs_expr,
+                        bindings,
+                        variables,
+                        block_depth,
+                        source_info,
+                    )
+                    .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
                     let rhs = bindings.next_binding();
                     rhs_block.assign(rhs, rhs_value);
 
@@ -270,14 +343,21 @@ pub fn compile_expr<'code>(
             }
             ast::BinaryOp::Assignment { op } => {
                 // compute rhs
-                let (mut builder, rhs_value) =
-                    compile_expr(state, builder, *rhs_expr, bindings, variables, source_info)
-                        .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
+                let (mut builder, rhs_value) = compile_expr(
+                    state,
+                    builder,
+                    *rhs_expr,
+                    bindings,
+                    variables,
+                    block_depth,
+                    source_info,
+                )
+                .map_err(|e| e.with_backup_source(rhs_span, source_info))?;
 
                 let rhs = bindings.next_binding();
                 builder.assign(rhs, rhs_value);
 
-                let (lhs_mem, lhs_size) = expr_as_ptr(*lhs_expr, variables)
+                let (lhs_mem, lhs_size) = expr_as_ptr(*lhs_expr, variables, block_depth)
                     .map_err(|e| e.with_backup_source(lhs_span, source_info))?;
                 let result_binding = if let Some(assignment_enabled) = op {
                     // 1. read the memory
@@ -306,12 +386,13 @@ pub fn compile_expr<'code>(
 fn expr_as_ptr<'code>(
     expr: ast::Expr<'code>,
     variables: &VariableTracker<'code>,
+    block_depth: usize,
 ) -> Result<(Binding, ByteSize), VarE> {
     match expr {
         ast::Expr::Variable {
             name: Source { source: name, .. },
         } => variables
-            .get(name)
+            .get(name, block_depth)
             .ok_or_else(|| VarE::new(VarError::UnknownVariable(name.to_string())))
             .copied(),
 

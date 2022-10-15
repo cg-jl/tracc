@@ -224,8 +224,8 @@ impl<'code> VariableTracker<'code> {
             memories: Vec::new(),
         }
     }
-    pub fn get(&self, name: &str) -> Option<&(Binding, ByteSize)> {
-        self.memories
+    pub fn get(&self, name: &str, depth: usize) -> Option<&(Binding, ByteSize)> {
+        self.memories[..=depth]
             .iter()
             .rev()
             .fold(None, |acc, next| acc.or_else(|| next.get(name)))
