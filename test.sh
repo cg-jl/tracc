@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # TODO capture output for errors
 
 try_run() {
@@ -7,7 +7,7 @@ try_run() {
 
 # source dest
 try_compile_with_gcc() {
-    try_run "~/sdks/gcc-arm/bin/gcc -static -o $2 $1"
+    try_run "~/sdks/gcc-arm/bin/aarch64-none-linux-gnu-gcc -static -o $2 $1"
 }
 
 try_compile_with_project() {
