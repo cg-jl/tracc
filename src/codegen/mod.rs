@@ -25,6 +25,15 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
 
     let alloc_map = memory::make_alloc_map(&ir.code);
 
+    alloc_map.keys().cloned().for_each(|allocated_binding| {
+        registers.insert(allocated_binding, assembly::RegisterID::StackPointer);
+        completely_spilled.remove(&allocated_binding);
+    });
+
+    debug_assert!(completely_spilled.is_empty(), "shouldn't have any spills");
+
+    let (memory, mem_size) = memory::figure_out_allocations(&ir, alloc_map);
+
     for binding in registers.iter().filter_map(|(binding, reg)| {
         if matches!(reg, assembly::RegisterID::ZeroRegister) {
             Some(*binding)
@@ -35,16 +44,6 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
         // UNSAFE: the binding is allocated to a read-only register.
         unsafe { crate::intermediate::refactor::remove_binding(&mut ir, binding) };
     }
-
-    alloc_map.keys().cloned().for_each(|allocated_binding| {
-        registers.insert(allocated_binding, assembly::RegisterID::StackPointer);
-        completely_spilled.remove(&allocated_binding);
-    });
-
-    debug_assert!(completely_spilled.is_empty(), "shouldn't have any spills");
-
-    let (memory, mem_size) =
-        memory::figure_out_allocations(&ir, alloc_map, &lifetimes, &collisions);
 
     debug_assert!(save_upon_call.is_empty(), "TODO: implement save upon call");
 
