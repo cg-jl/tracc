@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::ops::ControlFlow;
+
+use self::lifetimes::BlockAddress;
 
 use super::{BasicBlock, Binding, BlockBinding, BranchingMap, Statement, Value, IR};
 mod binding_usage;
@@ -73,8 +76,63 @@ pub fn is_indirect_child_of(
     if possible_child == possible_parent {
         false
     } else {
-        antecessors(ir, possible_parent).any(|indirect_child| indirect_child == possible_child)
+        antecessors(ir, possible_child).any(|indirect_parent| indirect_parent == possible_parent)
     }
+}
+
+pub fn statements_with_addresses<'i>(
+    ir: &'i IR,
+) -> impl Iterator<Item = (&'i Statement, BlockAddress)> + '_ {
+    ir.code.iter().enumerate().flat_map(|(block_index, block)| {
+        block
+            .statements
+            .iter()
+            .enumerate()
+            .map(move |(statement_index, statement)| {
+                (
+                    statement,
+                    BlockAddress {
+                        block: BlockBinding(block_index),
+                        statement: statement_index,
+                    },
+                )
+            })
+    })
+}
+
+// TODO: register where each binding is declared when inserting blocks
+pub fn find_assignment_value_with_adress(
+    code: &[BasicBlock],
+    binding: Binding,
+) -> Option<(&Value, lifetimes::BlockAddress)> {
+    code.iter()
+        .enumerate()
+        .flat_map(|(block_i, block)| {
+            block
+                .statements
+                .iter()
+                .enumerate()
+                .map(move |(statement_i, stmt)| {
+                    (
+                        lifetimes::BlockAddress {
+                            block: BlockBinding(block_i),
+                            statement: statement_i,
+                        },
+                        stmt,
+                    )
+                })
+        })
+        .find_map(|(address, stmt)| {
+            if let Statement::Assign { index, value } = stmt {
+                if index == &binding {
+                    Some((value, address))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
 }
 
 pub fn find_assignment_value(code: &[BasicBlock], binding: Binding) -> Option<&Value> {
@@ -137,6 +195,7 @@ impl<'code> Iterator for BottomTopTraversal<'code> {
     type Item = BlockBinding;
     fn next(&mut self) -> Option<Self::Item> {
         let next = self.queue.pop()?;
+        dbg!(next);
         self.visited.insert(next);
         let visited_ref = &self.visited;
         let parents = self

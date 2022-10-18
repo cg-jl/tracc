@@ -70,29 +70,26 @@ pub fn compute_lifetimes(ir: &IR) -> LifetimeMap {
 
 pub type CollisionMap = HashMap<Binding, HashSet<Binding>>;
 
-pub fn compute_lifetime_collisions(ir: &IR) -> (CollisionMap, LifetimeMap) {
+pub fn compute_lifetime_collisions(ir: &IR) -> CollisionMap {
     let lifetime_map = compute_lifetimes(ir);
-    (
-        lifetime_map
-            .iter()
-            .map(|(k, lifetime)| {
-                (
-                    *k,
-                    lifetime_map
-                        .iter()
-                        .filter_map(|(k2, l2)| {
-                            if k2 != k && lifetime.intersects(l2, ir) {
-                                Some(*k2)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                )
-            })
-            .collect(),
-        lifetime_map,
-    )
+    lifetime_map
+        .iter()
+        .map(|(k, lifetime)| {
+            (
+                *k,
+                lifetime_map
+                    .iter()
+                    .filter_map(|(k2, l2)| {
+                        if k2 != k && lifetime.intersects(l2, ir) {
+                            Some(*k2)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
 }
 
 pub fn get_defs(ir: &IR) -> impl Iterator<Item = (Binding, BlockAddress)> + '_ {
@@ -280,10 +277,87 @@ pub struct BlockAddress {
     pub statement: usize,
 }
 
+impl BlockAddress {
+    pub fn happens_before(self: Self, ir: &IR, other: Self) -> bool {
+        // A happens before B if:
+        // - the block that B happens in has A's block as a predecessor.
+        // or:
+        // - it happens before B in the same block
+        if self.block == other.block {
+            self.statement < other.statement
+        } else {
+            analysis::antecessors(ir, self.block).any(|i| i == other.block)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::intermediate::*;
+    mod block_address {
+        use super::*;
+
+        #[test]
+        fn happens_before_same_block() {
+            let ir = IR::from(vec![BasicBlock {
+                statements: vec![
+                    Statement::Assign {
+                        index: Binding(0),
+                        value: Value::Constant(2),
+                    },
+                    Statement::Assign {
+                        index: Binding(1),
+                        value: Value::Constant(3),
+                    },
+                    Statement::Assign {
+                        index: Binding(2),
+                        value: Value::Multiply {
+                            lhs: Binding(0),
+                            rhs: Binding(1).into(),
+                        },
+                    },
+                ],
+                end: BlockEnd::Return(Binding(2)),
+            }]);
+
+            let defs: HashMap<_, _> = get_defs(&ir).collect();
+
+            assert!(defs[&Binding(0)].happens_before(&ir, defs[&Binding(1)]));
+            assert!(!defs[&Binding(1)].happens_before(&ir, defs[&Binding(0)]));
+        }
+
+        #[test]
+        fn happens_before_loop() {
+            let ir = IR::from(vec![
+                BasicBlock {
+                    statements: vec![Statement::Assign {
+                        index: Binding(0),
+                        value: Value::Constant(2),
+                    }],
+                    end: Branch::Unconditional {
+                        target: BlockBinding(1),
+                    }
+                    .into(),
+                },
+                BasicBlock {
+                    statements: vec![Statement::Assign {
+                        index: Binding(1),
+                        value: Value::Constant(3),
+                    }],
+                    end: Branch::Unconditional {
+                        target: BlockBinding(0),
+                    }
+                    .into(),
+                },
+            ]);
+
+            let defs: HashMap<_, _> = get_defs(&ir).collect();
+
+            assert!(defs[&Binding(0)].happens_before(&ir, defs[&Binding(1)]));
+            assert!(defs[&Binding(1)].happens_before(&ir, defs[&Binding(0)]));
+        }
+    }
     // TODO: more tests on intersections:
     //  - different blocks, collides
     //  - different blocks, different branches
@@ -412,7 +486,7 @@ mod tests {
     fn compile_source_into_ir(source: &str) -> anyhow::Result<crate::intermediate::IR> {
         let meta = crate::error::SourceMetadata::new(source).with_file("<test program>".into());
         let program = crate::grammar::Parser::new(&meta).parse()?;
-        let (_function_name, ir) = crate::intermediate::generate::compile_program(program, &meta)?;
+        let (_function_name, ir) = crate::intermediate::generate::compile_function(program, &meta)?;
         Ok(ir)
     }
 
