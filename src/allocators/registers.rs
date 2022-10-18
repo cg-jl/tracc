@@ -625,7 +625,7 @@ mod tests {
     fn compile_source_into_ir(source: &str) -> anyhow::Result<crate::intermediate::IR> {
         let meta = crate::error::SourceMetadata::new(source).with_file("<test program>".into());
         let program = crate::grammar::Parser::new(&meta).parse()?;
-        let (_function_name, ir) = crate::intermediate::generate::compile_program(program, &meta)?;
+        let (_function_name, ir) = crate::intermediate::generate::compile_function(program, &meta)?;
         Ok(ir)
     }
 
@@ -638,7 +638,8 @@ int main() {
 }"#,
         )
         .unwrap();
-        let collisions = crate::intermediate::analysis::compute_lifetime_collisions(&ir);
+        let collisions =
+            crate::intermediate::analysis::compute_lifetime_collisions(&ir);
         // TODO: test traversal for allocator hints
         let hints = make_allocator_hints(&ir);
         let result = alloc_registers(

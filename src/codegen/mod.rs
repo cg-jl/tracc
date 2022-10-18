@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
-    let (collisions, lifetimes) = crate::intermediate::analysis::compute_lifetime_collisions(&ir);
+    let collisions = crate::intermediate::analysis::compute_lifetime_collisions(&ir);
     // TODO: integrate register spill output
     let registers::CodegenHints {
         need_move_to_return_reg,
