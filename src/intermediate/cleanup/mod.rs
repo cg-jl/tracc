@@ -22,11 +22,12 @@ pub fn remove_unused_bindings(ir: &mut IR) {
     // #2 Catch all the binding dependencies
 
     use super::analysis::BindingUsage;
-    let deps: HashSet<Binding> = ir
-        .code
-        .iter()
-        .flat_map(|block: &BasicBlock| block.binding_deps())
-        .collect();
+
+    let mut deps = HashSet::new();
+    ir.visit_value_bindings(&mut |dep| {
+        deps.insert(dep);
+        std::ops::ControlFlow::<(), ()>::Continue(())
+    });
 
     // #3. Anything defined but not depended on is unused
     let unused = defs

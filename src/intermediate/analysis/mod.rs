@@ -17,14 +17,13 @@ pub use binding_usage::{get_usage_map, BindingUsage, UsageMap};
 pub fn order_by_deps(ir: &IR, bindings: impl Iterator<Item = Binding>) -> Vec<Binding> {
     let mut all_bindings: BTreeMap<_, HashSet<_>> = bindings
         .map(|binding| {
-            (
-                binding,
-                find_assignment_value(&ir.code, binding)
-                    .unwrap()
-                    .binding_deps()
-                    .into_iter()
-                    .collect(),
-            )
+            let assigned_value = find_assignment_value(&ir.code, binding).unwrap();
+            let mut deps = HashSet::new();
+            assigned_value.visit_value_bindings(&mut |dep| {
+                deps.insert(dep);
+                std::ops::ControlFlow::<(), _>::Continue(())
+            });
+            (binding, deps)
         })
         .collect();
 

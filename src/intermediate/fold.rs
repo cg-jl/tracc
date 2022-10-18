@@ -134,14 +134,14 @@ fn find_potential_folds(code: &[Statement]) -> impl Iterator<Item = (usize, Bind
             found_constants.insert(*index, *c);
         }
         use super::analysis::BindingUsage;
-        let usages = statement.binding_deps();
         let found_constants = &found_constants;
-        folds.extend(usages.into_iter().filter_map(move |binding| {
-            found_constants
-                .get(&binding)
-                .cloned()
-                .map(|value| (index, binding, value))
-        }));
+
+        statement.visit_value_bindings(&mut |binding| {
+            if let Some(value) = found_constants.get(&binding).cloned() {
+                folds.push((index, binding, value));
+            }
+            std::ops::ControlFlow::<(), ()>::Continue(())
+        });
     }
     folds.into_iter()
 }

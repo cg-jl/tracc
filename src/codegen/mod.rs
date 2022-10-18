@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
-    let collisions = crate::intermediate::analysis::compute_lifetime_collisions(&ir);
+    let (collisions, lifetimes) = crate::intermediate::analysis::compute_lifetime_collisions(&ir);
     // TODO: integrate register spill output
     let registers::CodegenHints {
         need_move_to_return_reg,
@@ -43,7 +43,8 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
 
     debug_assert!(completely_spilled.is_empty(), "shouldn't have any spills");
 
-    let (memory, mem_size) = memory::figure_out_allocations(&ir, alloc_map, &collisions);
+    let (memory, mem_size) =
+        memory::figure_out_allocations(&ir, alloc_map, &lifetimes, &collisions);
 
     debug_assert!(save_upon_call.is_empty(), "TODO: implement save upon call");
 

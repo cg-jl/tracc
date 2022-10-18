@@ -1,5 +1,6 @@
 use crate::intermediate::{BasicBlock, BlockEnd, Branch, IR};
 use crate::intermediate::{Binding, CouldBeConstant, Statement, Value};
+use core::ops::ControlFlow;
 use std::collections::HashMap;
 use std::iter::FromIterator;
 
@@ -32,12 +33,13 @@ pub fn get_usage_map(ir: &IR) -> UsageMap {
                     .or_default()
                     .push(Usage::Store(*mem_binding)),
                 Statement::Assign { index, value } => {
-                    for dep in value.binding_deps() {
+                    value.visit_value_bindings(&mut |dep| {
                         usage_map
                             .entry(dep)
                             .or_default()
                             .push(Usage::Binding(*index));
-                    }
+                        ControlFlow::<(), _>::Continue(())
+                    });
                 }
             }
         }
@@ -57,7 +59,10 @@ pub trait BindingUsage {
     // Check if a binding is used
     fn contains_binding(&self, binding: Binding) -> bool;
     // Get all the dependencies
-    fn binding_deps(&self) -> Vec<Binding>;
+    fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
+        &self,
+        f: &mut F,
+    ) -> ControlFlow<B>;
 }
 
 impl BindingUsage for Binding {
@@ -65,8 +70,11 @@ impl BindingUsage for Binding {
         self == &binding
     }
 
-    fn binding_deps(&self) -> Vec<Binding> {
-        vec![*self]
+    fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
+        &self,
+        f: &mut F,
+    ) -> ControlFlow<B> {
+        f(*self)
     }
 }
 
@@ -78,8 +86,14 @@ impl BindingUsage for CouldBeConstant {
         }
     }
 
-    fn binding_deps(&self) -> Vec<Binding> {
-        Vec::from_iter(self.as_binding())
+    fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
+        &self,
+        f: &mut F,
+    ) -> ControlFlow<B> {
+        match self {
+            CouldBeConstant::Binding(b) => b.visit_value_bindings(f),
+            CouldBeConstant::Constant(_) => ControlFlow::Continue(()),
+        }
     }
 }
 
@@ -120,10 +134,13 @@ impl BindingUsage for Value {
         }
     }
 
-    fn binding_deps(&self) -> Vec<Binding> {
+    fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
+        &self,
+        f: &mut F,
+    ) -> ControlFlow<B> {
         match self {
-            Value::Constant(_) | Value::Allocate { size: _ } => vec![],
-            Value::Phi { nodes } => nodes.iter().map(|node| node.value).collect(),
+            Value::Constant(_) | Value::Allocate { size: _ } => ControlFlow::Continue(()),
+            Value::Phi { nodes } => nodes.iter().try_for_each(|node| f(node.value)),
             Value::Add { lhs, rhs }
             | Value::Subtract { lhs, rhs }
             | Value::Multiply { lhs, rhs }
@@ -141,29 +158,22 @@ impl BindingUsage for Value {
                 condition: _,
                 lhs,
                 rhs,
-            } => Some(*lhs).into_iter().chain(rhs.as_binding()).collect(),
+            } => {
+                f(*lhs)?;
+                rhs.visit_value_bindings(f)
+            }
             Value::Load {
                 mem_binding,
                 byte_size: _,
-            } => vec![*mem_binding],
+            } => f(*mem_binding),
             Value::Binding(binding) | Value::Negate { binding } | Value::FlipBits { binding } => {
-                vec![*binding]
+                f(*binding)
             }
         }
     }
 }
 
 impl BindingUsage for Statement {
-    fn binding_deps(&self) -> Vec<Binding> {
-        match self {
-            Self::Store {
-                byte_size: _,
-                mem_binding,
-                binding,
-            } => vec![*mem_binding, *binding],
-            Self::Assign { index: _, value } => value.binding_deps(),
-        }
-    }
     fn contains_binding(&self, target: Binding) -> bool {
         match self {
             Self::Store {
@@ -174,22 +184,26 @@ impl BindingUsage for Statement {
             Self::Assign { index: _, value } => value.contains_binding(target),
         }
     }
+
+    fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
+        &self,
+        f: &mut F,
+    ) -> ControlFlow<B> {
+        match self {
+            Self::Store {
+                mem_binding,
+                binding,
+                byte_size: _,
+            } => {
+                f(*binding)?;
+                f(*mem_binding)
+            }
+            Self::Assign { index: _, value } => value.visit_value_bindings(f),
+        }
+    }
 }
 
 impl BindingUsage for BasicBlock {
-    fn binding_deps(&self) -> Vec<Binding> {
-        let mut output: Vec<_> = self
-            .statements
-            .iter()
-            .flat_map(|statement| statement.binding_deps())
-            .collect();
-        match self.end {
-            BlockEnd::Branch(Branch::Conditional { flag, .. }) => output.push(flag),
-            BlockEnd::Return(ret) => output.push(ret),
-            _ => (),
-        }
-        output
-    }
     fn contains_binding(&self, binding: Binding) -> bool {
         let is_in_end = match self.end {
             BlockEnd::Branch(Branch::Conditional { flag, .. }) => flag == binding,
@@ -201,5 +215,35 @@ impl BindingUsage for BasicBlock {
                 .statements
                 .iter()
                 .any(|statement| statement.contains_binding(binding)))
+    }
+
+    fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
+        &self,
+        f: &mut F,
+    ) -> ControlFlow<B> {
+        self.statements
+            .iter()
+            .try_for_each(|s| s.visit_value_bindings(f))?;
+
+        match &self.end {
+            BlockEnd::Branch(Branch::Conditional { flag, .. }) => f(*flag),
+            BlockEnd::Return(ret) => f(*ret),
+            _ => ControlFlow::Continue(()),
+        }
+    }
+}
+
+impl BindingUsage for IR {
+    fn contains_binding(&self, binding: Binding) -> bool {
+        true
+    }
+
+    fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
+        &self,
+        f: &mut F,
+    ) -> ControlFlow<B> {
+        self.code
+            .iter()
+            .try_for_each(|block| block.visit_value_bindings(f))
     }
 }

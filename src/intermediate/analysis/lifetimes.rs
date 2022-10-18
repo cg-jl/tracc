@@ -70,26 +70,29 @@ pub fn compute_lifetimes(ir: &IR) -> LifetimeMap {
 
 pub type CollisionMap = HashMap<Binding, HashSet<Binding>>;
 
-pub fn compute_lifetime_collisions(ir: &IR) -> CollisionMap {
+pub fn compute_lifetime_collisions(ir: &IR) -> (CollisionMap, LifetimeMap) {
     let lifetime_map = compute_lifetimes(ir);
-    lifetime_map
-        .iter()
-        .map(|(k, lifetime)| {
-            (
-                *k,
-                lifetime_map
-                    .iter()
-                    .filter_map(|(k2, l2)| {
-                        if k2 != k && lifetime.intersects(l2, ir) {
-                            Some(*k2)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
-            )
-        })
-        .collect()
+    (
+        lifetime_map
+            .iter()
+            .map(|(k, lifetime)| {
+                (
+                    *k,
+                    lifetime_map
+                        .iter()
+                        .filter_map(|(k2, l2)| {
+                            if k2 != k && lifetime.intersects(l2, ir) {
+                                Some(*k2)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
+                )
+            })
+            .collect(),
+        lifetime_map,
+    )
 }
 
 pub fn get_defs(ir: &IR) -> impl Iterator<Item = (Binding, BlockAddress)> + '_ {
@@ -122,11 +125,12 @@ fn get_lifetime_ends(ir: &IR) -> HashMap<Binding, Vec<BlockAddress>> {
         for (block_binding, block) in analysis::iterate_with_bindings(&ir.code) {
             for (statement_index, statement) in block.statements.iter().enumerate() {
                 use analysis::BindingUsage;
-                for dep in statement.binding_deps() {
+                statement.visit_value_bindings(&mut |dep| {
                     map.entry(dep)
                         .or_default()
                         .insert(block_binding, statement_index);
-                }
+                    std::ops::ControlFlow::<(), _>::Continue(())
+                });
             }
             match &block.end {
                 BlockEnd::Branch(Branch::Conditional { flag, .. }) => {
