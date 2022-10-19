@@ -40,7 +40,6 @@ impl BindingUsage for Value {
             }
             | Value::Add { lhs, rhs }
             | Value::Subtract { lhs, rhs }
-            | Value::Multiply { lhs, rhs }
             | Value::Lsl { lhs, rhs }
             | Value::Lsr { lhs, rhs }
             | Value::And { lhs, rhs }
@@ -53,7 +52,8 @@ impl BindingUsage for Value {
             Value::Negate { binding: other } | Value::FlipBits { binding: other } => {
                 other.uses_binding(binding)
             }
-            Value::Divide {
+            Value::Multiply { lhs, rhs }
+            | Value::Divide {
                 lhs,
                 rhs,
                 is_signed: _,

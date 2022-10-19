@@ -114,7 +114,7 @@ pub enum Instruction {
     Mul {
         target: Register,
         lhs: Register,
-        rhs: Data,
+        rhs: Register,
     },
     /// Divide two signed numbers
     Div {

@@ -102,7 +102,7 @@ pub enum Value {
     },
     Multiply {
         lhs: Binding,
-        rhs: CouldBeConstant,
+        rhs: Binding,
     },
     // NOTE: `rhs` should be a binding since `udiv` only accepts registers.
     Divide {

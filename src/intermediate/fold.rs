@@ -433,14 +433,7 @@ fn value_propagate_constant(
                 _ => None,
             }
         }.ok_or(value).into(),
-        Value::Multiply { lhs, rhs } => match rhs {
-            CouldBeConstant::Constant(c) => known_constants.get(&lhs).copied().map(|a| a.wrapping_sub(c).into()),
-            CouldBeConstant::Binding(rhs) => match (get_known(known_constants, lhs), get_known(known_constants, rhs)) {
-                (Ok(a), Ok(b)) => Some(a.wrapping_mul(b).into()),
-                (Err(lhs), Ok(rhs)) | (Ok(rhs), Err(lhs)) => Some(Value::Multiply { lhs, rhs: rhs.into() }),
-                _ => None
-            }
-        }.ok_or(value).into(),
+        Value::Multiply { lhs, rhs } => both(known_constants.get(&lhs).copied(), known_constants.get(&rhs).copied()).map(|(a, b)| a.wrapping_mul(b)).ok_or(value).into(),
         // NOTE: when dividing by zero, don't fold it. The expression is UB so we'll
         // let the user shoot themselves in the foot and insert a division by zero.
         Value::Divide {

@@ -57,7 +57,6 @@ impl Rename for Value {
             }
             Value::Add { lhs, rhs }
             | Value::Subtract { lhs, rhs }
-            | Value::Multiply { lhs, rhs }
             | Value::Lsl { lhs, rhs }
             | Value::Lsr { lhs, rhs }
             | Value::And { lhs, rhs }
@@ -66,7 +65,8 @@ impl Rename for Value {
                 lhs.rename(target, rename_as);
                 rhs.rename(target, rename_as);
             }
-            Value::Divide {
+            Value::Multiply { lhs, rhs }
+            | Value::Divide {
                 lhs,
                 rhs,
                 is_signed: _,

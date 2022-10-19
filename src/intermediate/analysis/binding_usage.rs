@@ -106,7 +106,6 @@ impl BindingUsage for Value {
                 .any(|node| node.value.contains_binding(search_target)),
             Value::Add { lhs, rhs }
             | Value::Subtract { lhs, rhs }
-            | Value::Multiply { lhs, rhs }
             | Value::Lsl { lhs, rhs }
             | Value::Lsr { lhs, rhs }
             | Value::And { lhs, rhs }
@@ -124,7 +123,8 @@ impl BindingUsage for Value {
             Value::FlipBits { binding } | Value::Negate { binding } => {
                 binding.contains_binding(search_target)
             }
-            Value::Divide {
+            Value::Multiply { lhs, rhs }
+            | Value::Divide {
                 lhs,
                 rhs,
                 is_signed: _,
@@ -143,7 +143,6 @@ impl BindingUsage for Value {
             Value::Phi { nodes } => nodes.iter().try_for_each(|node| f(node.value)),
             Value::Add { lhs, rhs }
             | Value::Subtract { lhs, rhs }
-            | Value::Multiply { lhs, rhs }
             | Value::Lsl { lhs, rhs }
             | Value::Lsr { lhs, rhs }
             | Value::And { lhs, rhs }
@@ -157,7 +156,8 @@ impl BindingUsage for Value {
                 f(*lhs)?;
                 rhs.visit_value_bindings(f)
             }
-            Value::Divide {
+            Value::Multiply { lhs, rhs }
+            | Value::Divide {
                 lhs,
                 rhs,
                 is_signed: _,
