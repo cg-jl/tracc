@@ -32,7 +32,7 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
 
     debug_assert!(completely_spilled.is_empty(), "shouldn't have any spills");
 
-    let (memory, mem_size) = memory::figure_out_allocations(&ir, alloc_map);
+    let (memory, mem_size) = memory::figure_out_allocations(&ir, alloc_map, &collisions);
 
     for binding in registers.iter().filter_map(|(binding, reg)| {
         if matches!(reg, assembly::RegisterID::ZeroRegister) {

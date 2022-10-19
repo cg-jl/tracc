@@ -30,13 +30,21 @@ use crate::intermediate::analysis;
 
 type AllocMap = HashMap<Binding, usize>;
 
-pub fn figure_out_allocations(ir: &IR, allocations_needed: AllocMap) -> (MemoryMap, usize) {
+pub fn figure_out_allocations(
+    ir: &IR,
+    allocations_needed: AllocMap,
+    lifetime_collisions: &analysis::lifetimes::CollisionMap,
+) -> (MemoryMap, usize) {
+    log::debug!("requested allocations: {allocations_needed:?}");
+
     let collision_map = compute_memory_collisions(ir);
 
-    //log::debug!("lifetimes: {lifetime_map:#?}");
+    log::debug!("allocation collisions: {collision_map:?}");
+    log::debug!("lifetime collisions: {lifetime_collisions:?}");
 
     let mut local_collisions: Vec<(_, HashSet<_>)> = collision_map
         .iter()
+        .chain(lifetime_collisions.into_iter())
         .filter_map(|(k, set)| {
             if allocations_needed.contains_key(k) {
                 Some((
