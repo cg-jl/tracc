@@ -368,7 +368,7 @@ fn compile_value(
         } => assembly::Instruction::Div {
             target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
             lhs: assembly::Register::from_id(registers[&lhs], assembly::BitSize::Bit32),
-            rhs: could_be_constant_to_data(rhs, registers),
+            rhs: assembly::Register::from_id(registers[&rhs], assembly::BitSize::Bit32),
             signed: is_signed,
         }
         .into(),

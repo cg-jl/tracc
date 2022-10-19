@@ -120,7 +120,7 @@ pub enum Instruction {
     Div {
         target: Register,
         lhs: Register,
-        rhs: Data,
+        rhs: Register,
         signed: bool,
     },
     /// Logical shift left

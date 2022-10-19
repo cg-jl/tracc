@@ -120,7 +120,7 @@ fn merge_blocks(
     // TODO: set predecessor to the other basic block in the predecessor if there's a loop between
 }
 
-fn find_potential_folds(code: &[Statement]) -> impl Iterator<Item = (usize, Binding, i32)> {
+fn find_potential_folds(code: &[Statement]) -> (Vec<(usize, Binding, i32)>, HashMap<Binding, i32>) {
     let mut found_constants = HashMap::new();
 
     let mut folds = Vec::new();
@@ -143,7 +143,7 @@ fn find_potential_folds(code: &[Statement]) -> impl Iterator<Item = (usize, Bind
             std::ops::ControlFlow::<(), ()>::Continue(())
         });
     }
-    folds.into_iter()
+    (folds, found_constants)
 }
 
 fn fold_block(ir: &mut IR, block: BlockBinding) {
@@ -152,14 +152,14 @@ fn fold_block(ir: &mut IR, block: BlockBinding) {
     let mut failed_folds: HashMap<usize, HashSet<(Binding, i32)>> = HashMap::new();
     loop {
         // collect into a vec to avoid reference issues
-        let mut potential_folds: Vec<_> = find_potential_folds(&ir[block].statements)
-            .filter(|(index, binding, value)| {
-                failed_folds
-                    .get(index)
-                    .filter(|set| set.contains(&(*binding, *value)))
-                    .is_none()
-            })
-            .collect();
+        let (mut potential_folds, found_constants) = find_potential_folds(&ir[block].statements);
+
+        potential_folds.retain(|(index, binding, value)| {
+            failed_folds
+                .get(index)
+                .filter(|set| set.contains(&(*binding, *value)))
+                .is_none()
+        });
 
         if potential_folds.is_empty() {
             break;
@@ -180,7 +180,7 @@ fn fold_block(ir: &mut IR, block: BlockBinding) {
             let PropagationResult {
                 value: new_statement,
                 modified,
-            } = statement_propagate_constant(binding, value, old_statement);
+            } = statement_propagate_constant(&found_constants, old_statement);
             // if the statement was modified, that means this fold succeeded, ot least partially.
             // Therefore we're going to forget all the previous bod folds from this index, to try
             // those unsucceeded folds again.
@@ -225,11 +225,31 @@ struct PropagationResult<T> {
     modified: bool,
 }
 
+impl<T, U, E> From<Result<U, E>> for PropagationResult<T>
+where
+    T: From<U>,
+    T: From<E>,
+{
+    fn from(value: Result<U, E>) -> Self {
+        match value {
+            Ok(v) => Self::modified(v.into()),
+            Err(v) => Self::unchanged(v.into()),
+        }
+    }
+}
+
 impl<T> PropagationResult<T> {
     fn map<U>(self, f: impl FnOnce(T) -> U) -> PropagationResult<U> {
         PropagationResult {
             value: f(self.value),
             modified: self.modified,
+        }
+    }
+
+    fn from_result(res: Result<T, T>) -> Self {
+        match res {
+            Ok(value) => Self::modified(value),
+            Err(value) => Self::unchanged(value),
         }
     }
 
@@ -249,15 +269,12 @@ impl<T> PropagationResult<T> {
 }
 
 fn statement_propagate_constant(
-    known_binding: Binding,
-    known_value: i32,
+    known_constants: &HashMap<Binding, i32>,
     statement: Statement,
 ) -> PropagationResult<Statement> {
     match statement {
-        Statement::Assign { index, value } => {
-            value_propagate_constant(known_binding, known_value, value)
-                .map(|value| Statement::Assign { index, value })
-        }
+        Statement::Assign { index, value } => value_propagate_constant(known_constants, value)
+            .map(|value| Statement::Assign { index, value }),
         // stores can't be folded further.
         Statement::Store { .. } => PropagationResult::unchanged(statement),
     }
@@ -291,8 +308,7 @@ impl<T> FromIterator<PropagationResult<T>> for PropagationResult<Vec<T>> {
 
 #[allow(unused)]
 fn value_propagate_constant(
-    known_binding: Binding,
-    binding_value: i32,
+    known_constants: &HashMap<Binding, i32>,
     value: Value,
 ) -> PropagationResult<Value> {
     match value {
@@ -353,36 +369,33 @@ fn value_propagate_constant(
                 }
             }
             match rhs {
-                CouldBeConstant::Constant(ctant) if lhs == known_binding => {
+                CouldBeConstant::Constant(ctant) if let Some(value) = known_constants.get(&lhs) => {
                     PropagationResult::modified(Value::Constant(eval_condition(
                         condition,
-                        binding_value,
+                        *value,
                         ctant,
                     )))
                 }
                 CouldBeConstant::Binding(other) => {
-                    if lhs == known_binding && other == known_binding {
-                        PropagationResult::modified(Value::Constant(eval_condition(
-                            condition,
-                            binding_value,
-                            binding_value,
-                        )))
-                    } else if other == known_binding {
-                        // we know half the thing.
-                        PropagationResult::modified(Value::Cmp {
+
+                    let known_lhs = known_constants.get(&lhs).ok_or(lhs);
+                    let known_rhs = known_constants.get(&other).ok_or(other);
+
+                    match (known_lhs, known_rhs) {
+                        (Ok(lhs), Ok(rhs)) => PropagationResult::modified(Value::Constant(eval_condition(condition, *lhs, *rhs))),
+                        // we have half the thing
+                        (Err(lhs), Ok(rhs)) => PropagationResult::modified(Value::Cmp {
                             condition,
                             lhs,
-                            rhs: CouldBeConstant::Constant(binding_value),
-                        })
-                    } else if lhs == known_binding && condition.is_commutative() {
-                        // if the condition is commutative, we can flip the thing.
-                        PropagationResult::modified(Value::Cmp {
+                            rhs: (*rhs).into(),
+                        }),
+                        // if the condition is commutative, we can flip the arguments
+                        (Ok(&rhs), Err(lhs)) if condition.is_commutative() => PropagationResult::modified(Value::Cmp {
                             condition,
-                            lhs: other,
-                            rhs: CouldBeConstant::Constant(binding_value),
-                        })
-                    } else {
-                        PropagationResult::unchanged(value)
+                            lhs,
+                            rhs: rhs.into(),
+                        }),
+                        _ => PropagationResult::unchanged(value),
                     }
                 }
                 CouldBeConstant::Constant(_) => PropagationResult::unchanged(value),
@@ -392,152 +405,83 @@ fn value_propagate_constant(
             mem_binding,
             byte_size,
         } => todo!(),
-        Value::Negate { binding } => {
-            if binding == known_binding {
-                PropagationResult::modified(Value::Constant((!binding_value).wrapping_add(1)))
-            } else {
-                PropagationResult::unchanged(value)
-            }
-        }
-        Value::FlipBits { binding } => {
-            if binding == known_binding {
-                PropagationResult::modified(Value::Constant(!binding_value))
-            } else {
-                PropagationResult::unchanged(value)
-            }
-        }
-        Value::Add { lhs, rhs } => match (lhs, rhs) {
-            (a, CouldBeConstant::Constant(c)) if a == known_binding => {
-                PropagationResult::modified(Value::Constant(binding_value.wrapping_add(c)))
-            }
-            (a, CouldBeConstant::Binding(b)) => {
-                if a == b && a == known_binding {
-                    PropagationResult::modified(Value::Constant(
-                        binding_value.wrapping_add(binding_value),
-                    ))
-                } else if a == known_binding {
-                    // flip the operation to have the constant on rhs
-                    PropagationResult::modified(Value::Add {
-                        lhs: b,
-                        rhs: CouldBeConstant::Constant(binding_value),
-                    })
-                } else if b == known_binding {
-                    PropagationResult::modified(Value::Add {
-                        lhs: a,
-                        rhs: CouldBeConstant::Constant(binding_value),
-                    })
-                } else {
-                    PropagationResult::unchanged(value)
-                }
-            }
+        Value::Negate { binding } => known_constants.get(&binding).copied().map(|x| (!x).wrapping_add(1)).ok_or(value).into(),
 
-            (lhs, rhs) => PropagationResult::unchanged(value),
-        },
+        Value::FlipBits { binding } => known_constants.get(&binding).copied().map(|x| !x).ok_or(value).into(),
+
+        Value::Add { lhs, rhs } => match rhs {
+            CouldBeConstant::Constant(c) => known_constants.get(&lhs).copied().map(|a| a.wrapping_add(c).into()),
+            CouldBeConstant::Binding(other) => match (get_known(known_constants, lhs), get_known(known_constants, other)) {
+                (Ok(a), Ok(b)) => Some(a.wrapping_add(b).into()),
+                (Ok(rhs), Err(lhs)) | (Err(lhs), Ok(rhs))  => Some(Value::Add {
+                    lhs,
+                    rhs: rhs.into()
+                }),
+                _ => None
+            }
+        }.ok_or(value).into(),
         Value::Subtract { lhs, rhs } => match rhs {
-            CouldBeConstant::Constant(c) if lhs == known_binding => {
-                PropagationResult::modified(Value::Constant(binding_value.wrapping_sub(c)))
+            CouldBeConstant::Constant(c) => known_constants.get(&lhs).copied().map(|a| a.wrapping_sub(c).into()),
+            CouldBeConstant::Binding(other) => match (get_known(known_constants, lhs), get_known(known_constants, other)) {
+                (Ok(a), Ok(b)) => Some(a.wrapping_sub(b).into()),
+                (Err(lhs), Ok(rhs)) => Some(Value::Subtract {
+                    lhs,
+                    rhs: rhs.into(),
+                }),
+                // NOTE: Since substraction is anticommutative, flipping it around would generate
+                // more instructions. If the two values end up known it'll fold it anyway.
+                _ => None,
             }
-            CouldBeConstant::Binding(other) => {
-                if lhs == known_binding && other == known_binding {
-                    PropagationResult::modified(Value::Constant(0))
-                } else if lhs == known_binding {
-                    // since subtraction is anticommutative, I'd have to generate more values to
-                    // accomodate a reorder. I'll just fail so that the order of evaluation for
-                    // folds changes
-                    PropagationResult::unchanged(value)
-                } else if other == known_binding {
-                    // here I can change the rhs to be a constant
-                    PropagationResult::modified(Value::Subtract {
-                        lhs,
-                        rhs: CouldBeConstant::Constant(binding_value),
-                    })
-                } else {
-                    PropagationResult::unchanged(value)
-                }
+        }.ok_or(value).into(),
+        Value::Multiply { lhs, rhs } => match rhs {
+            CouldBeConstant::Constant(c) => known_constants.get(&lhs).copied().map(|a| a.wrapping_sub(c).into()),
+            CouldBeConstant::Binding(rhs) => match (get_known(known_constants, lhs), get_known(known_constants, rhs)) {
+                (Ok(a), Ok(b)) => Some(a.wrapping_mul(b).into()),
+                (Err(lhs), Ok(rhs)) | (Ok(rhs), Err(lhs)) => Some(Value::Multiply { lhs, rhs: rhs.into() }),
+                _ => None
             }
-            CouldBeConstant::Constant(_) => PropagationResult::unchanged(value),
-        },
-        Value::Multiply { lhs, rhs } => match (lhs, rhs) {
-            (a, CouldBeConstant::Constant(c)) if a == known_binding => {
-                PropagationResult::modified(Value::Constant(binding_value.wrapping_mul(c)))
-            }
-            (a, CouldBeConstant::Binding(b)) => {
-                if a == b && a == known_binding {
-                    PropagationResult::modified(Value::Constant(
-                        binding_value.wrapping_mul(binding_value),
-                    ))
-                } else if a == known_binding {
-                    // flip the operation to have the constant on rhs
-                    PropagationResult::modified(Value::Multiply {
-                        lhs: b,
-                        rhs: CouldBeConstant::Constant(binding_value),
-                    })
-                } else if b == known_binding {
-                    PropagationResult::modified(Value::Multiply {
-                        lhs: a,
-                        rhs: CouldBeConstant::Constant(binding_value),
-                    })
-                } else {
-                    PropagationResult::unchanged(value)
-                }
-            }
-
-            (lhs, rhs) => PropagationResult::unchanged(value),
-        },
+        }.ok_or(value).into(),
         // NOTE: when dividing by zero, don't fold it. The expression is UB so we'll
         // let the user shoot themselves in the foot and insert a division by zero.
         Value::Divide {
             lhs,
             rhs,
             is_signed,
-        } => match rhs {
-            CouldBeConstant::Binding(other) => {
-                // NOTE: Since division does *not* support any kind of *commutativity, I cannot
-                // reorder it
-                if lhs == known_binding && other == known_binding && binding_value != 0 {
-                    PropagationResult::modified(Value::Constant(1))
-                } else if other == known_binding {
-                    // I can set the other to be a constant
-                    PropagationResult::modified(Value::Divide {
-                        lhs,
-                        rhs: CouldBeConstant::Constant(binding_value),
-                        is_signed,
-                    })
-                } else {
-                    PropagationResult::unchanged(value)
-                }
+        } =>
+        // NOTE: Since division does *not* support any kind of *commutativity, I cannot
+        // reorder it
+        {
+            if let Some((a, b)) = both(
+                known_constants.get(&lhs).copied(),
+                known_constants.get(&rhs).copied(),
+            )
+            .filter(|(_, b)| *b != 0)
+            {
+                PropagationResult::modified(Value::Constant(a / b))
+            } else {
+                PropagationResult::unchanged(value)
             }
-            CouldBeConstant::Constant(ctant) if lhs == known_binding && ctant != 0 => {
-                PropagationResult::modified(Value::Constant(binding_value / ctant))
-            }
-            // otherwise i'll leave it as is, because I can't fold it in a safe way.
-            _ => PropagationResult::unchanged(value),
-        },
+        }
         Value::Lsl { lhs, rhs } => todo!(),
         Value::Lsr { lhs, rhs } => todo!(),
         Value::And { lhs, rhs } => match rhs {
-            CouldBeConstant::Constant(ctant) if lhs == known_binding => {
-                PropagationResult::modified(Value::Constant(binding_value & ctant))
+            CouldBeConstant::Constant(ctant) if let Some(value) = known_constants.get(&lhs) => {
+                PropagationResult::modified(Value::Constant(*value & ctant))
             }
             CouldBeConstant::Binding(other) => {
-                if lhs == known_binding && other == known_binding {
-                    PropagationResult::modified(Value::Constant(binding_value))
-                } else if lhs == known_binding {
-                    // reorder the AND
-                    PropagationResult::modified(Value::And {
-                        lhs: other,
-                        rhs: binding_value.into(),
-                    })
-                } else if other == known_binding {
-                    // we could evaluate half of it.
-                    PropagationResult::modified(Value::And {
-                        lhs,
-                        rhs: binding_value.into(),
-                    })
-                } else {
-                    PropagationResult::unchanged(value)
+
+                let known_lhs = known_constants.get(&lhs).copied().ok_or(lhs);
+                let known_rhs = known_constants.get(&other).copied().ok_or(other);
+
+                match (known_lhs, known_rhs) {
+                    (Ok(a), Ok(b)) => PropagationResult::modified(Value::Constant(a & b)),
+                    (Ok(a), Err(b)) | (Err(b), Ok(a)) => PropagationResult::modified(Value::And {
+                        lhs: b,
+                        rhs: a.into()
+                    }),
+                    _ => PropagationResult::unchanged(value)
                 }
-            }
+            },
             CouldBeConstant::Constant(_) => PropagationResult::unchanged(value),
         },
         Value::Or { lhs, rhs } => todo!(),
@@ -546,4 +490,14 @@ fn value_propagate_constant(
         Value::Constant(_) => PropagationResult::unchanged(value),
         Value::Binding(_) => todo!(),
     }
+}
+
+#[inline]
+fn both<A, B>(a: Option<A>, b: Option<B>) -> Option<(A, B)> {
+    a.and_then(|a| b.map(|b| (a, b)))
+}
+
+#[inline]
+fn get_known(knowns: &HashMap<Binding, i32>, binding: Binding) -> Result<i32, Binding> {
+    knowns.get(&binding).copied().ok_or(binding)
 }

@@ -45,11 +45,6 @@ impl BindingUsage for Value {
             | Value::Lsr { lhs, rhs }
             | Value::And { lhs, rhs }
             | Value::Or { lhs, rhs }
-            | Value::Divide {
-                lhs,
-                rhs,
-                is_signed: _,
-            }
             | Value::Xor { lhs, rhs } => lhs.uses_binding(binding) || rhs.uses_binding(binding),
             Value::Load {
                 mem_binding,
@@ -58,6 +53,11 @@ impl BindingUsage for Value {
             Value::Negate { binding: other } | Value::FlipBits { binding: other } => {
                 other.uses_binding(binding)
             }
+            Value::Divide {
+                lhs,
+                rhs,
+                is_signed: _,
+            } => lhs.uses_binding(binding) || rhs.uses_binding(binding),
             Value::Constant(_) => todo!(),
             Value::Binding(other) => other.uses_binding(binding),
         }

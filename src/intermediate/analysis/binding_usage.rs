@@ -107,11 +107,6 @@ impl BindingUsage for Value {
             Value::Add { lhs, rhs }
             | Value::Subtract { lhs, rhs }
             | Value::Multiply { lhs, rhs }
-            | Value::Divide {
-                lhs,
-                rhs,
-                is_signed: _,
-            }
             | Value::Lsl { lhs, rhs }
             | Value::Lsr { lhs, rhs }
             | Value::And { lhs, rhs }
@@ -129,6 +124,11 @@ impl BindingUsage for Value {
             Value::FlipBits { binding } | Value::Negate { binding } => {
                 binding.contains_binding(search_target)
             }
+            Value::Divide {
+                lhs,
+                rhs,
+                is_signed: _,
+            } => lhs.contains_binding(search_target) || rhs.contains_binding(search_target),
             Value::Constant(_) => false,
             Value::Binding(b) => b.contains_binding(search_target),
         }
@@ -144,11 +144,6 @@ impl BindingUsage for Value {
             Value::Add { lhs, rhs }
             | Value::Subtract { lhs, rhs }
             | Value::Multiply { lhs, rhs }
-            | Value::Divide {
-                lhs,
-                rhs,
-                is_signed: _,
-            }
             | Value::Lsl { lhs, rhs }
             | Value::Lsr { lhs, rhs }
             | Value::And { lhs, rhs }
@@ -161,6 +156,14 @@ impl BindingUsage for Value {
             } => {
                 f(*lhs)?;
                 rhs.visit_value_bindings(f)
+            }
+            Value::Divide {
+                lhs,
+                rhs,
+                is_signed: _,
+            } => {
+                f(*lhs)?;
+                f(*rhs)
             }
             Value::Load {
                 mem_binding,

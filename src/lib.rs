@@ -1,3 +1,4 @@
+#![feature(if_let_guard)]
 #[allow(unused)]
 pub mod allocators;
 #[allow(unused)]

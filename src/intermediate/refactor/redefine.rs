@@ -58,16 +58,19 @@ impl Rename for Value {
             Value::Add { lhs, rhs }
             | Value::Subtract { lhs, rhs }
             | Value::Multiply { lhs, rhs }
-            | Value::Divide {
-                lhs,
-                rhs,
-                is_signed: _,
-            }
             | Value::Lsl { lhs, rhs }
             | Value::Lsr { lhs, rhs }
             | Value::And { lhs, rhs }
             | Value::Or { lhs, rhs }
             | Value::Xor { lhs, rhs } => {
+                lhs.rename(target, rename_as);
+                rhs.rename(target, rename_as);
+            }
+            Value::Divide {
+                lhs,
+                rhs,
+                is_signed: _,
+            } => {
                 lhs.rename(target, rename_as);
                 rhs.rename(target, rename_as);
             }
