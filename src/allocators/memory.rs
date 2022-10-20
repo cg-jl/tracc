@@ -26,7 +26,7 @@ pub fn align(value: usize, to: usize) -> usize {
 // what allocate_graph does:
 //  - start on the leaves and follow through their preceding blocks
 //  - if the place is not taken, assign that index
-use crate::intermediate::analysis;
+use crate::intermediate::analysis::{self, CollisionMap, Lifetime};
 
 type AllocMap = HashMap<Binding, usize>;
 
@@ -37,10 +37,36 @@ pub fn figure_out_allocations(
 ) -> (MemoryMap, usize) {
     log::debug!("requested allocations: {allocations_needed:?}");
 
-    let collision_map = compute_memory_collisions(ir);
+    let memory_lifetimes = compute_memory_lifetimes(ir, &allocations_needed);
+    let collision_map = analysis::compute_lifetime_collisions(ir, &memory_lifetimes);
 
     log::debug!("allocation collisions: {collision_map:?}");
-    log::debug!("lifetime collisions: {lifetime_collisions:?}");
+    log::debug!("{ir:?}");
+
+    let mut local_collisions = CollisionMap::new();
+
+    collision_map
+        .iter()
+        .chain(lifetime_collisions.into_iter())
+        .filter_map(|(k, set)| {
+            if allocations_needed.contains_key(k) {
+                Some((
+                    *k,
+                    set.iter()
+                        .filter(|k| allocations_needed.contains_key(k))
+                        .copied()
+                        .collect::<HashSet<_>>(),
+                ))
+            } else {
+                None
+            }
+        })
+        .for_each(|(k, set)| match local_collisions.entry(k) {
+            std::collections::hash_map::Entry::Occupied(mut occ) => occ.get_mut().extend(set),
+            std::collections::hash_map::Entry::Vacant(vac) => {
+                vac.insert(set);
+            }
+        });
 
     let mut local_collisions: Vec<(_, HashSet<_>)> = collision_map
         .iter()
@@ -164,44 +190,101 @@ fn find_load_dependencies<'c>(
     unsafe { cache.get(&binding).unwrap_unchecked() }
 }
 
-fn compute_memory_collisions(ir: &IR) -> HashMap<Binding, HashSet<Binding>> {
-    // Find stores. For each of the stores, use their direct dependencies to map back to a load.
-    use analysis::BindingUsage;
-    let mut deps_cache = HashMap::new();
-    let mut collisions = HashMap::new();
+pub fn compute_memory_lifetimes(ir: &IR, allocated_memories: &AllocMap) -> Vec<Lifetime> {
+    // step 1: collect memory lifetimes
+    let mut memory_lifetimes: HashMap<_, HashMap<BlockAddress, Vec<BlockAddress>>> =
+        allocated_memories
+            .keys()
+            .copied()
+            .map(|k| (k, HashMap::new()))
+            .collect();
 
-    analysis::statements_with_addresses(ir)
-        .filter_map(|(statement, addr)| {
-            if let Statement::Store {
-                mem_binding,
-                binding,
-                byte_size: _,
-            } = statement
-            {
-                Some((*mem_binding, *binding, addr))
-            } else {
-                None
-            }
-        })
-        .for_each(|(stored_mem, stored_value, store_location)| {
-            let collision_set: &mut HashSet<_> = collisions.entry(stored_mem).or_default();
+    let num_of_allocated_bindings = allocated_memories.keys().count();
 
-            for (&load_dep, load_locations) in
-                find_load_dependencies(ir, stored_value, &mut deps_cache)
-            {
-                if load_dep == stored_mem {
-                    continue;
-                }
-                if load_locations
-                    .iter()
-                    .any(|loc| loc.happens_before(ir, store_location))
-                {
-                    collision_set.insert(load_dep);
-                }
-            }
+    let mut preceding_definitions: Vec<_> = ir
+        .code
+        .iter()
+        .map(|_| HashMap::with_capacity(num_of_allocated_bindings))
+        .collect();
+
+    for binding in allocated_memories.keys().copied() {
+        let first_definition = analysis::find_assignment_value_with_adress(&ir.code, binding)
+            .unwrap()
+            .1;
+        preceding_definitions.iter_mut().for_each(|def| {
+            def.insert(binding, first_definition);
         });
+    }
 
-    collisions
+    for block in analysis::predecessors(ir, BlockBinding(0)) {
+        ir[block]
+            .statements
+            .iter()
+            .enumerate()
+            .filter_map(|(statement_index, statement)| {
+                if let Statement::Store {
+                    mem_binding,
+                    binding: _,
+                    byte_size: _,
+                } = statement
+                {
+                    Some((
+                        mem_binding,
+                        BlockAddress {
+                            block,
+                            statement: statement_index,
+                        },
+                    ))
+                } else {
+                    None
+                }
+            })
+            .filter(|(b, _)| allocated_memories.contains_key(b))
+            .for_each(|(stored_mem, position)| {
+                let lifetimes_for_mem = memory_lifetimes.entry(*stored_mem).or_default();
+                // mark this memory 'alive' at this position
+                lifetimes_for_mem.insert(position, Vec::new());
+
+                let one_statement_before = BlockAddress {
+                    block: position.block,
+                    statement: position.statement.saturating_sub(1),
+                };
+
+                // if there was a store of this same memory in the same block, make sure it's dead
+                // by here.
+                if let Some(old_store) =
+                    preceding_definitions[block.0].insert(*stored_mem, position)
+                {
+                    lifetimes_for_mem
+                        .entry(old_store)
+                        .or_default()
+                        .push(one_statement_before);
+                } else {
+                    // for each antecessor of this block, if there was a store
+                    analysis::antecessors(&ir, block).for_each(|antecessor| {
+                        if let Some(old_store) =
+                            preceding_definitions[antecessor.0].insert(*stored_mem, position)
+                        {
+                            lifetimes_for_mem
+                                .entry(old_store)
+                                .or_default()
+                                .push(one_statement_before);
+                        }
+                    })
+                }
+            });
+    }
+
+    memory_lifetimes
+        .into_iter()
+        .flat_map(|(k, v)| {
+            v.into_iter().map(move |(start, ends)| Lifetime {
+                attached_binding: k,
+                start,
+                ends,
+            })
+        })
+        .collect()
 }
 
 /// List the memory allocations that the block defines

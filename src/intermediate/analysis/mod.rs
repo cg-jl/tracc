@@ -151,13 +151,17 @@ pub fn find_assignment_value(code: &[BasicBlock], binding: Binding) -> Option<&V
         })
 }
 
-pub fn antecessors(ir: &IR, binding: BlockBinding) -> impl Iterator<Item = BlockBinding> + '_ {
-    BottomTopTraversal {
-        backwards_map: &ir.backwards_map,
-        visited: HashSet::new(),
-        queue: vec![binding],
-    }
+pub fn antecessors<'code>(ir: &'code IR, binding: BlockBinding) -> BottomTopTraversal<'code> {
+    BottomTopTraversal::new(
+        ir,
+        ir.backwards_map
+            .get(&binding)
+            .into_iter()
+            .flat_map(|x| x.iter().copied())
+            .collect(),
+    )
 }
+
 pub struct BottomTopTraversal<'code> {
     backwards_map: &'code BranchingMap,
     visited: HashSet<BlockBinding>,
@@ -171,6 +175,11 @@ impl<'code> BottomTopTraversal<'code> {
             visited: HashSet::new(),
             queue,
         }
+    }
+
+    pub fn finish_and_get_visited_set(mut self) -> HashSet<BlockBinding> {
+        while self.next().is_some() {}
+        self.visited
     }
 }
 
@@ -195,7 +204,6 @@ impl<'code> Iterator for BottomTopTraversal<'code> {
     type Item = BlockBinding;
     fn next(&mut self) -> Option<Self::Item> {
         let next = self.queue.pop()?;
-        dbg!(next);
         self.visited.insert(next);
         let visited_ref = &self.visited;
         let parents = self

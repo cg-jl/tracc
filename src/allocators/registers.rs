@@ -638,8 +638,9 @@ int main() {
 }"#,
         )
         .unwrap();
+        let lifetimes = crate::intermediate::analysis::compute_lifetimes(&ir);
         let collisions =
-            crate::intermediate::analysis::compute_lifetime_collisions(&ir);
+            crate::intermediate::analysis::compute_lifetime_collisions(&ir, &lifetimes);
         // TODO: test traversal for allocator hints
         let hints = make_allocator_hints(&ir);
         let result = alloc_registers(

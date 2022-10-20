@@ -3,25 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 pub type LifetimeMap = HashMap<Binding, Lifetime>;
 
-// BUG: detects wrong collisions from phi nodes/branches:
-/*
-BB0:
-  %0 = 2
-  %1 = cmp eq, %0, 1
-  br-cond %1, BB2, BB1
-BB1:
-  %3 = 3
-  store %0, u32 %3
-  br  BB2
-BB2:
-  %6 = phi [ %1, BB0 ], [ %3, BB1 ]
-  ret %6
-
-given this code, %1 does *NOT* collide with %3 because the path selected by the phi node
-doesn't contain %3's lifetime.
-  */
-
-pub fn compute_lifetimes(ir: &IR) -> LifetimeMap {
+pub fn compute_lifetimes(ir: &IR) -> Vec<Lifetime> {
     let mut lifetime_map = LifetimeMap::new();
 
     let mut die_map = get_lifetime_ends(ir);
@@ -30,18 +12,13 @@ pub fn compute_lifetimes(ir: &IR) -> LifetimeMap {
         let die = match die_map.remove(&key) {
             Some(die) => die,
             // if a defined value wasn't caught on another statement, then it wasn't used.
-            // therefore we can set it to end as soon as it starts
             None => {
                 lifetime_map.insert(
                     key,
                     Lifetime {
                         attached_binding: key,
                         start: def,
-                        ends: {
-                            let mut map = HashMap::new();
-                            map.insert(def.block, def.statement);
-                            map
-                        },
+                        ends: vec![],
                     },
                 );
                 continue;
@@ -55,9 +32,6 @@ pub fn compute_lifetimes(ir: &IR) -> LifetimeMap {
                         attached_binding: key,
                         start: def,
                         ends: die
-                            .into_iter()
-                            .map(|blockaddr| (blockaddr.block, blockaddr.statement))
-                            .collect(),
                     }
                 )
                 .is_none(),
@@ -65,23 +39,24 @@ pub fn compute_lifetimes(ir: &IR) -> LifetimeMap {
         );
     }
 
-    lifetime_map
+    lifetime_map.into_values().collect()
 }
 
 pub type CollisionMap = HashMap<Binding, HashSet<Binding>>;
 
-pub fn compute_lifetime_collisions(ir: &IR) -> CollisionMap {
-    let lifetime_map = compute_lifetimes(ir);
-    lifetime_map
+pub fn compute_lifetime_collisions(ir: &IR, lifetimes: &[Lifetime]) -> CollisionMap {
+    lifetimes
         .iter()
-        .map(|(k, lifetime)| {
+        .map(|lifetime| {
             (
-                *k,
-                lifetime_map
+                lifetime.attached_binding,
+                lifetimes
                     .iter()
-                    .filter_map(|(k2, l2)| {
-                        if k2 != k && lifetime.intersects(l2, ir) {
-                            Some(*k2)
+                    .filter_map(|l| {
+                        if l.attached_binding != lifetime.attached_binding
+                            && lifetime.intersects(l, ir)
+                        {
+                            Some(l.attached_binding)
                         } else {
                             None
                         }
@@ -173,96 +148,60 @@ fn get_lifetime_ends(ir: &IR) -> HashMap<Binding, Vec<BlockAddress>> {
 }
 impl Lifetime {
     /// If the binding is local to the block, it will return the statement index
-    pub fn local_end(&self) -> Option<(BlockBinding, usize)> {
-        self.ends
-            .get(&self.start.block)
-            .map(|&index| (self.start.block, index))
-    }
-    fn start_from_block(&self, block: BlockBinding) -> Option<usize> {
-        if block == self.start.block {
-            Some(self.start.statement)
+    // pub fn local_end(&self) -> Option<BlockAddress> {
+    //     self.endjjj
+    //     self.ends
+    //         .get(&self.start.block)
+    //         .map(|&index| (self.start.block, index))
+    // }
+    // fn start_from_block(&self, block: BlockBinding) -> Option<usize> {
+    //     if block == self.start.block {
+    //         Some(self.start.statement)
+    //     } else {
+    //         None
+    //     }
+    // }
+    /// Checks whether the binding is local to the block (is not used in other blocks)
+    // pub fn is_local_to_block(&self) -> bool {
+    //     // if the code is correct, and the binding is local, once it has been ended in the block
+    //     // it's defined then no more uses can happen
+    //     self.ends.contains_key(&self.start.block)
+    // }
+    pub fn intersects(&self, other: &Self, ir: &IR) -> bool {
+        // Lifetime A intersects lifetime B if:
+        //   - for any end A' of A, B is comprised between A and A'
+        //   OR (viceversa)
+        //   - for any end B' of B, A is comprised between B and B'
+        //   OR
+        //   - A is defined before B and A has no end to it
+        //   OR
+        //   - B is defined before A and B has no end to it
+
+        if self.start.happens_before(ir, other.start) {
+            self.ends.is_empty()
+                || self
+                    .ends
+                    .iter()
+                    .any(|a_end| other.start.happens_before(ir, *a_end))
+        } else if other.start.happens_before(ir, self.start) {
+            other.ends.is_empty()
+                || other
+                    .ends
+                    .iter()
+                    .any(|b_end| self.start.happens_before(ir, *b_end))
         } else {
-            None
+            false
         }
     }
-    /// Checks whether the binding is local to the block (is not used in other blocks)
-    pub fn is_local_to_block(&self) -> bool {
-        // if the code is correct, and the binding is local, once it has been ended in the block
-        // it's defined then no more uses can happen
-        self.ends.contains_key(&self.start.block)
-    }
-    pub fn intersects(&self, other: &Self, ir: &IR) -> bool {
-        let self_passes_through: HashSet<_> = self.pass_through_list(ir).collect();
-        let other_passes_through: HashSet<_> = other.pass_through_list(ir).collect();
-
-        // they won't intersect if:
-        //  - the blocks they pass through never coincide.
-        self_passes_through
-            .intersection(&other_passes_through)
-            //  - if there is any block where they coincide:
-            .any(|block| {
-                //      - if one dies and the other one is defined in the same block:
-                let dies_or_defined =
-                    self.ends
-                        .get(block)
-                        .copied()
-                        .and_then(|end| other.start_from_block(*block).map(|start| (end, start)))
-                        .or_else(|| {
-                            other.ends.get(block).copied().and_then(|end| {
-                                self.start_from_block(*block).map(|start| (end, start))
-                            })
-                        });
-
-                if let Some((dies, defined)) = dies_or_defined {
-                    //          - if the one that dies has a higher statement index than the statement index
-                    //              of the one that is defined, then they intersect.
-                    dies > defined
-
-                    //          - otherwise, they won't intersect (since one is defined after the other is
-                    //          already dead)
-                } else {
-                    // if no one dies here with the other being defined in the same block, then
-                    // this not a collision
-                    false
-                }
-            })
-    }
-
-    pub fn pass_through_list<'ir>(
-        &'ir self,
-        ir: &'ir IR,
-    ) -> impl Iterator<Item = BlockBinding> + 'ir {
-        super::predecessors(ir, self.start.block).filter(|block| {
-            use super::BindingUsage;
-            ir[*block].contains_binding(self.attached_binding)
-        })
-    }
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Lifetime {
     pub attached_binding: Binding,
     pub start: BlockAddress,
-    pub ends: HashMap<BlockBinding, usize>,
-}
-impl std::fmt::Debug for Lifetime {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        struct AddressMapDebugImpl<'a>(&'a HashMap<BlockBinding, usize>);
-        impl<'a> std::fmt::Debug for AddressMapDebugImpl<'a> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.debug_list()
-                    .entries(
-                        self.0
-                            .iter()
-                            .map(|(&block, &statement)| BlockAddress { block, statement }),
-                    )
-                    .finish()
-            }
-        }
-        f.debug_struct("Lifetime")
-            .field("start", &self.start)
-            .field("ends", &AddressMapDebugImpl(&self.ends))
-            .finish()
-    }
+    pub ends: Vec<BlockAddress>, // "actually" this should be just one end, since a lifetime is
+                                 // just a code span. But since each binding
+                                 // has just one start and more than one end, it's more useful to
+                                 // put all those in.
 }
 impl std::fmt::Debug for BlockAddress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -278,16 +217,16 @@ pub struct BlockAddress {
 }
 
 impl BlockAddress {
+    pub fn happens_between(self: Self, ir: &IR, a: Self, b: Self) -> bool {
+        a.happens_before(ir, self) && self.happens_before(ir, b)
+    }
     pub fn happens_before(self: Self, ir: &IR, other: Self) -> bool {
         // A happens before B if:
         // - the block that B happens in has A's block as a predecessor.
         // or:
         // - it happens before B in the same block
-        if self.block == other.block {
-            self.statement < other.statement
-        } else {
-            analysis::antecessors(ir, self.block).any(|i| i == other.block)
-        }
+        (self.block == other.block && self.statement < other.statement)
+            || analysis::antecessors(ir, other.block).any(|a| a == self.block)
     }
 }
 
@@ -358,6 +297,113 @@ mod tests {
             assert!(defs[&Binding(1)].happens_before(&ir, defs[&Binding(0)]));
         }
     }
+    #[test]
+    fn collide_different_blocks() {
+        // have binding %0 and %1 allocate. In different blocks that are related through a loop.
+        // Write 0 to %0. Write 1 to %1. On a loop: Read a temp from %0. Read the value of %1 and
+        // store the sum of it and the temp in %0. Write the temp in %1. Yes, this is fibonacci.
+        // forever fibonacci. %0 and %1's memory lifetimes MUST collide.
+        let ir = IR::from(vec![
+            BasicBlock {
+                // setup: declare %0 and %1, write 0 to %0 and 1 to %1.
+                statements: vec![
+                    Statement::Assign {
+                        index: Binding(0),
+                        value: Value::Allocate { size: 4 },
+                    },
+                    Statement::Assign {
+                        index: Binding(1),
+                        value: Value::Allocate { size: 4 },
+                    },
+                    Statement::Assign {
+                        index: Binding(2),
+                        value: 0.into(),
+                    },
+                    Statement::Store {
+                        mem_binding: Binding(0),
+                        binding: Binding(2),
+                        byte_size: ByteSize::U32,
+                    },
+                    Statement::Assign {
+                        index: Binding(3),
+                        value: 1.into(),
+                    },
+                    Statement::Store {
+                        mem_binding: Binding(1),
+                        binding: Binding(3),
+                        byte_size: ByteSize::U32,
+                    },
+                ],
+                end: BlockEnd::Branch(Branch::Unconditional {
+                    target: BlockBinding(1),
+                }),
+            },
+            BasicBlock {
+                statements: vec![
+                    Statement::Assign {
+                        index: Binding(4), // %4 will be our temp
+                        value: Value::Load {
+                            mem_binding: Binding(0),
+                            byte_size: ByteSize::U32,
+                        },
+                    },
+                    Statement::Assign {
+                        index: Binding(5),
+                        value: Value::Load {
+                            mem_binding: Binding(1),
+                            byte_size: ByteSize::U32,
+                        },
+                    },
+                    Statement::Assign {
+                        index: Binding(6),
+                        value: Value::Add {
+                            lhs: Binding(4),
+                            rhs: Binding(5).into(),
+                        },
+                    },
+                    Statement::Store {
+                        mem_binding: Binding(1),
+                        binding: Binding(6),
+                        byte_size: ByteSize::U32,
+                    },
+                    Statement::Store {
+                        mem_binding: Binding(0),
+                        binding: Binding(4),
+                        byte_size: ByteSize::U32,
+                    },
+                ],
+                end: BlockEnd::Branch(Branch::Unconditional {
+                    target: BlockBinding(1), // forever.
+                }),
+            },
+        ]);
+        dbg!(&ir.backwards_map);
+
+        use crate::allocators::memory;
+        let lifetime_map: LifetimeMap =
+            memory::compute_memory_lifetimes(&ir, &memory::make_alloc_map(&ir.code))
+                .into_iter()
+                .map(|l| (l.attached_binding, l))
+                .collect();
+
+        assert!(BlockAddress {
+            block: BlockBinding(1),
+            statement: 3
+        }
+        .happens_before(
+            &ir,
+            BlockAddress {
+                block: BlockBinding(1),
+                statement: 0
+            }
+        ));
+
+        dbg!(&ir);
+        dbg!(&lifetime_map);
+
+        assert!(lifetime_map[&Binding(1)].intersects(&lifetime_map[&Binding(0)], &ir));
+    }
+
     // TODO: more tests on intersections:
     //  - different blocks, collides
     //  - different blocks, different branches
@@ -395,40 +441,27 @@ mod tests {
         }]);
         let lifetime_1 = Lifetime {
             attached_binding: Binding(0),
-            start: BlockAddress {
+            ends: vec![BlockAddress {
                 block: BlockBinding(0),
                 statement: 0,
+            }],
+            start: BlockAddress {
+                block: BlockBinding(0),
+                statement: 2,
             },
-            ends: vec![(BlockBinding(0), 2)].into_iter().collect(),
         };
         let lifetime_2 = Lifetime {
             attached_binding: Binding(2),
-            start: BlockAddress {
+            ends: vec![BlockAddress {
                 block: BlockBinding(0),
                 statement: 3,
+            }],
+            start: BlockAddress {
+                block: BlockBinding(0),
+                statement: 4,
             },
-            ends: vec![(BlockBinding(0), 4)].into_iter().collect(),
         };
         assert!(!lifetime_1.intersects(&lifetime_2, &ir));
-    }
-
-    #[test]
-    fn only_block_passes_through() {
-        let ir = IR::from(vec![BasicBlock {
-            statements: vec![Statement::Assign {
-                index: Binding(0),
-                value: Value::Constant(0),
-            }],
-            end: BlockEnd::Return(Binding(0)),
-        }]);
-        let lifetime_map = compute_lifetimes(&ir);
-        dbg!(&lifetime_map);
-        let lifetime = &lifetime_map[&Binding(0)];
-        dbg!(&lifetime);
-        assert_eq!(
-            lifetime.pass_through_list(&ir).collect::<Vec<_>>(),
-            vec![BlockBinding(0)]
-        )
     }
 
     /// sets up a triangle CFG:
@@ -471,7 +504,6 @@ mod tests {
         dbg!(&ir);
         let lifetimes = compute_lifetimes(&ir);
         dbg!(&lifetimes);
-        let lifetimes: Vec<_> = lifetimes.into_values().collect();
 
         assert!(!lifetimes[0].intersects(&lifetimes[1], &ir));
         assert!(!lifetimes[0].intersects(&lifetimes[2], &ir));
@@ -497,7 +529,13 @@ mod tests {
         );
 
         let ir = compile_source_into_ir(SOURCE_CODE)?;
-        let lifetimes = analysis::compute_lifetimes(&ir);
+        let lifetimes: HashMap<_, _> = analysis::compute_lifetimes(&ir)
+            .into_iter()
+            .map(|lifetime| (lifetime.attached_binding, lifetime))
+            .collect();
+
+        dbg!(&lifetimes);
+
         assert!(
             !lifetimes[&Binding(2)].intersects(&lifetimes[&Binding(3)], &ir),
             "{:?}\n%2 and %3 should *NOT* collide",
