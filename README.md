@@ -13,6 +13,7 @@ The compiler currently expects an only function, with no parameters, with a list
   - Assignments (with their optional binary operators)
   - if statements (with else-if chaining)
   - blocks inside blocks for scoped variables
+  - While loops
   - The not supported operators are:
     - Pre and post increment
     - Comma operator
@@ -41,23 +42,23 @@ Output assembly:
 foo:
 	sub sp, sp, #16
 	mov w1, #1
-	str w1, [sp]
+	str w1, [sp, #4]
 	mov w2, #2
-	str w2, [sp]
-	ldr w3, [sp]
-	ldr w4, [sp]
-	cmp w3, w4
-	cset w5, gt
-	cmp w5, wzr
+	str w2, [sp, #8]
+	ldr w2, [sp, #4]
+	ldr w3, [sp, #8]
+	cmp w2, w3
+	cset w2, gt
+	cmp w2, wzr
 	beq .LBB2
-	ldr w1, [sp]
-	ldr w0, [sp]
-	sub w0, w1, w0
+	ldr w0, [sp, #4]
+	ldr w2, [sp, #8]
+	sub w0, w0, w2
 	b   .epilogue
 .LBB2:
-	ldr w1, [sp]
-	ldr w0, [sp]
-	add w0, w1, w0
+	ldr w0, [sp, #4]
+	ldr w2, [sp, #8]
+	add w0, w0, w2
 .epilogue:
 	add sp, sp, #16
 	ret
