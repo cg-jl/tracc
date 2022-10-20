@@ -18,7 +18,7 @@ pub fn compute_lifetimes(ir: &IR) -> Vec<Lifetime> {
                     Lifetime {
                         attached_binding: key,
                         start: def,
-                        ends: vec![],
+                        ends: vec![def],
                     },
                 );
                 continue;
@@ -31,7 +31,7 @@ pub fn compute_lifetimes(ir: &IR) -> Vec<Lifetime> {
                     Lifetime {
                         attached_binding: key,
                         start: def,
-                        ends: die
+                        ends: if die.is_empty() { vec![def] } else { die }
                     }
                 )
                 .is_none(),
@@ -226,7 +226,9 @@ impl Lifetime {
         //   - B is defined before A and B has no end to it
         assert!(
             !self.ends.is_empty() && !other.ends.is_empty(),
-            "everything comes to an end :("
+            "({a} | {b}) everything comes to an end :(",
+            a = self.attached_binding,
+            b = other.attached_binding
         );
 
         if self.start.happens_before(ir, other.start) {
@@ -434,11 +436,7 @@ mod tests {
         dbg!(&ir.backwards_map);
 
         use crate::allocators::memory;
-        let lifetime_map: LifetimeMap =
-            memory::compute_memory_lifetimes(&ir, &memory::make_alloc_map(&ir.code))
-                .into_iter()
-                .map(|l| (l.attached_binding, l))
-                .collect();
+        let lifetimes = memory::compute_memory_lifetimes(&ir, &memory::make_alloc_map(&ir.code));
 
         assert!(BlockAddress {
             block: BlockBinding(1),
@@ -452,12 +450,11 @@ mod tests {
             }
         ));
 
-        dbg!(&ir);
-        dbg!(&lifetime_map);
+        let collisions = compute_lifetime_collisions(&ir, &lifetimes);
 
-        assert!(!lifetime_map[&Binding(1)]
-            .find_intersections(&lifetime_map[&Binding(0)], &ir)
-            .is_empty());
+        dbg!(&ir);
+
+        assert!(collisions[&Binding(1)].contains(&Binding(0)));
     }
 
     // TODO: more tests on intersections:

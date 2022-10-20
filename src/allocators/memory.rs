@@ -281,7 +281,7 @@ pub fn compute_memory_lifetimes(ir: &IR, allocated_memories: &AllocMap) -> Vec<L
             v.into_iter().map(move |(start, ends)| Lifetime {
                 attached_binding: k,
                 start,
-                ends,
+                ends: if ends.is_empty() { vec![start] } else { ends },
             })
         })
         .collect()
