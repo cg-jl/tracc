@@ -43,28 +43,72 @@ pub fn compute_lifetimes(ir: &IR) -> Vec<Lifetime> {
 }
 
 pub type CollisionMap = HashMap<Binding, HashSet<Binding>>;
+pub type CollisionMapWithLocations =
+    HashMap<Binding, HashMap<Binding, (BlockAddress, BlockAddress)>>;
 
 pub fn compute_lifetime_collisions(ir: &IR, lifetimes: &[Lifetime]) -> CollisionMap {
-    lifetimes
-        .iter()
-        .map(|lifetime| {
+    let with_locations = compute_lifetime_collisions_with_locations(ir, lifetimes);
+    use crate::intermediate::Value;
+
+    with_locations
+        .into_iter()
+        .map(|(k, collisions)| {
             (
-                lifetime.attached_binding,
-                lifetimes
-                    .iter()
-                    .filter_map(|l| {
-                        if l.attached_binding != lifetime.attached_binding
-                            && lifetime.intersects(l, ir)
-                        {
-                            Some(l.attached_binding)
-                        } else {
+                k,
+                collisions
+                    .into_iter()
+                    .filter_map(|(collision, mut locations)| {
+                        locations.retain(|(_, end)| {
+                            // filter out the locations that include a phi node with those two values.
+                            let nodes = if let Some(Statement::Assign {
+                                index: _,
+                                value: Value::Phi { nodes },
+                            }) = ir.get_statement(end)
+                            {
+                                nodes
+                            } else {
+                                return true;
+                            };
+                            let found_k = nodes.iter().find(|desc| desc.value == k).is_some();
+                            let found_col =
+                                nodes.iter().find(|desc| desc.value == collision).is_some();
+                            !(found_k && found_col)
+                        });
+
+                        if locations.is_empty() {
                             None
+                        } else {
+                            Some(collision)
                         }
                     })
                     .collect(),
             )
         })
         .collect()
+}
+
+fn compute_lifetime_collisions_with_locations<'code>(
+    ir: &'code IR,
+    lifetimes: &'code [Lifetime],
+) -> impl Iterator<
+    Item = (
+        Binding,
+        HashMap<Binding, HashSet<(BlockAddress, BlockAddress)>>,
+    ),
+> + 'code {
+    lifetimes.iter().map(|lifetime| {
+        let mut locations = HashMap::new();
+        lifetimes
+            .iter()
+            .filter(|l| l.attached_binding != lifetime.attached_binding)
+            .for_each(|l| {
+                let intersections = lifetime.find_intersections(l, ir);
+                if !intersections.is_empty() {
+                    locations.insert(l.attached_binding, intersections);
+                }
+            });
+        (lifetime.attached_binding, locations)
+    })
 }
 
 pub fn get_defs(ir: &IR) -> impl Iterator<Item = (Binding, BlockAddress)> + '_ {
@@ -167,7 +211,11 @@ impl Lifetime {
     //     // it's defined then no more uses can happen
     //     self.ends.contains_key(&self.start.block)
     // }
-    pub fn intersects(&self, other: &Self, ir: &IR) -> bool {
+    pub fn find_intersections(
+        &self,
+        other: &Self,
+        ir: &IR,
+    ) -> HashSet<(BlockAddress, BlockAddress)> {
         // Lifetime A intersects lifetime B if:
         //   - for any end A' of A, B is comprised between A and A'
         //   OR (viceversa)
@@ -176,24 +224,30 @@ impl Lifetime {
         //   - A is defined before B and A has no end to it
         //   OR
         //   - B is defined before A and B has no end to it
+        assert!(
+            !self.ends.is_empty() && !other.ends.is_empty(),
+            "everything comes to an end :("
+        );
 
         if self.start.happens_before(ir, other.start) {
-            self.ends.is_empty()
-                || self
-                    .ends
-                    .iter()
-                    .any(|a_end| other.start.happens_before(ir, *a_end))
+            self.ends
+                .iter()
+                .filter(|&a_end| other.start.happens_before(ir, *a_end))
+                .map(|end| (self.start, *end))
+                .collect()
         } else if other.start.happens_before(ir, self.start) {
-            other.ends.is_empty()
-                || other
-                    .ends
-                    .iter()
-                    .any(|b_end| self.start.happens_before(ir, *b_end))
+            other
+                .ends
+                .iter()
+                .filter(|&b_end| self.start.happens_before(ir, *b_end))
+                .map(|end| (other.start, *end))
+                .collect()
         } else {
-            false
+            HashSet::new()
         }
     }
 }
+
 #[derive(Clone, Debug)]
 pub struct Lifetime {
     pub attached_binding: Binding,
@@ -401,7 +455,9 @@ mod tests {
         dbg!(&ir);
         dbg!(&lifetime_map);
 
-        assert!(lifetime_map[&Binding(1)].intersects(&lifetime_map[&Binding(0)], &ir));
+        assert!(!lifetime_map[&Binding(1)]
+            .find_intersections(&lifetime_map[&Binding(0)], &ir)
+            .is_empty());
     }
 
     // TODO: more tests on intersections:
@@ -461,7 +517,7 @@ mod tests {
                 statement: 4,
             },
         };
-        assert!(!lifetime_1.intersects(&lifetime_2, &ir));
+        assert!(lifetime_1.find_intersections(&lifetime_2, &ir).is_empty());
     }
 
     /// sets up a triangle CFG:
@@ -505,14 +561,26 @@ mod tests {
         let lifetimes = compute_lifetimes(&ir);
         dbg!(&lifetimes);
 
-        assert!(!lifetimes[0].intersects(&lifetimes[1], &ir));
-        assert!(!lifetimes[0].intersects(&lifetimes[2], &ir));
+        assert!(lifetimes[0]
+            .find_intersections(&lifetimes[1], &ir)
+            .is_empty());
+        assert!(lifetimes[0]
+            .find_intersections(&lifetimes[2], &ir)
+            .is_empty());
 
-        assert!(!lifetimes[1].intersects(&lifetimes[2], &ir));
-        assert!(!lifetimes[1].intersects(&lifetimes[0], &ir));
+        assert!(lifetimes[1]
+            .find_intersections(&lifetimes[2], &ir)
+            .is_empty());
+        assert!(lifetimes[1]
+            .find_intersections(&lifetimes[0], &ir)
+            .is_empty());
 
-        assert!(!lifetimes[2].intersects(&lifetimes[1], &ir));
-        assert!(!lifetimes[2].intersects(&lifetimes[0], &ir));
+        assert!(lifetimes[2]
+            .find_intersections(&lifetimes[1], &ir)
+            .is_empty());
+        assert!(lifetimes[2]
+            .find_intersections(&lifetimes[0], &ir)
+            .is_empty());
     }
 
     fn compile_source_into_ir(source: &str) -> anyhow::Result<crate::intermediate::IR> {
@@ -529,15 +597,13 @@ mod tests {
         );
 
         let ir = compile_source_into_ir(SOURCE_CODE)?;
-        let lifetimes: HashMap<_, _> = analysis::compute_lifetimes(&ir)
-            .into_iter()
-            .map(|lifetime| (lifetime.attached_binding, lifetime))
-            .collect();
+        let lifetimes = analysis::compute_lifetimes(&ir);
+        let collision_map = analysis::compute_lifetime_collisions(&ir, &lifetimes);
 
         dbg!(&lifetimes);
 
         assert!(
-            !lifetimes[&Binding(2)].intersects(&lifetimes[&Binding(3)], &ir),
+            !collision_map[&Binding(2)].contains(&Binding(3)),
             "{:?}\n%2 and %3 should *NOT* collide",
             ir
         );

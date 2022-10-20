@@ -9,6 +9,8 @@ pub mod generate;
 pub mod refactor;
 
 use crate::codegen::assembly::Condition;
+
+use self::analysis::lifetimes::BlockAddress;
 // IR: everything is divided into basic blocks
 
 pub type BranchingMap = HashMap<BlockBinding, Vec<BlockBinding>>;
@@ -19,6 +21,12 @@ pub struct IR {
     pub code: IRCode,
     pub backwards_map: BranchingMap,
     pub forward_map: BranchingMap,
+}
+
+impl IR {
+    pub fn get_statement(&self, addr: &BlockAddress) -> Option<&Statement> {
+        self[addr.block].statements.get(addr.statement)
+    }
 }
 
 pub struct BasicBlock {
@@ -208,6 +216,14 @@ impl Branch {
                 },
             }
         })
+    }
+}
+
+impl core::ops::Index<analysis::lifetimes::BlockAddress> for IR {
+    type Output = Statement;
+
+    fn index(&self, index: analysis::lifetimes::BlockAddress) -> &Self::Output {
+        &self[index.block].statements[index.statement]
     }
 }
 
