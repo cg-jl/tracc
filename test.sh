@@ -41,6 +41,7 @@ test_one() {
 }
 
 test_stage() {
+  echo "---- testing stage $@ ----"
   local path="write_a_c_compiler/stage_$1/valid"
   while [ $# -gt 1 ]; do
     shift
