@@ -1,6 +1,7 @@
 //! First step of code generation is to get the stack memory usage for the code
 
 use std::collections::{HashMap, HashSet};
+use tracing::{debug, span, Level};
 
 use crate::intermediate::{BasicBlock, Binding, BlockBinding, Statement, Value, IR};
 
@@ -35,13 +36,13 @@ pub fn figure_out_allocations(
     allocations_needed: AllocMap,
     lifetime_collisions: &analysis::lifetimes::CollisionMap,
 ) -> (MemoryMap, usize) {
-    log::debug!("requested allocations: {allocations_needed:?}");
+    tracing::debug!(target: "memory_allocation",  "requested allocations: {allocations_needed:?}");
 
     let memory_lifetimes = compute_memory_lifetimes(ir, &allocations_needed);
     let collision_map = analysis::compute_lifetime_collisions(ir, &memory_lifetimes);
 
-    log::debug!("allocation collisions: {collision_map:?}");
-    log::debug!("{ir:?}");
+    tracing::debug!(target: "memory_allocation", "allocation collisions: {collision_map:?}");
+    tracing::debug!(target: "memory_allocation", "{ir:?}");
 
     let mut local_collisions = CollisionMap::new();
 

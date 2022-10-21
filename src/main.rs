@@ -4,7 +4,7 @@ use tracc::ast::Program;
 use tracc::error::SourceMetadata;
 use tracc::grammar::Parser;
 
-use simplelog::{TermLogger, TerminalMode};
+use tracing_subscriber::fmt;
 
 // TODO(#3): structured formatting lib (error,warning,note,help, etc)
 // TODO(#4): create test crate
@@ -21,16 +21,25 @@ fn run() -> Result<(), anyhow::Error> {
     use std::io::Write;
 
     let opt = Opt::from_args();
-    TermLogger::init(
-        if opt.verbose {
-            log::LevelFilter::Trace
-        } else {
-            log::LevelFilter::Info
-        },
-        Default::default(),
-        TerminalMode::Mixed,
-        simplelog::ColorChoice::Auto,
-    )?;
+
+    if let Some((_, filter)) = std::env::vars().find(|x| x.0 == "TRACC_TRACE") {
+        fmt::Subscriber::builder()
+            .with_ansi(true)
+            .pretty()
+            .with_env_filter(filter)
+            .init();
+    }
+
+    // TermLogger::init(
+    //     if opt.verbose {
+    //         log::LevelFilter::Trace
+    //     } else {
+    //         log::LevelFilter::Info
+    //     },
+    //     Default::default(),
+    //     TerminalMode::Mixed,
+    //     simplelog::ColorChoice::Auto,
+    // )?;
     let filename = opt.file;
     let file = fs::read_to_string(&filename)?;
     let out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
@@ -72,8 +81,4 @@ struct Opt {
     /// The (optional) output file
     #[structopt(short = "o", long = "output", parse(from_os_str))]
     output: Option<std::path::PathBuf>,
-
-    /// Verbose output?
-    #[structopt(short = "v", long = "verbose")]
-    verbose: bool,
 }

@@ -13,6 +13,9 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
         &ir,
         &crate::intermediate::analysis::compute_lifetimes(&ir),
     );
+
+    log::debug!("collisions: {collisions:?}");
+
     // TODO: integrate register spill output
     let registers::CodegenHints {
         need_move_to_return_reg,
