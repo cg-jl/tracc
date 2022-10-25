@@ -9,12 +9,12 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
+    tracing::trace!(target: "codegen", "begin codegen for {function_name}()");
+    tracing::debug!(target: "codegen", "{ir:?}");
     let collisions = crate::intermediate::analysis::compute_lifetime_collisions(
         &ir,
         &crate::intermediate::analysis::compute_lifetimes(&ir),
     );
-
-    log::debug!("collisions: {collisions:?}");
 
     // TODO: integrate register spill output
     let registers::CodegenHints {
@@ -24,7 +24,6 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
         mut registers,
     } = registers::alloc_registers(
         &ir,
-        &collisions,
         analysis::order_by_deps(&ir, collisions.keys().cloned()),
         registers::make_allocator_hints(&ir),
     );

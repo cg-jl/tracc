@@ -9,6 +9,7 @@ use std::collections::HashSet;
 
 pub type RegisterMap = HashMap<Binding, RegisterID>;
 
+#[derive(Debug)]
 pub enum AllocatorHints {
     InMemory,
     Usable {
@@ -20,6 +21,7 @@ pub enum AllocatorHints {
     },
 }
 
+#[derive(Debug)]
 enum ImmediateHint {
     InMemory,
     Usable {
@@ -158,7 +160,7 @@ fn is_callee_saved(register: u8) -> bool {
     (9..=15).contains(&register)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct CodegenHints {
     #[allow(dead_code)]
     /// list of bindings that couldn't be allocated the return register but are to be returned.
@@ -285,7 +287,10 @@ impl AllocatorState {
         collides_with: &HashSet<Binding>,
         register: u8,
     ) -> Option<RegisterID> {
+        tracing::trace!(target: "register_alloc::state", "Collisions: {collides_with:?} \\ {bucket:?}",
+                        bucket=&self.buckets[register as usize]);
         if self.buckets[register as usize].is_disjoint(collides_with) {
+            tracing::trace!(target: "register_alloc::state", "Found available {binding} -> x{register}");
             self.buckets[register as usize].insert(binding);
             Some(RegisterID::GeneralPurpose { index: register })
         } else {
@@ -342,18 +347,251 @@ impl AllocatorState {
     }
 }
 
+// To simplify allocation, we're going to split them by blocks. Each block gets its starts and ends
+// for each binding being used.
+
+struct ActiveBindingSet {
+    bindings: Vec<Binding>,
+}
+
+use crate::intermediate::analysis::lifetimes::BlockAddress;
+
+impl ActiveBindingSet {
+    fn add(&mut self, binding: Binding, ends: &HashMap<Binding, usize>) {
+        let binding_end = ends[&binding];
+        for i in 0..self.bindings.len() {
+            if ends[&self.bindings[i]] > binding_end {
+                self.bindings.insert(i, binding);
+                return;
+            }
+        }
+        self.bindings.push(binding);
+    }
+
+    fn last(&self) -> Option<Binding> {
+        self.bindings.last().copied()
+    }
+
+    fn contains(&self, binding: Binding) -> bool {
+        self.bindings.contains(&binding)
+    }
+
+    fn remove(&mut self, binding: Binding) -> bool {
+        let found = self
+            .bindings
+            .iter()
+            .copied()
+            .position(|other| other == binding);
+
+        if let Some(i) = found {
+            self.bindings.remove(i);
+            true
+        } else {
+            false
+        }
+    }
+
+    const fn new() -> Self {
+        Self {
+            bindings: Vec::new(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.bindings.len()
+    }
+}
+
+type BindingGraph = HashMap<Binding, HashSet<Binding>>;
+
+// code stolen from sawblade, with some touches for phi nodes
+// NOTE: considers everything is 'dead' at the end of the block.
+fn linear_alloc_block(
+    codegen_hints: &mut CodegenHints,
+    phi_nodes: &mut BindingGraph,
+    phi_edges: &mut BindingGraph,
+    ordered_bindings_by_start: &[Binding],
+    used_through_call: &HashSet<Binding>,
+    used_in_return: &HashSet<Binding>,
+    starts: &HashMap<Binding, usize>,
+    ends: &HashMap<Binding, usize>,
+) {
+    let mut active = ActiveBindingSet::new();
+    let mut used = HashMap::new();
+
+    tracing::trace!(target: "alloc::registers::block", "ordered by start: {ordered_bindings_by_start:?}");
+    tracing::trace!(target: "alloc::registers::block", "ends: {ends:?}");
+    tracing::trace!(target: "alloc::registers::block", "starts: {starts:?}");
+
+    for binding in ordered_bindings_by_start.iter().copied() {
+        let start = starts[&binding];
+        tracing::trace!(target: "alloc::registers::block", "allocating {binding}, which starts at {start}");
+        // expire old intervals
+        let end_i = active
+            .bindings
+            .iter()
+            .position(|other| ends[other] > start)
+            .unwrap_or(active.bindings.len());
+
+        for dropped_binding in active.bindings.drain(..end_i) {
+            tracing::trace!(target: "alloc::registers", "dropping {dropped_binding}");
+            let reg = &codegen_hints.registers[&dropped_binding];
+            if used[reg] == 1 {
+                used.remove(reg);
+            } else {
+                // SAFE: the if above already asserted that we have the value.
+                *unsafe { used.get_mut(reg).unwrap_unchecked() } -= 1;
+            }
+        }
+
+        // sometimes the binding has been already allocated and we're just extending
+        // its lifetime, so it's ok
+        if let Some(already_allocated) = codegen_hints.registers.get(&binding).copied() {
+            tracing::trace!(target: "alloc::registers", "{binding} already allocated to {already_allocated:?}");
+            *used.entry(already_allocated).or_insert(0) += 1;
+            active.add(binding, ends);
+            continue;
+        }
+
+        let phi_alloc =  phi_edges
+            .remove(&binding)
+            .and_then(|edges| {
+                let allocs: HashSet<_> = edges
+                    .iter()
+                    .flat_map(|binding| codegen_hints.registers.get(binding).copied())
+                    .collect();
+
+                if allocs.is_empty() {
+                    None // not going to do anything, use another hint
+                } else {
+                    tracing::debug!(target: "register_alloc::phi::full", "found phi edges: {edges:?}");
+                    // allocate the same as the rest of bindings that it is target to
+                    debug_assert_eq!(
+                        allocs.len(),
+                        1,
+                        "Expecting all allocated edges to be in the same place"
+                        );
+                    // SAFE: assertion above.
+                    let unique_alloc = unsafe { allocs.into_iter().next().unwrap_unchecked() };
+                    tracing::trace!(target: "register_alloc::phi::full", "setting allocation through phi nodes: {unique_alloc:?}");
+
+                    Some(unique_alloc)
+                }
+            })
+        .or_else(|| {
+            phi_nodes.remove(&binding).map(|phi_nodes| {
+                // NOTE: might have to reorder allocations so that collisions are resolved
+                // must have allocated everyone
+                let allocs: Vec<_> = phi_nodes
+                    .iter()
+                    .flat_map(|binding| codegen_hints.registers.get(binding).copied())
+                    .collect();
+
+                tracing::trace!(target: "alloc::registers", "found phi nodes: {phi_nodes:?} | {allocs:?}");
+                debug_assert_eq!(
+                    allocs.len(),
+                    phi_nodes.len(),
+                    "All phi nodes must have been previously allocated"
+                    );
+
+                let allocs: HashSet<_> = allocs.into_iter().collect();
+
+                // NOTE: this will be removed if needed
+                debug_assert_eq!(
+                    allocs.len(),
+                    1,
+                    "All allocated phi nodes must be on the same register"
+                    );
+
+                let unique_alloc = allocs.into_iter().next().unwrap();
+                tracing::trace!(target: "alloc::registers", "found allocated phi node: {unique_alloc:?}");
+
+                unique_alloc
+            })
+        });
+
+        // try to find an available register.
+        let unused_register = phi_alloc.or_else(|| {
+            if used_through_call.contains(&binding) {
+                // try a callee-saved register, otherwise hint that we couldn't
+                (9..=15)
+                    .map(RegisterID::from)
+                    .find(|reg| !used.contains_key(reg))
+                    .or_else(|| {
+                        (0..15)
+                            .chain((16..=30))
+                            .map(RegisterID::from)
+                            .find(|reg| !used.contains_key(reg))
+                            .map(|reg| {
+                                codegen_hints.save_upon_call.insert(binding);
+                                reg
+                            })
+                    })
+            } else {
+                (0..15)
+                    .chain((16..=30))
+                    .chain((9..=15))
+                    .map(RegisterID::from)
+                    .find(|reg| !used.contains_key(reg))
+            }
+        });
+
+        // spill one to get this one
+        let found_register = unused_register.or_else(|| {
+            // SAFE: we know that there must be at least one active binding, since all of our
+            // registers are occupied.
+            let longest_lived = unsafe { active.last().unwrap_unchecked() };
+            if ends[&longest_lived] > ends[&binding] {
+
+                tracing::trace!(target: "register_alloc", "spilling {longest_lived} in favor of {binding}");
+                // spill the longest lived and allocate this one since it has a shorter span.
+                active.remove(longest_lived);
+                codegen_hints.completely_spilled.insert(longest_lived);
+                let reg = unsafe {
+                    codegen_hints
+                        .registers
+                        .insert(longest_lived, RegisterID::StackPointer)
+                        .unwrap_unchecked()
+                };
+                *used.entry(reg).or_default() += 1;
+                Some(reg)
+            } else {
+                None
+            }
+        });
+
+        if let Some(register) = found_register {
+            tracing::trace!(target: "alloc::registers", "found register {register:?} for {binding}");
+            assert!(
+                used.insert(register, 1).is_none(),
+                "this register shouldn't be being used!"
+            );
+            codegen_hints.registers.insert(binding, register);
+            active.add(binding, ends);
+        } else {
+            codegen_hints.completely_spilled.insert(binding);
+            codegen_hints
+                .registers
+                .insert(binding, RegisterID::StackPointer);
+        }
+    }
+}
+
 pub fn alloc_registers(
     ir: &IR,
-    collisions: &CollisionMap,
     need_allocation: Vec<Binding>,
     alloc_hints: HashMap<Binding, AllocatorHints>,
 ) -> CodegenHints {
+    tracing::trace!(target: "register_alloc", "requested allocations: {need_allocation:?}");
+    tracing::trace!(target: "register_alloc", "allocator hints: {alloc_hints:?}");
     // TODO: reserve phi nodes hints for later, when all of its dependencies are allocated.
     // and so on.
     let mut state = AllocatorState::new();
     let mut might_need_call_save = HashSet::new();
     let mut might_need_move_to_x0 = HashSet::new();
-    let (immediate_alloc_hints, mut phi_nodes, mut phi_edges) = {
+    let (immediate_alloc_hints, mut phi_nodes, mut phi_edges, used_in_return, used_through_call) = {
+        let mut used_in_return_set = HashSet::new();
+        let mut used_through_call_set = HashSet::new();
         let mut immediate_allocs = HashMap::new();
         let mut phi_nodes = HashMap::new();
         let mut phi_targets = HashMap::new();
@@ -361,6 +599,7 @@ pub fn alloc_registers(
         for (binding, hints) in alloc_hints {
             match hints {
                 AllocatorHints::InMemory => {
+                    tracing::debug!(target: "register_alloc::hints", "found memory use case: {binding}");
                     immediate_allocs.insert(binding, ImmediateHint::InMemory);
                 }
                 AllocatorHints::Usable {
@@ -371,11 +610,17 @@ pub fn alloc_registers(
                     is_phi_node_with,
                 } => {
                     if used_through_call {
+                        used_through_call_set.insert(binding);
+                        tracing::debug!(target: "register_alloc::hints", "found used through call: {binding}");
                         might_need_call_save.insert(binding);
                     }
                     if used_in_return {
+                        used_in_return_set.insert(binding);
+
+                        tracing::debug!(target: "register_alloc::hints", "found used in return: {binding}");
                         might_need_move_to_x0.insert(binding);
                     }
+
                     immediate_allocs.insert(
                         binding,
                         ImmediateHint::Usable {
@@ -385,189 +630,45 @@ pub fn alloc_registers(
                         },
                     );
                     if let Some(nodes) = from_phi_node {
+                        tracing::trace!(target: "register_alloc::hints", "found source phi node for {binding}: {nodes:?}");
                         phi_nodes.insert(binding, nodes);
                     }
                     if !is_phi_node_with.is_empty() {
+                        tracing::trace!(target: "register_alloc::hints", "found phi node usage neighbors for {binding}: {is_phi_node_with:?}");
                         phi_targets.insert(binding, is_phi_node_with);
                     }
                 }
             };
         }
 
-        (immediate_allocs, phi_nodes, phi_targets)
+        (
+            immediate_allocs,
+            phi_nodes,
+            phi_targets,
+            used_in_return_set,
+            used_through_call_set,
+        )
     };
 
-    let mut starting_allocs: HashMap<_, _> = immediate_alloc_hints
-        .into_iter()
-        .flat_map(|(binding, hint)| {
-            let collisions = &collisions.get(&binding).unwrap();
-            match hint {
-                ImmediateHint::InMemory => {
-                    state.spill(binding);
-                    None
-                }
-                ImmediateHint::Usable {
-                    used_in_return,
-                    is_zero,
-                    used_through_call,
-                } => {
-                    if used_through_call {
-                        // if the binding is returned, we *probably* assigned a non-return register, so set it
-                        // to move to return
-                        if used_in_return {
-                            state.need_move_to_return_reg.insert(binding);
-                        }
-                        // we're going to look through the buckets and check our collisions to find if we can
-                        // allocate a callee-saved register
-                        state.try_saved_register(binding, collisions).or_else(|| {
-                            state.try_nonsaved_register(binding, collisions).map(|x| {
-                                state.save_when_call.insert(binding);
-                                x
-                            })
-                        })
-                    } else if used_in_return {
-                        state.try_register(binding, collisions, 0).or_else(|| {
-                            state.try_standard_alloc(binding, collisions).map(|x| {
-                                state.need_move_to_return_reg.insert(binding);
-                                x
-                            })
-                        })
-                    } else {
-                        is_zero.then(|| state.is_zero(binding))
-                    }
-                }
-            }
-            .map(|alloc| (binding, alloc))
-        })
-        .collect();
+    let mut hints = CodegenHints::default();
+    use crate::intermediate::analysis;
 
-    // strategy #1: For non-returned bindings, non-phi bindings, bindings that don't need to live after a call
-    // we're just going to try and allocate
-    // those to non-callee-saved registers.
-    // returns the bindings that it could not allocate.
-    let mut allocated = HashSet::new();
-    for binding in need_allocation {
-        if allocated.contains(&binding) {
-            continue;
-        }
-        let collisions = collisions.get(&binding).unwrap();
-        allocated.insert(binding);
-        let phi_alloc = phi_edges
-            .remove(&binding)
-            .and_then(|edges| {
-                let allocs: HashSet<_> = edges
-                    .iter()
-                    .flat_map(|binding| state.get_allocation(*binding))
-                    .collect();
+    let mut all_lifetimes = analysis::lifetimes::make_sorted_lifetimes(ir);
 
-                if allocs.is_empty() {
-                    None // not going to do anything, use another hint
-                } else {
-                    // allocate the same as the rest of bindings that it is target to
-                    debug_assert_eq!(
-                        allocs.len(),
-                        1,
-                        "Expecting all allocated edges to be in the same place"
-                    );
-                    let unique_alloc = allocs.into_iter().next().unwrap();
-                    debug_assert!(
-                        state.try_alloc(binding, collisions, unique_alloc).is_some(),
-                        "Must be able to allocate binding on same register as its phi edges"
-                    );
-
-                    Some(unique_alloc)
-                }
-            })
-            .or_else(|| {
-                phi_nodes.remove(&binding).map(|phi_nodes| {
-                    // NOTE: might have to reorder allocations so that collisions are resolved
-                    // must have allocated everyone
-                    let allocs: Vec<_> = phi_nodes
-                        .iter()
-                        .flat_map(|binding| state.get_allocation(*binding))
-                        .collect();
-
-                    debug_assert_eq!(
-                        allocs.len(),
-                        phi_nodes.len(),
-                        "All phi nodes must have been previously allocated"
-                    );
-
-                    let allocs: HashSet<_> = allocs.into_iter().collect();
-
-                    // NOTE: this will be removed if needed
-                    debug_assert_eq!(
-                        allocs.len(),
-                        1,
-                        "All allocated phi nodes must be on the same register"
-                    );
-
-                    let unique_alloc = allocs.into_iter().next().unwrap();
-
-                    debug_assert!(
-                        state.try_alloc(binding, collisions, unique_alloc).is_some(),
-                        "Must be able to allocate binding on same register as its phi nodes"
-                    );
-                    unique_alloc
-                })
-            });
-        let final_alloc = phi_alloc
-            .or_else(|| starting_allocs.remove(&binding))
-            .or_else(|| state.try_standard_alloc(binding, collisions));
-
-        if might_need_move_to_x0.contains(&binding)
-            && final_alloc
-                .filter(|alloc| !matches!(alloc, RegisterID::GeneralPurpose { index: 0 }))
-                .is_some()
-        {
-            state.need_move_to_return_reg.insert(binding);
-        }
-
-        if might_need_call_save.contains(&binding)
-            && final_alloc
-                .filter(|alloc| {
-                    if let RegisterID::GeneralPurpose { index } = alloc {
-                        !is_callee_saved(*index)
-                    } else {
-                        false /* non-gp registers are not read-only */
-                    }
-                })
-                .is_some()
-        {
-            state.save_when_call.insert(binding);
-        }
-
-        if final_alloc.is_none() {
-            state.spill(binding);
-        }
+    for full_lifetime in all_lifetimes {
+        linear_alloc_block(
+            &mut hints,
+            &mut phi_nodes,
+            &mut phi_edges,
+            &full_lifetime.ordered_by_start,
+            &used_through_call,
+            &used_in_return,
+            &full_lifetime.binding_starts,
+            &full_lifetime.binding_ends,
+        );
     }
 
-    CodegenHints {
-        need_move_to_return_reg: state.need_move_to_return_reg,
-        save_upon_call: state.save_when_call,
-        completely_spilled: state.spills,
-        registers: state
-            .buckets
-            .into_iter()
-            .enumerate()
-            .flat_map(|(register, bindings)| {
-                bindings.into_iter().map(move |binding| {
-                    (
-                        binding,
-                        RegisterID::GeneralPurpose {
-                            index: register as u8,
-                        },
-                    )
-                })
-            })
-            .chain(
-                state
-                    .got_zero
-                    .into_iter()
-                    .map(|binding| (binding, RegisterID::ZeroRegister)),
-            )
-            .collect(),
-    }
+    hints
 }
 
 // TODO: collides != contains. We need `contains` for making scopes.
@@ -643,12 +744,7 @@ int main() {
             crate::intermediate::analysis::compute_lifetime_collisions(&ir, &lifetimes);
         // TODO: test traversal for allocator hints
         let hints = make_allocator_hints(&ir);
-        let result = alloc_registers(
-            &ir,
-            &collisions,
-            collisions.keys().cloned().collect(),
-            hints,
-        );
+        let result = alloc_registers(&ir, collisions.keys().cloned().collect(), hints);
         assert!(
             result.need_move_to_return_reg.is_empty(),
             "The return register should be directly available for the needing binding"

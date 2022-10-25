@@ -1,5 +1,10 @@
-use crate::intermediate::{analysis, Binding, BlockBinding, BlockEnd, Branch, Statement, IR};
-use std::collections::{HashMap, HashSet};
+use crate::intermediate::{
+    analysis, Binding, BlockBinding, BlockEnd, Branch, Statement, Value, IR,
+};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::ControlFlow,
+};
 
 pub type LifetimeMap = HashMap<Binding, Lifetime>;
 
@@ -235,6 +240,12 @@ impl Lifetime {
             self.ends
                 .iter()
                 .filter(|&a_end| other.start.happens_before(ir, *a_end))
+                .filter(|&a_end| {
+                    other
+                        .ends
+                        .iter()
+                        .any(|b_end| a_end.happens_before(ir, *b_end))
+                })
                 .map(|end| (self.start, *end))
                 .collect()
         } else if other.start.happens_before(ir, self.start) {
@@ -242,12 +253,103 @@ impl Lifetime {
                 .ends
                 .iter()
                 .filter(|&b_end| self.start.happens_before(ir, *b_end))
+                .filter(|&b_end| {
+                    self.ends
+                        .iter()
+                        .any(|a_end| b_end.happens_before(ir, *a_end))
+                })
                 .map(|end| (other.start, *end))
                 .collect()
         } else {
             HashSet::new()
         }
     }
+}
+
+#[derive(Default)]
+pub struct BlockLifetimes {
+    pub ordered_by_start: Vec<Binding>,
+    pub binding_starts: HashMap<Binding, usize>,
+    pub binding_ends: HashMap<Binding, usize>,
+}
+
+pub fn make_sorted_lifetimes(ir: &IR) -> Vec<BlockLifetimes> {
+    let mut lasting_lifetimes = vec![HashSet::new(); ir.code.len()].into_boxed_slice();
+    let mut collected = Vec::with_capacity(ir.code.len());
+    for block in analysis::TopBottomTraversal::from(ir) {
+        // collect our
+        let mut this_block_lifetimes = analysis::antecessors(ir, block)
+            .flat_map(|block| lasting_lifetimes[block.0].iter().copied())
+            .collect();
+
+        // calculate the block's local lifetimes.
+        let mut calcd_lifetimes =
+            make_block_lifetimes(&ir[block].statements, &mut this_block_lifetimes);
+
+        lasting_lifetimes[block.0] = this_block_lifetimes;
+
+        collected.push(calcd_lifetimes);
+    }
+    collected
+}
+
+// NOTE: this doesn't take into account lifetimes that go through a block, but are not used in that
+// block.
+// We'll have to take into account those by keeping track of what values are alive on each block
+// and if they end, remove that "aliveness" for the rest of the branch.... For that I'll need to
+// look at all the block's antecessors and any value that hasn't found and end
+fn make_block_lifetimes(block: &[Statement], still_alive: &mut HashSet<Binding>) -> BlockLifetimes {
+    let mut result: BlockLifetimes = Default::default();
+    tracing::info!(target: "lifetimes::block", "filling in lifetime information");
+
+    for (statement, stmt) in block.iter().enumerate() {
+        use analysis::BindingUsage;
+
+        // if the value is not a phi node, set the starts of these values if they haven't started
+        // here.
+        if let Statement::Assign { index, value } = stmt {
+            // visit first the value bindings so that any values that are used here start before
+            // the target is assigned.
+            value.visit_value_bindings(|visited| {
+                tracing::trace!(target: "lifetimes::block", "starts here: {visited}");
+                if !result.ordered_by_start.contains(&visited) {
+                    result.ordered_by_start.push(visited);
+                }
+                result.binding_starts.entry(visited).or_insert(0);
+                result.binding_ends.insert(visited, block.len());
+                ControlFlow::<(), ()>::Continue(())
+            });
+
+            tracing::trace!(target: "lifetimes::block", "starts here: {index}");
+            result.ordered_by_start.push(*index);
+            result.binding_starts.insert(*index, statement);
+            result.binding_ends.insert(*index, block.len()); // assume it spans the whole block
+                                                             // unless proven otherwise.
+        }
+
+        stmt.visit_value_bindings(|visited| {
+            tracing::trace!(target: "lifetimes::block", "ends here: {visited}");
+            // NOTE: we're only storing the last encounter of each visited binding. This way we ensure
+            still_alive.remove(&visited);
+            result.binding_ends.insert(visited, statement);
+            ControlFlow::<(), ()>::Continue(())
+        });
+    }
+
+    // for any still alive binding, we'll add a start and an end to it since they pass through this
+    // block.
+    for alive in still_alive.iter().copied() {
+        result.ordered_by_start.push(alive);
+        result.binding_starts.insert(alive, 0);
+        result.binding_ends.insert(alive, block.len());
+    }
+
+    // NOTE :needs stable sort since the order that we visited the bindings in matters.
+    result
+        .ordered_by_start
+        .sort_by_key(|binding| result.binding_starts[binding]);
+
+    result
 }
 
 #[derive(Clone, Debug)]
@@ -266,7 +368,7 @@ impl std::fmt::Debug for BlockAddress {
 }
 
 // TODO: move `Debug` impls to a separate module
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockAddress {
     pub block: BlockBinding,
     pub statement: usize,

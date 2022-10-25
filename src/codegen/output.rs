@@ -109,6 +109,8 @@ impl fmt::Debug for AssemblyOutput {
             }
         }
 
-        f.debug_list().entries(self.0.iter().map(DoDisplay)).finish()
+        f.debug_list()
+            .entries(self.0.iter().map(DoDisplay))
+            .finish()
     }
 }

@@ -59,10 +59,7 @@ pub trait BindingUsage {
     // Check if a binding is used
     fn contains_binding(&self, binding: Binding) -> bool;
     // Get all the dependencies
-    fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
-        &self,
-        f: &mut F,
-    ) -> ControlFlow<B>;
+    fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(&self, f: F) -> ControlFlow<B>;
 }
 
 impl BindingUsage for Binding {
@@ -72,7 +69,7 @@ impl BindingUsage for Binding {
 
     fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
         &self,
-        f: &mut F,
+        mut f: F,
     ) -> ControlFlow<B> {
         f(*self)
     }
@@ -88,7 +85,7 @@ impl BindingUsage for CouldBeConstant {
 
     fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
         &self,
-        f: &mut F,
+        mut f: F,
     ) -> ControlFlow<B> {
         match self {
             CouldBeConstant::Binding(b) => b.visit_value_bindings(f),
@@ -136,7 +133,7 @@ impl BindingUsage for Value {
 
     fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
         &self,
-        f: &mut F,
+        mut f: F,
     ) -> ControlFlow<B> {
         match self {
             Value::Constant(_) | Value::Allocate { size: _ } => ControlFlow::Continue(()),
@@ -190,7 +187,7 @@ impl BindingUsage for Statement {
 
     fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
         &self,
-        f: &mut F,
+        mut f: F,
     ) -> ControlFlow<B> {
         match self {
             Self::Store {
@@ -201,7 +198,7 @@ impl BindingUsage for Statement {
                 f(*binding)?;
                 f(*mem_binding)
             }
-            Self::Assign { index: _, value } => value.visit_value_bindings(f),
+            Self::Assign { index: _, value } => value.visit_value_bindings(&mut f),
         }
     }
 }
@@ -222,11 +219,11 @@ impl BindingUsage for BasicBlock {
 
     fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
         &self,
-        f: &mut F,
+        mut f: F,
     ) -> ControlFlow<B> {
         self.statements
             .iter()
-            .try_for_each(|s| s.visit_value_bindings(f))?;
+            .try_for_each(|s| s.visit_value_bindings(&mut f))?;
 
         match &self.end {
             BlockEnd::Branch(Branch::Conditional { flag, .. }) => f(*flag),
@@ -243,10 +240,10 @@ impl BindingUsage for IR {
 
     fn visit_value_bindings<B, F: FnMut(Binding) -> ControlFlow<B>>(
         &self,
-        f: &mut F,
+        mut f: F,
     ) -> ControlFlow<B> {
         self.code
             .iter()
-            .try_for_each(|block| block.visit_value_bindings(f))
+            .try_for_each(|block| block.visit_value_bindings(&mut f))
     }
 }

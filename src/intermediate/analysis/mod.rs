@@ -169,7 +169,7 @@ pub struct BottomTopTraversal<'code> {
 }
 
 impl<'code> BottomTopTraversal<'code> {
-    fn new(ir: &'code IR, queue: Vec<BlockBinding>) -> Self {
+    pub fn new(ir: &'code IR, queue: Vec<BlockBinding>) -> Self {
         Self {
             backwards_map: &ir.backwards_map,
             visited: HashSet::new(),

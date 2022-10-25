@@ -1,3 +1,4 @@
+#![feature(result_option_inspect)]
 #![feature(if_let_guard)]
 #[allow(unused)]
 pub mod allocators;

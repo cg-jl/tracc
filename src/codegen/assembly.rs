@@ -403,6 +403,12 @@ pub enum RegisterID {
     ZeroRegister,
 }
 
+impl From<u8> for RegisterID {
+    fn from(index: u8) -> Self {
+        Self::GeneralPurpose { index }
+    }
+}
+
 impl fmt::Display for Register {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
