@@ -266,7 +266,7 @@ impl Lifetime {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 pub struct BlockLifetimes {
     pub ordered_by_start: Vec<Binding>,
     pub binding_starts: HashMap<Binding, usize>,

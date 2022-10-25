@@ -31,114 +31,111 @@ use crate::intermediate::analysis::{self, CollisionMap, Lifetime};
 
 type AllocMap = HashMap<Binding, usize>;
 
-pub fn figure_out_allocations(
-    ir: &IR,
-    allocations_needed: AllocMap,
-    lifetime_collisions: &analysis::lifetimes::CollisionMap,
-) -> (MemoryMap, usize) {
-    tracing::debug!(target: "memory_allocation",  "requested allocations: {allocations_needed:?}");
+pub fn figure_out_allocations(ir: &IR, mut allocations_needed: AllocMap) -> (MemoryMap, usize) {
+    let all = make_memory_lifetimes(ir, &allocations_needed);
 
-    let memory_lifetimes = compute_memory_lifetimes(ir, &allocations_needed);
-    let collision_map = analysis::compute_lifetime_collisions(ir, &memory_lifetimes);
-
-    tracing::debug!(target: "memory_allocation", "allocation collisions: {collision_map:?}");
-    tracing::debug!(target: "memory_allocation", "{ir:?}");
-
-    let mut local_collisions = CollisionMap::new();
-
-    collision_map
-        .iter()
-        .chain(lifetime_collisions.into_iter())
-        .filter_map(|(k, set)| {
-            if allocations_needed.contains_key(k) {
-                Some((
-                    *k,
-                    set.iter()
-                        .filter(|k| allocations_needed.contains_key(k))
-                        .copied()
-                        .collect::<HashSet<_>>(),
-                ))
-            } else {
-                None
-            }
-        })
-        .for_each(|(k, set)| match local_collisions.entry(k) {
-            std::collections::hash_map::Entry::Occupied(mut occ) => occ.get_mut().extend(set),
-            std::collections::hash_map::Entry::Vacant(vac) => {
-                vac.insert(set);
-            }
-        });
-
-    let mut local_collisions: Vec<(_, HashSet<_>)> = collision_map
-        .iter()
-        .chain(lifetime_collisions.into_iter())
-        .filter_map(|(k, set)| {
-            if allocations_needed.contains_key(k) {
-                Some((
-                    *k,
-                    set.iter()
-                        .filter(|k| allocations_needed.contains_key(k))
-                        .copied()
-                        .collect(),
-                ))
-            } else {
-                None
-            }
-        })
-        .collect();
-    local_collisions.sort_by_key(|(_, v)| v.len());
-    let mut blocks: Vec<HashSet<_>> = Vec::new();
-
-    for (binding, collisions) in local_collisions {
-        // if we find some block where there are no other collisions, we can put it there.
-        // otherwise we'll have to allocate a new block for it.
-        if let Some(block_index) = blocks.iter().enumerate().find_map(|(i, set)| {
-            // we want to know if there are no collisions in common
-            if set.is_disjoint(&collisions) {
-                Some(i)
-            } else {
-                None
-            }
-        }) {
-            blocks[block_index].insert(binding);
+    tracing::trace!(target: "alloc::memory", "aligning allocations: {allocations_needed:?}");
+    // align all the allocations to four bytes.
+    for value in allocations_needed.values_mut() {
+        let rem = *value % 4;
+        if rem == 0 {
+            *value = *value / 4;
         } else {
-            let mut new_block = HashSet::new();
-            new_block.insert(binding);
-            blocks.push(new_block);
+            *value = *value / 4 + 1;
         }
     }
 
-    // allocation is done, now we gotta transform the data into offsets
+    tracing::debug!(target: "alloc::memory", "aligned allocations to blocks: {allocations_needed:?}");
+    use crate::allocators::registers::ActiveBindingSet;
 
-    let mut offsets = HashMap::new();
-    let mut size = 0;
+    let mut allocated_blocks = HashMap::new();
 
-    for block in blocks {
-        // assign the offset as the current size
-        offsets.extend(block.iter().copied().map(|binding| (binding, size)));
+    // per block, let's allocate memory!
+    let mut total_blocks = 0usize;
+    for lifetime in all {
+        let mut active = ActiveBindingSet::new();
+        let mut free_blocks = HashSet::new();
+        for binding in lifetime.ordered_by_start.iter().copied() {
+            let start = lifetime.binding_starts[&binding];
 
-        // now we bump the size by the max value of those allocations
-        size += block
-            .into_iter()
-            .map(|binding| allocations_needed[&binding])
-            .max()
-            .unwrap();
+            tracing::debug!(target: "alloc::memory::block", "allocating {binding} @{start}");
+
+            // expire old intervals
+            tracing::trace!(target: "alloc::memory::block", "currently active: {active:?}");
+            let end_i = active
+                .bindings
+                .iter()
+                .position(|other| lifetime.binding_ends[other] > start)
+                .unwrap_or(active.bindings.len());
+
+            for dropped_binding in active.bindings.drain(..end_i) {
+                tracing::trace!(target: "alloc::memory::block", "freeing {dropped_binding}");
+                let location = allocated_blocks[&dropped_binding];
+                for i in 0..allocations_needed[&dropped_binding] {
+                    free_blocks.insert(i + location);
+                }
+            }
+
+            let allocated_size = allocations_needed[&binding];
+
+            if let Some(already_allocated) = allocated_blocks.get(&binding).copied() {
+                tracing::trace!(target: "alloc::memory", "{binding} already allocated to offset {already_allocated:?}");
+
+                for block_offset in 0..allocated_size {
+                    free_blocks.remove(&(block_offset + already_allocated));
+                }
+                active.add(binding, &lifetime.binding_ends);
+                continue;
+            }
+
+            // unlike with registers, this never fails since we suppose we have unlimited memory.
+            // find a spot with N consecutive free blocks.
+            let found_offset = (0..=total_blocks.saturating_sub(allocated_size))
+                .position(|i| (0..allocated_size).all(|offset| free_blocks.contains(&(i + offset))))
+                .unwrap_or_else(|| {
+                    // try to find a spot at the end where some amount of blocks is free, so we don't
+                    // have to allocate extra blocks for some part of the allocation.
+                    let free_block_count_at_end = (0..total_blocks)
+                        .rev()
+                        .take_while(|i| free_blocks.contains(i))
+                        .count();
+                    if free_block_count_at_end >= allocated_size {
+                        tracing::warn!(target: "alloc::memory", "found needed consecutive blocks on fallback");
+                        total_blocks - allocated_size
+                    } else {
+                        let needed_extra_alloc = allocated_size - free_block_count_at_end;
+                        tracing::trace!(target: "alloc::memory", "found {free_block_count_at_end} blocks that can be reused with the {needed_extra_alloc} extra blocks");
+                        let offset = total_blocks - free_block_count_at_end;
+                        total_blocks += needed_extra_alloc;
+                        offset
+                    }
+                });
+
+            allocated_blocks.insert(binding, found_offset);
+
+            for i in 0..allocated_size {
+                // NOTE: since the blocks could be new, they won't be in the 'free' set, since
+                // it makes no sense adding them to the 'free' set and removing them right after.
+                free_blocks.remove(&(i + found_offset));
+            }
+            active.add(binding, &lifetime.binding_ends);
+        }
     }
 
     (
-        offsets
+        allocated_blocks
             .into_iter()
-            .map(|(binding, offset)| {
+            .map(|(binding, block)| {
                 (
                     binding,
                     assembly::Memory {
                         register: assembly::Register::StackPointer,
-                        offset: assembly::Offset::Determined(offset),
+                        offset: assembly::Offset::Determined(block * 4),
                     },
                 )
             })
             .collect(),
-        size,
+        total_blocks,
     )
 }
 
@@ -152,140 +149,91 @@ pub fn make_alloc_map(code: &[BasicBlock]) -> AllocMap {
 // tracks per dependency where it is loaded.
 pub type LoadDependencies = HashMap<Binding, HashSet<analysis::lifetimes::BlockAddress>>;
 
-fn find_load_dependencies<'c>(
+pub fn make_memory_lifetimes(
     ir: &IR,
-    binding: Binding,
-    cache: &'c mut HashMap<Binding, LoadDependencies>,
-) -> &'c LoadDependencies {
-    use analysis::BindingUsage;
+    allocations_needed: &AllocMap,
+) -> Vec<analysis::lifetimes::BlockLifetimes> {
+    // memory lifetimes are more tricky because memory bindings have 'multiple' starts and ends.
+    // Since the allocator accounts for bindings that it has already allocated (those just
+    // contribute to the free blocks), we can push multiple starts and ends per memory. We'll also
+    // have to take into account the lifetimes that pass through blocks without being used
+    // explicitly inside them.
+    let mut alive_memories = vec![HashSet::new(); ir.code.len()].into_boxed_slice();
+    let mut all = vec![analysis::lifetimes::BlockLifetimes::default(); ir.code.len()];
 
-    // NOTE: it's ok to make a copy of the reference here since the exclusivity is proven
-    // by means of control flow: There's no parallel thing going on.
-    let cache_ref_copy = unsafe {
-        let ptr = cache as *mut HashMap<_, _>;
-        ptr.as_mut().unwrap_unchecked()
-    };
-
-    if let Some(cached) = cache.get(&binding) {
-        return cached;
-    }
-
-    let mut deps = LoadDependencies::new();
-    let (value, address) = analysis::find_assignment_value_with_adress(&ir.code, binding).unwrap();
-
-    if let Value::Load { mem_binding, .. } = value {
-        deps.entry(*mem_binding).or_default().insert(address);
-    }
-
-    value.visit_value_bindings(&mut |dep| {
-        deps.extend(
-            find_load_dependencies(ir, dep, cache_ref_copy)
-                .iter()
-                .map(|(x, y)| (*x, y.clone())),
-        );
-        std::ops::ControlFlow::<(), ()>::Continue(())
-    });
-
-    cache_ref_copy.insert(binding, deps);
-    // SAFE: we've just inserted it.
-    unsafe { cache.get(&binding).unwrap_unchecked() }
-}
-
-pub fn compute_memory_lifetimes(ir: &IR, allocated_memories: &AllocMap) -> Vec<Lifetime> {
-    // step 1: collect memory lifetimes
-    let mut memory_lifetimes: HashMap<_, HashMap<BlockAddress, Vec<BlockAddress>>> =
-        allocated_memories
-            .keys()
-            .copied()
-            .map(|k| (k, HashMap::new()))
+    for block in analysis::TopBottomTraversal::from(ir) {
+        let mut this_block_alive_mems: HashSet<_> = ir
+            .backwards_map
+            .get(&block)
+            .into_iter()
+            .flat_map(|x| x.iter().copied())
+            .flat_map(|antecessor| alive_memories[antecessor.0].iter().copied())
             .collect();
 
-    let num_of_allocated_bindings = allocated_memories.keys().count();
-
-    let mut preceding_definitions: Vec<_> = ir
-        .code
-        .iter()
-        .map(|_| HashMap::with_capacity(num_of_allocated_bindings))
-        .collect();
-
-    for binding in allocated_memories.keys().copied() {
-        let first_definition = analysis::find_assignment_value_with_adress(&ir.code, binding)
-            .unwrap()
-            .1;
-        preceding_definitions.iter_mut().for_each(|def| {
-            def.insert(binding, first_definition);
-        });
-    }
-
-    for block in analysis::predecessors(ir, BlockBinding(0)) {
-        ir[block]
-            .statements
-            .iter()
-            .enumerate()
-            .filter_map(|(statement_index, statement)| {
-                if let Statement::Store {
-                    mem_binding,
-                    binding: _,
-                    byte_size: _,
-                } = statement
-                {
-                    Some((
-                        mem_binding,
-                        BlockAddress {
-                            block,
-                            statement: statement_index,
-                        },
-                    ))
-                } else {
-                    None
+        for (statement, stmt) in ir[block].statements.iter().enumerate() {
+            match stmt {
+                Statement::Assign {
+                    value: Value::Load { mem_binding, .. },
+                    ..
                 }
-            })
-            .filter(|(b, _)| allocated_memories.contains_key(b))
-            .for_each(|(stored_mem, position)| {
-                let lifetimes_for_mem = memory_lifetimes.entry(*stored_mem).or_default();
-                // mark this memory 'alive' at this position
-                lifetimes_for_mem.insert(position, Vec::new());
-
-                let one_statement_before = BlockAddress {
-                    block: position.block,
-                    statement: position.statement.saturating_sub(1),
-                };
-
-                // if there was a store of this same memory in the same block, make sure it's dead
-                // by here.
-                if let Some(old_store) =
-                    preceding_definitions[block.0].insert(*stored_mem, position)
+                | Statement::Store { mem_binding, .. }
+                    if allocations_needed.contains_key(mem_binding) =>
                 {
-                    lifetimes_for_mem
-                        .entry(old_store)
-                        .or_default()
-                        .push(one_statement_before);
-                } else {
-                    // for each antecessor of this block, if there was a store
-                    analysis::antecessors(&ir, block).for_each(|antecessor| {
-                        if let Some(old_store) =
-                            preceding_definitions[antecessor.0].insert(*stored_mem, position)
-                        {
-                            lifetimes_for_mem
-                                .entry(old_store)
-                                .or_default()
-                                .push(one_statement_before);
+                    // if we haven't encountered it already in this block, extend its lifetime
+                    // to here and mark its start
+                    if !all[block.0].binding_starts.contains_key(mem_binding) {
+                        tracing::trace!(target: "alloc::memory::lifetimes", "found usage of {mem_binding} for the first time at {block} @{statement}");
+                        for antecessor in analysis::antecessors(ir, block) {
+                            alive_memories[antecessor.0].insert(*mem_binding);
+                            // make the memory lifetime span to the end of each block (since it
+                            // continues to live up to here)
+                            all[antecessor.0]
+                                .binding_ends
+                                .insert(*mem_binding, ir[antecessor].statements.len());
                         }
-                    })
+                        all[block.0].ordered_by_start.push(*mem_binding);
+                        all[block.0].binding_starts.insert(
+                            *mem_binding,
+                            if this_block_alive_mems.contains(mem_binding) {
+                                0
+                            } else {
+                                statement
+                            },
+                        );
+                    }
+
+                    // set it as dead. Why? Well, it's the last use of the memory that we've seen.
+                    all[block.0].binding_ends.insert(*mem_binding, statement);
+                    this_block_alive_mems.remove(mem_binding);
                 }
-            });
+                _ => {}
+            }
+        }
+        // for all the memories still alive that weren't declared here push them into it.
+        for left_alive in this_block_alive_mems.iter().copied() {
+            if !all[block.0].binding_starts.contains_key(&left_alive) {
+                all[block.0].binding_starts.insert(left_alive, 0);
+                all[block.0].ordered_by_start.push(left_alive);
+                all[block.0]
+                    .binding_ends
+                    .insert(left_alive, ir[block].statements.len());
+            }
+        }
+
+        alive_memories[block.0] = this_block_alive_mems;
     }
 
-    memory_lifetimes
-        .into_iter()
-        .flat_map(|(k, v)| {
-            v.into_iter().map(move |(start, ends)| Lifetime {
-                attached_binding: k,
-                start,
-                ends: if ends.is_empty() { vec![start] } else { ends },
-            })
-        })
-        .collect()
+    for lifetimes in all.iter_mut() {
+        // NOTE: using unstable sort for now, until I have no other choice than keeping traversal
+        // order
+        let mut taken = core::mem::take(&mut lifetimes.ordered_by_start);
+        taken.sort_unstable_by_key(|k| lifetimes.binding_starts[k]);
+        lifetimes.ordered_by_start = taken;
+    }
+
+    tracing::debug!(target: "alloc::memory", "gathered memory lifetimes per block: {all:#?}");
+
+    all
 }
 
 /// List the memory allocations that the block defines

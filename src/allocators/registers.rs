@@ -350,14 +350,15 @@ impl AllocatorState {
 // To simplify allocation, we're going to split them by blocks. Each block gets its starts and ends
 // for each binding being used.
 
-struct ActiveBindingSet {
-    bindings: Vec<Binding>,
+#[derive(Debug)]
+pub struct ActiveBindingSet {
+    pub bindings: Vec<Binding>,
 }
 
 use crate::intermediate::analysis::lifetimes::BlockAddress;
 
 impl ActiveBindingSet {
-    fn add(&mut self, binding: Binding, ends: &HashMap<Binding, usize>) {
+    pub fn add(&mut self, binding: Binding, ends: &HashMap<Binding, usize>) {
         let binding_end = ends[&binding];
         for i in 0..self.bindings.len() {
             if ends[&self.bindings[i]] > binding_end {
@@ -368,15 +369,15 @@ impl ActiveBindingSet {
         self.bindings.push(binding);
     }
 
-    fn last(&self) -> Option<Binding> {
+    pub fn last(&self) -> Option<Binding> {
         self.bindings.last().copied()
     }
 
-    fn contains(&self, binding: Binding) -> bool {
+    pub fn contains(&self, binding: Binding) -> bool {
         self.bindings.contains(&binding)
     }
 
-    fn remove(&mut self, binding: Binding) -> bool {
+    pub fn remove(&mut self, binding: Binding) -> bool {
         let found = self
             .bindings
             .iter()
@@ -391,13 +392,13 @@ impl ActiveBindingSet {
         }
     }
 
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             bindings: Vec::new(),
         }
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.bindings.len()
     }
 }
