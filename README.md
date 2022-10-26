@@ -48,9 +48,7 @@ foo:
 	ldr w0, [sp]
 	ldr w1, [sp, #4]
 	cmp w0, w1
-	cset w0, gt
-	cmp w0, wzr
-	beq .LBB2
+	ble .LBB2
 	ldr w0, [sp]
 	ldr w1, [sp, #4]
 	sub w0, w0, w1
