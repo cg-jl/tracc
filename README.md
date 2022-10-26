@@ -42,23 +42,23 @@ Output assembly:
 foo:
 	sub sp, sp, #16
 	mov w1, #1
-	str w1, [sp, #4]
+	str w1, [sp]
 	mov w2, #2
-	str w2, [sp, #8]
-	ldr w2, [sp, #4]
-	ldr w3, [sp, #8]
-	cmp w2, w3
-	cset w2, gt
-	cmp w2, wzr
+	str w2, [sp, #4]
+	ldr w0, [sp]
+	ldr w1, [sp, #4]
+	cmp w0, w1
+	cset w0, gt
+	cmp w0, wzr
 	beq .LBB2
-	ldr w0, [sp, #4]
-	ldr w2, [sp, #8]
-	sub w0, w0, w2
+	ldr w0, [sp]
+	ldr w1, [sp, #4]
+	sub w0, w0, w1
 	b   .epilogue
 .LBB2:
-	ldr w0, [sp, #4]
-	ldr w2, [sp, #8]
-	add w0, w0, w2
+	ldr w0, [sp]
+	ldr w1, [sp, #4]
+	add w0, w0, w1
 .epilogue:
 	add sp, sp, #16
 	ret
