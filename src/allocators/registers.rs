@@ -1,5 +1,5 @@
 //! Register analysis of the code
-use crate::codegen::assembly::RegisterID;
+use crate::codegen::assembly::{Condition, RegisterID};
 use crate::intermediate::{analysis::CollisionMap, Binding, BlockEnd, IR};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -173,6 +173,9 @@ pub struct CodegenHints {
     /// set of bindings that could not be allocated, for whatever reason
     #[allow(dead_code)]
     pub completely_spilled: HashSet<Binding>,
+
+    /// Set of bindings that are just to store a condition.
+    pub stores_condition: HashMap<Binding, Condition>,
 
     /// The register assigned for the bindings
     pub registers: RegisterMap,
@@ -414,7 +417,6 @@ fn linear_alloc_block(
     ordered_bindings_by_start: &[Binding],
     used_through_call: &HashSet<Binding>,
     used_in_return: &HashSet<Binding>,
-    zeroes: &HashSet<Binding>,
     starts: &HashMap<Binding, usize>,
     ends: &HashMap<Binding, usize>,
 ) {
@@ -446,20 +448,19 @@ fn linear_alloc_block(
             }
         }
 
+        // do not allocate it. This way, if there's something wrong, codegen will panic saying
+        // that there was a binding that wasn't allocated but is needed inside a register.
+        if codegen_hints.stores_condition.contains_key(&binding) {
+            tracing::trace!(target: "alloc::registers", "{binding} was moved to store a flag");
+            continue;
+        }
+
         // sometimes the binding has been already allocated and we're just extending
         // its lifetime, so it's ok
         if let Some(already_allocated) = codegen_hints.registers.get(&binding).copied() {
             tracing::trace!(target: "alloc::registers", "{binding} already allocated to {already_allocated:?}");
             *used.entry(already_allocated).or_insert(0) += 1;
             active.add(binding, ends);
-            continue;
-        }
-
-        if zeroes.contains(&binding) {
-            tracing::trace!(target: "alloc::registers", "{binding} is zero");
-            codegen_hints
-                .registers
-                .insert(binding, RegisterID::ZeroRegister);
             continue;
         }
 
@@ -599,20 +600,13 @@ pub fn alloc_registers(
     let mut state = AllocatorState::new();
     let mut might_need_call_save = HashSet::new();
     let mut might_need_move_to_x0 = HashSet::new();
-    let (
-        immediate_alloc_hints,
-        mut phi_nodes,
-        mut phi_edges,
-        used_in_return,
-        used_through_call,
-        zeroes,
-    ) = {
+    let mut codegen_hints = CodegenHints::default();
+    let (immediate_alloc_hints, mut phi_nodes, mut phi_edges, used_in_return, used_through_call) = {
         let mut used_in_return_set = HashSet::new();
         let mut used_through_call_set = HashSet::new();
         let mut immediate_allocs = HashMap::new();
         let mut phi_nodes = HashMap::new();
         let mut phi_targets = HashMap::new();
-        let mut zeroes = HashSet::new();
 
         for (binding, hints) in alloc_hints {
             match hints {
@@ -641,7 +635,10 @@ pub fn alloc_registers(
 
                     // only put it in zero register
                     if is_zero && !used_in_return {
-                        zeroes.insert(binding);
+                        tracing::debug!(target: "register_alloc::hints", "{binding} is zero");
+                        codegen_hints
+                            .registers
+                            .insert(binding, RegisterID::ZeroRegister);
                     }
 
                     immediate_allocs.insert(
@@ -670,30 +667,29 @@ pub fn alloc_registers(
             phi_targets,
             used_in_return_set,
             used_through_call_set,
-            zeroes,
         )
     };
 
-    let mut hints = CodegenHints::default();
+    codegen_hints.stores_condition = super::flag::get_used_flags(ir).collect();
+
     use crate::intermediate::analysis;
 
     let mut all_lifetimes = analysis::lifetimes::make_sorted_lifetimes(ir);
 
     for full_lifetime in all_lifetimes {
         linear_alloc_block(
-            &mut hints,
+            &mut codegen_hints,
             &mut phi_nodes,
             &mut phi_edges,
             &full_lifetime.ordered_by_start,
             &used_through_call,
             &used_in_return,
-            &zeroes,
             &full_lifetime.binding_starts,
             &full_lifetime.binding_ends,
         );
     }
 
-    hints
+    codegen_hints
 }
 
 // TODO: collides != contains. We need `contains` for making scopes.

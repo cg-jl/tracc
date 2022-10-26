@@ -1,10 +1,14 @@
 pub mod assembly;
 pub mod has_binding;
-mod output; // TODO: change output for a better builder (block based, receives IR branching maps for finishing)
+mod output;
+use self::assembly::Condition;
+
+// TODO: change output for a better builder (block based, receives IR branching maps for finishing)
 use super::allocators::*;
 use super::intermediate::*;
 use output::AssemblyOutput;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
@@ -22,6 +26,7 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
         save_upon_call,
         mut completely_spilled,
         mut registers,
+        stores_condition,
     } = registers::alloc_registers(
         &ir,
         analysis::order_by_deps(&ir, collisions.keys().cloned()),
@@ -68,7 +73,7 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
         .code
         .into_iter()
         .map(|BasicBlock { statements, end }| {
-            let block = compile_block(statements, &memory, &registers);
+            let block = compile_block(statements, &memory, &registers, &stores_condition);
             (block, end)
         })
         .unzip();
@@ -195,19 +200,22 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
                     target_true,
                     target_false,
                 }) => {
+                    let (condition, flag_is_condition) = stores_condition
+                        .get(&flag)
+                        .copied()
+                        .map(|c| (c, true))
+                        .unwrap_or((assembly::Condition::NotEquals, false));
+
                     let (condition, condition_target, rest_target) = if target_true.0 == index + 1 {
-                        (assembly::Condition::Equals, target_false.0, target_true.0)
+                        (condition.opposite(), target_false.0, target_true.0)
                     } else {
                         needed_labels.insert(target_true.0);
-                        (
-                            assembly::Condition::NotEquals,
-                            target_true.0,
-                            target_false.0,
-                        )
+                        (condition, target_true.0, target_false.0)
                     };
                     needed_labels.insert(condition_target);
-                    block.extend(vec![
-                        assembly::Instruction::Cmp {
+
+                    if !flag_is_condition {
+                        block.push_back(assembly::Instruction::Cmp {
                             register: assembly::Register::from_id(
                                 registers[&flag],
                                 assembly::BitSize::Bit32,
@@ -215,12 +223,13 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
                             data: assembly::Data::Register(assembly::Register::ZeroRegister {
                                 bit_size: assembly::BitSize::Bit32,
                             }),
-                        },
-                        assembly::Instruction::Branch(assembly::Branch::Conditional {
-                            condition,
-                            label: get_label(condition_target),
-                        }),
-                    ]);
+                        });
+                    }
+
+                    block.push_back(assembly::Branch::Conditional {
+                        condition,
+                        label: get_label(condition_target),
+                    });
 
                     if rest_target != index + 1 {
                         needed_labels.insert(rest_target);
@@ -253,11 +262,28 @@ fn compile_block(
     block: Vec<Statement>,
     memory: &memory::MemoryMap,
     registers: &registers::RegisterMap,
+    stores_condition: &HashMap<Binding, Condition>,
 ) -> AssemblyOutput {
     block
         .into_iter()
         .fold(AssemblyOutput::new(), |output, statement| {
             output.chain(match statement {
+                Statement::Assign {
+                    index,
+                    value:
+                        Value::Cmp {
+                            condition,
+                            lhs,
+                            rhs,
+                        },
+                } if stores_condition.contains_key(&index) => assembly::Instruction::Cmp {
+                    register: assembly::Register::from_id(
+                        registers[&lhs],
+                        assembly::BitSize::Bit32,
+                    ),
+                    data: could_be_constant_to_data(rhs, registers),
+                }
+                .into(),
                 Statement::Assign { index, value } => {
                     let register = registers[&index];
                     compile_value(value, register, memory, registers)
