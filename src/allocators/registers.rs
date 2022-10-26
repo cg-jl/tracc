@@ -414,6 +414,7 @@ fn linear_alloc_block(
     ordered_bindings_by_start: &[Binding],
     used_through_call: &HashSet<Binding>,
     used_in_return: &HashSet<Binding>,
+    zeroes: &HashSet<Binding>,
     starts: &HashMap<Binding, usize>,
     ends: &HashMap<Binding, usize>,
 ) {
@@ -451,6 +452,14 @@ fn linear_alloc_block(
             tracing::trace!(target: "alloc::registers", "{binding} already allocated to {already_allocated:?}");
             *used.entry(already_allocated).or_insert(0) += 1;
             active.add(binding, ends);
+            continue;
+        }
+
+        if zeroes.contains(&binding) {
+            tracing::trace!(target: "alloc::registers", "{binding} is zero");
+            codegen_hints
+                .registers
+                .insert(binding, RegisterID::ZeroRegister);
             continue;
         }
 
@@ -590,12 +599,20 @@ pub fn alloc_registers(
     let mut state = AllocatorState::new();
     let mut might_need_call_save = HashSet::new();
     let mut might_need_move_to_x0 = HashSet::new();
-    let (immediate_alloc_hints, mut phi_nodes, mut phi_edges, used_in_return, used_through_call) = {
+    let (
+        immediate_alloc_hints,
+        mut phi_nodes,
+        mut phi_edges,
+        used_in_return,
+        used_through_call,
+        zeroes,
+    ) = {
         let mut used_in_return_set = HashSet::new();
         let mut used_through_call_set = HashSet::new();
         let mut immediate_allocs = HashMap::new();
         let mut phi_nodes = HashMap::new();
         let mut phi_targets = HashMap::new();
+        let mut zeroes = HashSet::new();
 
         for (binding, hints) in alloc_hints {
             match hints {
@@ -620,6 +637,11 @@ pub fn alloc_registers(
 
                         tracing::debug!(target: "register_alloc::hints", "found used in return: {binding}");
                         might_need_move_to_x0.insert(binding);
+                    }
+
+                    // only put it in zero register
+                    if is_zero && !used_in_return {
+                        zeroes.insert(binding);
                     }
 
                     immediate_allocs.insert(
@@ -648,6 +670,7 @@ pub fn alloc_registers(
             phi_targets,
             used_in_return_set,
             used_through_call_set,
+            zeroes,
         )
     };
 
@@ -664,6 +687,7 @@ pub fn alloc_registers(
             &full_lifetime.ordered_by_start,
             &used_through_call,
             &used_in_return,
+            &zeroes,
             &full_lifetime.binding_starts,
             &full_lifetime.binding_ends,
         );
