@@ -45,7 +45,7 @@ impl From<Vec<BasicBlock>> for IR {
 pub fn compile_function<'code>(
     f: ast::Function<'code>,
     source_meta: &SourceMetadata<'code>,
-) -> Result<(&'code str, IR), VarE> {
+) -> Result<(&'code str, IR), StE> {
     let ast::Function {
         name: ast::Identifier(name),
         body: ast::Block { statements },
@@ -60,6 +60,7 @@ pub fn compile_function<'code>(
         statements,
         &mut binding_counter,
         &mut env,
+        None,
         0,
         source_meta,
     )?;
@@ -256,4 +257,15 @@ pub enum VarError {
     Redeclared(String),
 }
 
+#[derive(Error, Debug)]
+pub enum StatementError {
+    #[error("{0}")]
+    Variable(#[from] VarError),
+    #[error("cannot continue if not inside a loop")]
+    UnwantedContinue,
+    #[error("cannot break if not inside a loop")]
+    UnwantedBreak,
+}
+
+type StE = error::Error<StatementError>;
 type VarE = error::Error<VarError>;

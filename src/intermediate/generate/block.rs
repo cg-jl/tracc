@@ -7,9 +7,10 @@ pub fn compile_block<'code>(
     statements: impl IntoIterator<Item = (ast::Statement<'code>, Span)>,
     bindings: &mut BindingCounter,
     variables: &mut VariableTracker<'code>,
+    current_loop: Option<statement::LoopStatus>,
     block_depth: usize,
     source_info: &SourceMetadata,
-) -> Result<BlockBuilder, VarE> {
+) -> Result<BlockBuilder, StE> {
     // clean the variables for now
     variables.variables_at_depth(block_depth).clear();
 
@@ -20,6 +21,7 @@ pub fn compile_block<'code>(
             bindings,
             st,
             variables,
+            current_loop,
             block_depth,
             source_info,
         )

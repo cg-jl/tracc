@@ -3,7 +3,7 @@ use super::{
     Parse, ParseRes, Parser,
 };
 use crate::{
-    ast::{Block, Expr, Identifier, Statement},
+    ast::{Block, Expr, Identifier, LoopKind, Statement},
     error::Span,
 };
 
@@ -33,17 +33,19 @@ impl<'source> Parse<'source> for (Statement<'source>, Span) {
                                     (
                                         Statement::Loop {
                                             condition,
-                                            body: (
-                                                Box::new(Statement::Block(
-                                                    if let Some(end) = end {
-                                                        vec![body, end]
-                                                    } else {
-                                                        vec![body]
-                                                    },
-                                                )),
-                                                body_span,
-                                            ),
-                                            is_do_while: false,
+                                            body: (Box::new(body.0), body_span),
+                                            kind: if let Some(on_iteration_end) = end {
+                                                LoopKind::For {
+                                                    on_iteration_end: (
+                                                        Box::new(on_iteration_end.0),
+                                                        on_iteration_end.1,
+                                                    ),
+                                                }
+                                            } else {
+                                                // a for loop without a statement at the end is
+                                                // just a scoped while loop.
+                                                LoopKind::While
+                                            },
                                         },
                                         body_span,
                                     ),
@@ -54,6 +56,23 @@ impl<'source> Parse<'source> for (Statement<'source>, Span) {
                                 },
                             )
                         }
+                        "break" => {
+                            let offset = parser.current_position();
+                            parser.accept_current();
+                            parser.expect_token(TokenKind::Semicolon)?;
+                            parser.accept_current();
+
+                            (Statement::LoopBreak, Span { offset, len: 5 })
+                        }
+                        "continue" => {
+                            let offset = parser.current_position();
+                            parser.accept_current();
+                            parser.expect_token(TokenKind::Semicolon)?;
+                            parser.accept_current();
+
+                            (Statement::LoopContinue, Span { offset, len: 5 })
+                        }
+
                         "while" => {
                             let offset = parser.current_position();
                             parser.accept_current();
@@ -65,7 +84,7 @@ impl<'source> Parse<'source> for (Statement<'source>, Span) {
                                 Statement::Loop {
                                     condition: (condition, condition_span),
                                     body: (Box::new(statement), statement_span),
-                                    is_do_while: false,
+                                    kind: LoopKind::While,
                                 },
                                 Span {
                                     offset,

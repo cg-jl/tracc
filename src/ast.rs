@@ -42,6 +42,15 @@ impl fmt::Debug for Block<'_> {
 }
 
 #[derive(Debug)]
+pub enum LoopKind<'source> {
+    DoWhile,
+    While,
+    For {
+        on_iteration_end: (Box<Statement<'source>>, Span),
+    },
+}
+
+#[derive(Debug)]
 pub enum Statement<'source> {
     Return((Expr<'source>, Span)),
     SingleExpr((Expr<'source>, Span)),
@@ -58,7 +67,7 @@ pub enum Statement<'source> {
     Loop {
         condition: (Expr<'source>, Span),
         body: (Box<Statement<'source>>, Span),
-        is_do_while: bool,
+        kind: LoopKind<'source>,
     },
     LoopBreak,
     LoopContinue,
@@ -89,12 +98,11 @@ fn format_statement(
         Statement::Loop {
             condition: (expr, expr_span),
             body: (body, body_span),
-            is_do_while,
+            kind,
         } => {
             write!(
                 f,
-                "{}Loop@{:?}\n{}",
-                if *is_do_while { "DoWhile" } else { "" },
+                "{kind:?}Loop@{:?}\n{}",
                 stmt_span.as_range(),
                 spacing + "    "
             )?;

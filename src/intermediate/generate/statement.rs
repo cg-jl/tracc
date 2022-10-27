@@ -1,20 +1,27 @@
 use super::*;
 use crate::ast;
 
+#[derive(Debug, Clone, Copy)]
+pub struct LoopStatus {
+    break_point: BlockBinding,
+    continue_point: BlockBinding,
+}
+
 pub fn compile_statement<'code>(
     state: &mut IRGenState,
     mut builder: BlockBuilder,
     bindings: &mut BindingCounter,
     statement: ast::Statement<'code>,
     variables: &mut VariableTracker<'code>,
+    current_loop: Option<LoopStatus>,
     block_depth: usize,
     source_meta: &SourceMetadata,
-) -> Result<BlockBuilder, VarE> {
+) -> Result<BlockBuilder, StE> {
     match statement {
         ast::Statement::Loop {
             condition: (condition, condition_span),
             body: (body, body_span),
-            is_do_while,
+            kind,
         } => {
             let condition_block = state.new_block();
             let body_block = state.new_block();
@@ -25,7 +32,7 @@ pub fn compile_statement<'code>(
 
             // a do while executes the body at least once, while the 'while' loop first checks
             // the condition.
-            let loop_entrypoint = if is_do_while {
+            let loop_entrypoint = if let ast::LoopKind::DoWhile = kind {
                 body_entrypoint
             } else {
                 condition_entrypoint
@@ -49,7 +56,10 @@ pub fn compile_statement<'code>(
                 block_depth,
                 source_meta,
             )
-            .map_err(|e| e.with_backup_source(condition_span, source_meta))?;
+            .map_err(|e| {
+                e.with_backup_source(condition_span, source_meta)
+                    .map_kind(From::from)
+            })?;
             // assign it to a binding
             let condition_binding = bindings.next_binding();
             condition_block.assign(condition_binding, condition_value);
@@ -63,6 +73,34 @@ pub fn compile_statement<'code>(
                 },
             );
 
+            // compile the last thing and link it if necessary
+            let continue_point = if let ast::LoopKind::For {
+                on_iteration_end: (stmt, span),
+            } = kind
+            {
+                let end_block = state.new_block();
+                let continue_point = end_block.block();
+                compile_statement(
+                    state,
+                    end_block,
+                    bindings,
+                    *stmt,
+                    variables,
+                    current_loop,
+                    block_depth,
+                    source_meta,
+                )?
+                .finish_block(
+                    state,
+                    BlockEnd::Branch(Branch::Unconditional {
+                        target: condition_entrypoint,
+                    }),
+                );
+                continue_point
+            } else {
+                loop_entrypoint
+            };
+
             // compile the body
             let mut body = compile_statement(
                 state,
@@ -70,6 +108,10 @@ pub fn compile_statement<'code>(
                 bindings,
                 *body,
                 variables,
+                Some(LoopStatus {
+                    continue_point,
+                    break_point: exit.block(),
+                }),
                 block_depth,
                 source_meta,
             )
@@ -79,16 +121,50 @@ pub fn compile_statement<'code>(
             body.finish_block(
                 state,
                 Branch::Unconditional {
-                    target: condition_entrypoint,
+                    target: continue_point,
                 },
             );
 
             // we end at the exit point
             Ok(exit)
         }
-        ast::Statement::LoopBreak | ast::Statement::LoopContinue => {
-            // first, we'll have to
-            todo!("loop break/continue")
+        ast::Statement::LoopBreak => {
+            let loop_status =
+                current_loop.ok_or_else(|| StE::new(StatementError::UnwantedBreak))?;
+            // make another block so everything continues normally, although it's going to
+            // get removed afterwards.
+            // TODO: make this return control flow so that I can make it stop processing when it
+            // finds a break/continue (and forward the breaking if we aren't hitting any
+            // branches/loop)
+            let unused_block = state.new_block();
+
+            builder.finish_block(
+                state,
+                BlockEnd::Branch(Branch::Unconditional {
+                    target: loop_status.break_point,
+                }),
+            );
+
+            Ok(unused_block)
+        }
+        ast::Statement::LoopContinue => {
+            let loop_status =
+                current_loop.ok_or_else(|| StE::new(StatementError::UnwantedBreak))?;
+            // make another block so everything continues normally, although it's going to
+            // get removed afterwards.
+            // TODO: make this return control flow so that I can make it stop processing when it
+            // finds a break/continue (and forward the breaking if we aren't hitting any
+            // branches/loop)
+            let unused_block = state.new_block();
+
+            builder.finish_block(
+                state,
+                BlockEnd::Branch(Branch::Unconditional {
+                    target: loop_status.continue_point,
+                }),
+            );
+
+            Ok(unused_block)
         }
         ast::Statement::Return((expr, expr_span)) => {
             let ret_value = bindings.next_binding();
@@ -101,11 +177,15 @@ pub fn compile_statement<'code>(
                     variables,
                     block_depth,
                     source_meta,
-                )?;
+                )
+                .map_err(|e| e.map_kind(From::from))?;
                 block.assign(ret_value, resulting_value);
                 Ok(block)
             }
-            .map_err(|e: VarE| e.with_backup_source(expr_span, source_meta))?
+            .map_err(|e: VarE| {
+                e.with_backup_source(expr_span, source_meta)
+                    .map_kind(From::from)
+            })?
             .finish_block(state, ret_value);
             Ok(state.new_block())
         }
@@ -121,7 +201,10 @@ pub fn compile_statement<'code>(
                 block_depth,
                 source_meta,
             )
-            .map_err(|e| e.with_backup_source(expr_span, source_meta))?;
+            .map_err(|e| {
+                e.with_backup_source(expr_span, source_meta)
+                    .map_kind(From::from)
+            })?;
             let dummy = bindings.next_binding();
             block.assign(dummy, result_expr);
             Ok(block)
@@ -143,7 +226,10 @@ pub fn compile_statement<'code>(
                     block_depth,
                     source_meta,
                 )
-                .map_err(|e| e.with_backup_source(init_span, source_meta))?;
+                .map_err(|e| {
+                    e.with_backup_source(init_span, source_meta)
+                        .map_kind(From::from)
+                })?;
                 let compute_init = bindings.next_binding();
                 builder.assign(compute_init, expr);
                 builder.store(compute_init, memory, ByteSize::U32);
@@ -155,7 +241,7 @@ pub fn compile_statement<'code>(
             {
                 let ctx = variables.variables_at_depth(block_depth);
                 if ctx.contains_key(name) {
-                    return Err(VarE::new(VarError::Redeclared(name.to_string()))
+                    return Err(StE::new(VarError::Redeclared(name.to_string()).into())
                         .with_source(span, source_meta));
                 } else {
                     ctx.insert(name, (memory, ByteSize::U32));
@@ -169,6 +255,7 @@ pub fn compile_statement<'code>(
             block,
             bindings,
             variables,
+            current_loop,
             block_depth + 1,
             source_meta,
         ),
@@ -187,7 +274,10 @@ pub fn compile_statement<'code>(
                     block_depth,
                     source_meta,
                 )
-                .map_err(|e| e.with_backup_source(condition_span, source_meta))?;
+                .map_err(|e| {
+                    e.with_backup_source(condition_span, source_meta)
+                        .map_kind(From::from)
+                })?;
                 let value_binding = bindings.next_binding();
                 compute.assign(value_binding, cond_value);
                 (compute, value_binding)
@@ -203,6 +293,7 @@ pub fn compile_statement<'code>(
                         bindings,
                         *true_stmt,
                         variables,
+                        current_loop,
                         block_depth,
                         source_meta,
                     )
@@ -222,6 +313,7 @@ pub fn compile_statement<'code>(
                             bindings,
                             *false_stmt,
                             variables,
+                            current_loop,
                             block_depth,
                             source_meta,
                         )
