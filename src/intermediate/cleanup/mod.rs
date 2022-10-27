@@ -202,6 +202,8 @@ pub fn prune_unreached_blocks(ir: &mut IR) {
         unreached
     };
 
+    tracing::debug!(target: "cleanup", "found unused blocks: {unused_blocks:?}");
+
     // for all unused blocks:
     for unused_binding in unused_blocks {
         // SAFE: the block is proven to be unreachable.

@@ -277,6 +277,7 @@ pub fn make_sorted_lifetimes(ir: &IR) -> Vec<BlockLifetimes> {
     let mut lasting_lifetimes = vec![HashSet::new(); ir.code.len()].into_boxed_slice();
     let mut collected = Vec::with_capacity(ir.code.len());
     for block in analysis::TopBottomTraversal::from(ir) {
+        tracing::trace!(target: "lifetimes", "visiting block {block}");
         // collect our
         let mut this_block_lifetimes = analysis::antecessors(ir, block)
             .flat_map(|block| lasting_lifetimes[block.0].iter().copied())
