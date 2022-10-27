@@ -75,6 +75,8 @@ pub fn compile_function<'code>(
         forward_map,
     };
 
+    tracing::info!(target: "irgen", "cleaning up generated code to remove garbo");
+    tracing::debug!(target: "irgen", "ir before cleanup: {ir:?}");
     // run some cleanup on the generated code, because we might have generated
     // too much garbage
     super::cleanup::run_safe_cleanup(&mut ir);

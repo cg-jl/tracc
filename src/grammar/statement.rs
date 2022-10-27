@@ -16,6 +16,44 @@ impl<'source> Parse<'source> for (Statement<'source>, Span) {
                     let source = parser.current_token_source();
                     let start = parser.current_position();
                     match source {
+                        "for" => {
+                            let offset = parser.current_position();
+                            parser.accept_current();
+                            let ForLoopDecl {
+                                begin,
+                                condition,
+                                body,
+                                optional_end: end,
+                            } = for_loop(parser)?;
+                            let body_span = body.1;
+
+                            (
+                                Statement::Block(vec![
+                                    begin,
+                                    (
+                                        Statement::Loop {
+                                            condition,
+                                            body: (
+                                                Box::new(Statement::Block(
+                                                    if let Some(end) = end {
+                                                        vec![body, end]
+                                                    } else {
+                                                        vec![body]
+                                                    },
+                                                )),
+                                                body_span,
+                                            ),
+                                            is_do_while: false,
+                                        },
+                                        body_span,
+                                    ),
+                                ]),
+                                Span {
+                                    offset,
+                                    len: body_span.offset + body_span.len - offset,
+                                },
+                            )
+                        }
                         "while" => {
                             let offset = parser.current_position();
                             parser.accept_current();
@@ -89,7 +127,7 @@ impl<'source> Parse<'source> for (Statement<'source>, Span) {
                                 },
                             )
                         }
-                        _ => single_expr(parser)?,
+                        _ => single_expr(parser, true)?,
                     }
                 }
                 Some(TokenKind::OpenBrace) => {
@@ -97,18 +135,82 @@ impl<'source> Parse<'source> for (Statement<'source>, Span) {
                         (Statement::Block(statements), block_span)
                     })?
                 }
-                _ => single_expr(parser)?,
+                Some(TokenKind::Semicolon) => {
+                    let offset = parser.current_position();
+                    parser.accept_current();
+                    (Statement::Block(Vec::new()), Span { offset, len: 1 })
+                }
+                _ => single_expr(parser, true)?,
             })
         })
     }
 }
 
-fn single_expr<'source>(parser: &mut Parser<'source>) -> ParseRes<(Statement<'source>, Span)> {
+fn single_expr<'source>(
+    parser: &mut Parser<'source>,
+    needs_semi: bool,
+) -> ParseRes<(Statement<'source>, Span)> {
     let expr: (Expr, Span) = parser.parse()?;
-    parser.expect_token(TokenKind::Semicolon)?;
-    parser.accept_current();
+    if needs_semi {
+        parser.expect_token(TokenKind::Semicolon)?;
+        parser.accept_current();
+    }
     let expr_span = expr.1;
     Ok((Statement::SingleExpr(expr), expr_span))
+}
+
+struct ForLoopDecl<'code> {
+    begin: (Statement<'code>, Span),
+    condition: (Expr<'code>, Span),
+    body: (Statement<'code>, Span),
+    optional_end: Option<(Statement<'code>, Span)>,
+}
+
+fn for_loop<'code>(parser: &mut Parser<'code>) -> ParseRes<ForLoopDecl<'code>> {
+    let (begin, condition, optional_end) =
+        parser.with_context("parsing for loop header", |parser| {
+            parser.expect_token(TokenKind::OpenParen)?;
+            parser.accept_current();
+            let begin = if parser.peek_token()? == Some(TokenKind::Semicolon) {
+                let offset = parser.current_position();
+                parser.accept_current();
+                (Statement::Block(vec![]), Span { offset, len: 1 })
+            } else {
+                parser.parse()?
+            };
+
+            let cond = if parser.peek_token()? == Some(TokenKind::Semicolon) {
+                let offset = parser.current_position();
+                parser.accept_current();
+                (Expr::Constant(1), Span { offset, len: 1 })
+            } else {
+                let cond = parser.parse()?;
+                parser.expect_token(TokenKind::Semicolon)?;
+                parser.accept_current();
+                cond
+            };
+            let end = if parser.peek_token()? == Some(TokenKind::CloseParen) {
+                let offset = parser.current_position();
+                parser.accept_current();
+                None
+            } else {
+                let expr = single_expr(parser, false)?;
+
+                parser.expect_token(TokenKind::CloseParen)?;
+                parser.accept_current();
+                Some(expr)
+            };
+            Ok((begin, cond, end))
+        })?;
+
+    let body = parser.parse()?;
+
+    Ok(ForLoopDecl {
+        begin,
+        condition,
+        body,
+        optional_end,
+    })
 }
 
 fn while_loop<'code>(

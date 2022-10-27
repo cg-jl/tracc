@@ -45,16 +45,17 @@ fn run() -> Result<(), anyhow::Error> {
     let out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
+    tracing::debug!(target: "main", "parsed: {program:?}");
     let (function_name, ir) = tracc::intermediate::generate::compile_function(
         program.0.into_iter().next().unwrap(),
         &meta,
     )?;
 
-    log::debug!("before fold:{ir:?}");
+    tracing::debug!(target: "main", "before fold:{ir:?}");
 
     let ir = tracc::intermediate::fold::constant_fold(ir);
 
-    log::debug!("after fold:{ir:?}");
+    tracing::debug!(target: "main", "after fold:{ir:?}");
 
     let output = tracc::codegen::codegen_function(function_name.to_string(), ir).cons(
         tracc::codegen::assembly::Directive::Architecture("armv8-a".into()),
