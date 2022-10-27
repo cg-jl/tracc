@@ -1,5 +1,6 @@
 // Constant fold IR
 use super::*;
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 fn fold_ir_blocks(ir: &mut IR) {
@@ -30,9 +31,10 @@ fn repr_into_i32(repr: u32) -> i32 {
 // find places where a block jumps to another (child) block and this child only has that parent
 fn find_unique_jumps(ir: &IR) -> impl Iterator<Item = (BlockBinding, BlockBinding)> + '_ {
     ir.forward_map.iter().filter_map(|(parent, children)| {
-        if children.len() == 1 {
+        if children.len() == 1  {
             let unique_child = children[0];
             let unique_child_parents = &ir.backwards_map[&unique_child];
+            tracing::trace!(target: "fold::merge", "found unique child {unique_child} of {parent}, parents: {unique_child_parents:?}");
             if unique_child_parents.len() == 1 {
                 debug_assert_eq!(unique_child_parents[0], *parent, "Mismatch in backwards map: one block has a child who doesn't recognize it as a parent");
                 Some((*parent, unique_child))
@@ -49,36 +51,57 @@ fn try_merge(ir: &mut IR) -> bool {
     cleanup::run_safe_cleanup(ir);
 
     cleanup::prune_unreached_blocks(ir);
+    tracing::trace!(target: "irshow::fold::merge", "after fold & cleanup: {ir:?}");
 
     // if I find a direct mapping somewhere, I inline
     let mut jumps: HashMap<_, _> = find_unique_jumps(ir).collect();
+    tracing::debug!(target: "fold::merge", "found jumps: {jumps:?}");
 
     let did_merge = !jumps.is_empty();
 
     fn find_noncolliding_merge(
         jumps: &mut HashMap<BlockBinding, BlockBinding>,
     ) -> Option<(BlockBinding, BlockBinding)> {
-        for (parent, child) in jumps.iter().map(|(a, b)| (*a, *b)) {
-            if !jumps.contains_key(&child) {
-                jumps.remove(&parent);
-                return Some((parent, child));
-            }
-        }
-        None
+        let (parent, child) = jumps
+            .iter()
+            .map(|(a, b)| (*a, *b))
+            .filter(|(_, child)| !jumps.contains_key(&child))
+            .max_by(|(a, b), (c, d)| {
+                if (c > a && c > b) || (d > a && d > b) {
+                    core::cmp::Ordering::Less
+                } else if (a > c && a > d) || (b > c && b > d) {
+                    core::cmp::Ordering::Greater
+                } else {
+                    core::cmp::Ordering::Equal
+                }
+            })?;
+
+        jumps.remove(&parent);
+        Some((parent, child))
     }
 
     while let Some((parent, child)) = find_noncolliding_merge(&mut jumps) {
+        tracing::trace!(target: "fold::merge",  "found jump {parent} -> {child}");
         // rename the child block to the block it's inlined before removing it
         // before renaming, we set the predecessor
         block_set_predecessor(&mut ir[child], parent);
         unsafe { refactor::rename_block(ir, child, parent) };
+        // if the parent happens after the child, it was renamed after the block removal!
+        let parent = if child > parent {
+            parent
+        } else {
+            BlockBinding(parent.0 - 1)
+        };
         let child_block = unsafe { refactor::remove_block(ir, child) };
         merge_blocks(&mut ir[parent], child_block, parent);
+        tracing::trace!(target: "irshow::fold::merge", "after: {ir:?}");
     }
 
     did_merge
 }
 
+// searches phi nodes to update them with the selected value since we know exactly
+// what's selected.
 fn block_set_predecessor(block: &mut BasicBlock, predecessor: BlockBinding) {
     block.statements = std::mem::take(&mut block.statements)
         .into_iter()

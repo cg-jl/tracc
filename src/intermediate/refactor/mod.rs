@@ -57,10 +57,12 @@ pub unsafe fn remove_unreached_block_from_phi_statements(ir: &mut IR, target: Bl
 /// The block must not be referred by any of the blocks that come after its index
 /// in the IR's vector.
 pub unsafe fn remove_block(ir: &mut IR, target: BlockBinding) -> BasicBlock {
+    tracing::trace!(target: "irshow::refactor", "IR before removal of {target}: {ir:?}");
     let BlockBinding(index) = target;
 
     // shift the names of the blocks to the right to be 1 less.
     for i in index..ir.code.len() {
+        tracing::trace!(target: "fold::remove", "renaming {} -> {}", BlockBinding(i + 1), BlockBinding(i));
         rename_block(ir, BlockBinding(i + 1), BlockBinding(i));
     }
 
