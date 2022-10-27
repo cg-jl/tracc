@@ -9,6 +9,7 @@ use super::{
 pub fn run_safe_cleanup(ir: &mut IR) {
     remove_aliases(&mut ir.code);
     remove_unused_bindings(ir);
+    remove_redundant_jumps(ir);
 }
 
 pub fn remove_unused_bindings(ir: &mut IR) {
@@ -149,6 +150,31 @@ pub fn remove_aliases(code: &mut IRCode) {
             "Health check: remove alias correctly"
         );
     }
+}
+
+/// Removes blocks that just serve to redirect a jump, which might have resulted from compiling
+/// `break`/`continue` statements, which have some redundant redirection built into them.
+pub fn remove_redundant_jumps(ir: &mut IR) {
+    for b in (0..ir.code.len()).rev().map(BlockBinding) {
+        {
+            if ir[b].statements.is_empty() {
+                if let BlockEnd::Branch(Branch::Unconditional { target }) = ir[b].end {
+                    // only those who don't make an endless loop into themselves.
+                    if target != b {
+                        tracing::debug!(target: "cleanup", "found redundant jumping block {b} -> {target}");
+                        unsafe {
+                            refactor::rename_block(ir, b, target);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // re-compute the branching graph
+    let (forward_map, backwards_map) = super::generate::generate_branching_graphs(&ir.code);
+    ir.forward_map = forward_map;
+    ir.backwards_map = backwards_map;
 }
 
 /// prune not reached blocks
