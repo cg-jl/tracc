@@ -57,11 +57,11 @@ fn run() -> Result<(), anyhow::Error> {
 
     tracing::debug!(target: "main", "after fold:{ir:?}");
 
-    let output = tracc::codegen::codegen_function(function_name.to_string(), ir).cons(
-        tracc::codegen::assembly::Directive::Architecture("armv8-a".into()),
+    let output = tracc::asmgen::codegen_function(function_name.to_string(), ir).cons(
+        tracc::asmgen::assembly::Directive::Architecture("armv8-a".into()),
     );
 
-    //tracc::codegen::registers::debug_what_im_doing(&ir);
+    //tracc::asmgen::registers::debug_what_im_doing(&ir);
     // dbg!(memory_map, stack_size);
 
     // let program = tracc::variables::convert_program(program, &meta)?;

@@ -1,5 +1,5 @@
 //! Register analysis of the code
-use crate::codegen::assembly::{Condition, RegisterID};
+use crate::asmgen::assembly::{Condition, RegisterID};
 use crate::intermediate::{analysis::CollisionMap, Binding, BlockEnd, IR};
 use std::collections::HashMap;
 use std::collections::HashSet;

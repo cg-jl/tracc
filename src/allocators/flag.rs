@@ -8,7 +8,7 @@ use crate::intermediate::analysis;
 use std::collections::HashMap;
 
 use crate::{
-    codegen::assembly::Condition,
+    asmgen::assembly::Condition,
     intermediate::{Binding, Statement, Value, IR},
 };
 

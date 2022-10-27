@@ -5,7 +5,7 @@ pub mod allocators;
 #[allow(unused)]
 pub mod ast;
 #[allow(unused)]
-pub mod codegen;
+pub mod asmgen;
 #[allow(unused)]
 pub mod error;
 #[allow(unused)]

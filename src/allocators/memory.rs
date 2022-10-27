@@ -5,7 +5,7 @@ use tracing::{debug, span, Level};
 
 use crate::intermediate::{BasicBlock, Binding, BlockBinding, Statement, Value, IR};
 
-use crate::codegen::assembly;
+use crate::asmgen::assembly;
 use analysis::lifetimes::BlockAddress;
 
 // even if a piece of memory is not used in a block, if a leaf of it uses that piece of memory, the

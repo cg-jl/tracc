@@ -484,8 +484,8 @@ impl From<BitOp> for AssignmentEnabledOp {
 }
 
 impl Equality {
-    pub fn to_condition(self) -> crate::codegen::assembly::Condition {
-        use crate::codegen::assembly::Condition;
+    pub fn to_condition(self) -> crate::asmgen::assembly::Condition {
+        use crate::asmgen::assembly::Condition;
         match self {
             Self::Equals => Condition::Equals,
             Self::NotEquals => Condition::NotEquals,
@@ -505,8 +505,8 @@ impl Relational {
             Self::GreaterEqual => Self::Less,
         }
     }
-    pub const fn to_condition(self) -> crate::codegen::assembly::Condition {
-        use crate::codegen::assembly::Condition;
+    pub const fn to_condition(self) -> crate::asmgen::assembly::Condition {
+        use crate::asmgen::assembly::Condition;
         match self {
             Self::Less => Condition::LessThan,
             Self::LessEqual => Condition::LessEqual,

@@ -8,7 +8,7 @@ mod format;
 pub mod generate;
 pub mod refactor;
 
-use crate::codegen::assembly::Condition;
+use crate::asmgen::assembly::Condition;
 
 use self::analysis::lifetimes::BlockAddress;
 // IR: everything is divided into basic blocks
