@@ -56,6 +56,11 @@ test_stage() {
   return $res
 }
 
+if [ "$1" = "--one" ]; then
+    test_one $2 "`basename $2`"
+    exit $?
+fi
+
 if [ $1 -eq 6 ] && [ $# -eq 1 ]; then
     test_stage 6 expression
     test_stage 6 statement
