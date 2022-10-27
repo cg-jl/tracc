@@ -46,14 +46,14 @@ fn run() -> Result<(), anyhow::Error> {
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
     tracing::debug!(target: "main", "parsed: {program:?}");
-    let (function_name, ir) = tracc::intermediate::generate::compile_function(
+    let (function_name, ir) = tracc::ir::generate::compile_function(
         program.0.into_iter().next().unwrap(),
         &meta,
     )?;
 
     tracing::debug!(target: "main", "before fold:{ir:?}");
 
-    let ir = tracc::intermediate::fold::constant_fold(ir);
+    let ir = tracc::ir::fold::constant_fold(ir);
 
     tracing::debug!(target: "main", "after fold:{ir:?}");
 

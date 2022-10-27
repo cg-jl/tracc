@@ -1,4 +1,4 @@
-use crate::intermediate::{
+use crate::ir::{
     analysis, Binding, BlockBinding, BlockEnd, Branch, Statement, Value, IR,
 };
 use std::{
@@ -53,7 +53,7 @@ pub type CollisionMapWithLocations =
 
 pub fn compute_lifetime_collisions(ir: &IR, lifetimes: &[Lifetime]) -> CollisionMap {
     let with_locations = compute_lifetime_collisions_with_locations(ir, lifetimes);
-    use crate::intermediate::Value;
+    use crate::ir::Value;
 
     with_locations
         .into_iter()
@@ -392,7 +392,7 @@ impl BlockAddress {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::intermediate::*;
+    use crate::ir::*;
     mod block_address {
         use super::*;
 
@@ -683,10 +683,10 @@ mod tests {
             .is_empty());
     }
 
-    fn compile_source_into_ir(source: &str) -> anyhow::Result<crate::intermediate::IR> {
+    fn compile_source_into_ir(source: &str) -> anyhow::Result<crate::ir::IR> {
         let meta = crate::error::SourceMetadata::new(source).with_file("<test program>".into());
         let program = crate::grammar::Parser::new(&meta).parse()?;
-        let (_function_name, ir) = crate::intermediate::generate::compile_function(program, &meta)?;
+        let (_function_name, ir) = crate::ir::generate::compile_function(program, &meta)?;
         Ok(ir)
     }
 

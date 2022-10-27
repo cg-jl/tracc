@@ -1,6 +1,6 @@
 //! Register analysis of the code
 use crate::asmgen::assembly::{Condition, RegisterID};
-use crate::intermediate::{analysis::CollisionMap, Binding, BlockEnd, IR};
+use crate::ir::{analysis::CollisionMap, Binding, BlockEnd, IR};
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -118,14 +118,14 @@ impl Default for HintBuilder {
 
 pub fn make_allocator_hints(code: &IR) -> HashMap<Binding, AllocatorHints> {
     let mut map = HashMap::<Binding, HintBuilder>::new();
-    for block in crate::intermediate::analysis::TopBottomTraversal::from(code) {
+    for block in crate::ir::analysis::TopBottomTraversal::from(code) {
         for statement in &code[block].statements {
-            if let crate::intermediate::Statement::Assign { index, value } = statement {
+            if let crate::ir::Statement::Assign { index, value } = statement {
                 match value {
-                    crate::intermediate::Value::Constant(0) => {
+                    crate::ir::Value::Constant(0) => {
                         map.entry(*index).or_default().caught_zero();
                     }
-                    crate::intermediate::Value::Phi { nodes } => {
+                    crate::ir::Value::Phi { nodes } => {
                         let other_bindings: HashSet<_> =
                             nodes.iter().map(|descriptor| descriptor.value).collect();
                         nodes
@@ -138,7 +138,7 @@ pub fn make_allocator_hints(code: &IR) -> HashMap<Binding, AllocatorHints> {
                             });
                         map.entry(*index).or_default().add_phi_node(other_bindings);
                     }
-                    crate::intermediate::Value::Allocate { .. } => {
+                    crate::ir::Value::Allocate { .. } => {
                         map.entry(*index).or_default().value_is_memory()
                     }
                     _ => (),
@@ -358,7 +358,7 @@ pub struct ActiveBindingSet {
     pub bindings: Vec<Binding>,
 }
 
-use crate::intermediate::analysis::lifetimes::BlockAddress;
+use crate::ir::analysis::lifetimes::BlockAddress;
 
 impl ActiveBindingSet {
     pub fn add(&mut self, binding: Binding, ends: &HashMap<Binding, usize>) {
@@ -672,7 +672,7 @@ pub fn alloc_registers(
 
     codegen_hints.stores_condition = super::flag::get_used_flags(ir).collect();
 
-    use crate::intermediate::analysis;
+    use crate::ir::analysis;
 
     let mut all_lifetimes = analysis::lifetimes::make_sorted_lifetimes(ir);
 
@@ -744,10 +744,10 @@ mod tests {
     // parsing & compilation steps that already work correctly.
     // Any analysis performed on the IR will be stated explicitly, even if it could be factored
     // out.
-    fn compile_source_into_ir(source: &str) -> anyhow::Result<crate::intermediate::IR> {
+    fn compile_source_into_ir(source: &str) -> anyhow::Result<crate::ir::IR> {
         let meta = crate::error::SourceMetadata::new(source).with_file("<test program>".into());
         let program = crate::grammar::Parser::new(&meta).parse()?;
-        let (_function_name, ir) = crate::intermediate::generate::compile_function(program, &meta)?;
+        let (_function_name, ir) = crate::ir::generate::compile_function(program, &meta)?;
         Ok(ir)
     }
 
@@ -760,9 +760,9 @@ int main() {
 }"#,
         )
         .unwrap();
-        let lifetimes = crate::intermediate::analysis::compute_lifetimes(&ir);
+        let lifetimes = crate::ir::analysis::compute_lifetimes(&ir);
         let collisions =
-            crate::intermediate::analysis::compute_lifetime_collisions(&ir, &lifetimes);
+            crate::ir::analysis::compute_lifetime_collisions(&ir, &lifetimes);
         // TODO: test traversal for allocator hints
         let hints = make_allocator_hints(&ir);
         let result = alloc_registers(&ir, collisions.keys().cloned().collect(), hints);

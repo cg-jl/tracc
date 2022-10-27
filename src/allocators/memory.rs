@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, span, Level};
 
-use crate::intermediate::{BasicBlock, Binding, BlockBinding, Statement, Value, IR};
+use crate::ir::{BasicBlock, Binding, BlockBinding, Statement, Value, IR};
 
 use crate::asmgen::assembly;
 use analysis::lifetimes::BlockAddress;
@@ -27,7 +27,7 @@ pub fn align(value: usize, to: usize) -> usize {
 // what allocate_graph does:
 //  - start on the leaves and follow through their preceding blocks
 //  - if the place is not taken, assign that index
-use crate::intermediate::analysis::{self, CollisionMap, Lifetime};
+use crate::ir::analysis::{self, CollisionMap, Lifetime};
 
 type AllocMap = HashMap<Binding, usize>;
 

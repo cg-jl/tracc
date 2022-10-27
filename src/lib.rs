@@ -11,4 +11,4 @@ pub mod error;
 #[allow(unused)]
 pub mod grammar;
 #[allow(unused)]
-pub mod intermediate;
+pub mod ir;

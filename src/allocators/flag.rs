@@ -4,12 +4,12 @@
 //!     - it comes from a `cmp` statement
 //!     - it is not used elsewhere
 
-use crate::intermediate::analysis;
+use crate::ir::analysis;
 use std::collections::HashMap;
 
 use crate::{
     asmgen::assembly::Condition,
-    intermediate::{Binding, Statement, Value, IR},
+    ir::{Binding, Statement, Value, IR},
 };
 
 #[allow(clippy::needless_lifetimes)] // I prefer an explicit lifetime here.

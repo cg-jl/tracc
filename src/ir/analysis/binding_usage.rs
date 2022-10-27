@@ -1,5 +1,5 @@
-use crate::intermediate::{BasicBlock, BlockEnd, Branch, IR};
-use crate::intermediate::{Binding, CouldBeConstant, Statement, Value};
+use crate::ir::{BasicBlock, BlockEnd, Branch, IR};
+use crate::ir::{Binding, CouldBeConstant, Statement, Value};
 use core::ops::ControlFlow;
 use std::collections::HashMap;
 use std::iter::FromIterator;

@@ -5,7 +5,7 @@ use self::assembly::Condition;
 
 // TODO: change output for a better builder (block based, receives IR branching maps for finishing)
 use super::allocators::*;
-use super::intermediate::*;
+use super::ir::*;
 use output::AssemblyOutput;
 
 use std::collections::HashMap;
@@ -15,9 +15,9 @@ use std::collections::VecDeque;
 pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
     tracing::trace!(target: "codegen", "begin codegen for {function_name}()");
     tracing::debug!(target: "codegen", "{ir:?}");
-    let collisions = crate::intermediate::analysis::compute_lifetime_collisions(
+    let collisions = crate::ir::analysis::compute_lifetime_collisions(
         &ir,
-        &crate::intermediate::analysis::compute_lifetimes(&ir),
+        &crate::ir::analysis::compute_lifetimes(&ir),
     );
 
     // TODO: integrate register spill output
@@ -52,7 +52,7 @@ pub fn codegen_function(function_name: String, mut ir: IR) -> AssemblyOutput {
         }
     }) {
         // UNSAFE: the binding is allocated to a read-only register.
-        unsafe { crate::intermediate::refactor::remove_binding(&mut ir, binding) };
+        unsafe { crate::ir::refactor::remove_binding(&mut ir, binding) };
     }
 
     debug_assert!(save_upon_call.is_empty(), "TODO: implement save upon call");

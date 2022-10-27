@@ -8,7 +8,7 @@ use super::{
 };
 use crate::error::SourceMetadata;
 use crate::grammar::lexer::Source;
-use crate::intermediate::{BlockEnd, Branch, PhiDescriptor};
+use crate::ir::{BlockEnd, Branch, PhiDescriptor};
 use crate::{ast, error};
 mod block;
 mod expr;

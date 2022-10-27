@@ -1,4 +1,4 @@
-use crate::intermediate::{
+use crate::ir::{
     BasicBlock, Binding, BlockEnd, Branch, CouldBeConstant, PhiDescriptor, Statement, Value,
 };
 
