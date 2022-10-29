@@ -16,6 +16,59 @@ impl<'source> Parse<'source> for (Statement<'source>, Span) {
                     let source = parser.current_token_source();
                     let start = parser.current_position();
                     match source {
+                        "do" => {
+                            let offset = parser.current_position();
+                            parser.accept_current();
+
+                            let body: (_, Span) = parser.parse()?;
+
+                            let condition: (_, Span) = {
+                                let wanted_spec = crate::error::WantedSpec::Description(
+                                    "'while' after the 'do' loop to specify the condition",
+                                );
+
+                                let current_tok = parser.peek_token()?.ok_or_else(|| {
+                                    parser.error_at_current_token(
+                                        super::ParseErrorKind::UnexpectedEOF {
+                                            wanted: Some(wanted_spec),
+                                        },
+                                    )
+                                })?;
+
+                                if current_tok != TokenKind::Identifier
+                                    || parser.current_token_source() != "while"
+                                {
+                                    parser.reject_current_token(super::ParseErrorKind::Expected {
+                                        wanted: wanted_spec,
+                                        found: current_tok,
+                                    })
+                                } else {
+                                    parser.accept_current();
+                                    parser.with_context("parsing do-while's condition", |parser| {
+                                        parser.expect_token(TokenKind::OpenParen)?;
+                                        parser.accept_current();
+                                        let condition = parser.parse()?;
+                                        parser.expect_token(TokenKind::CloseParen)?;
+                                        parser.accept_current();
+                                        Ok(condition)
+                                    })
+                                }
+                            }?;
+
+                            let condition_span = condition.1;
+
+                            (
+                                Statement::Loop {
+                                    condition,
+                                    body: (Box::new(body.0), body.1),
+                                    kind: LoopKind::DoWhile,
+                                },
+                                Span {
+                                    offset,
+                                    len: condition_span.len + condition_span.offset - offset,
+                                },
+                            )
+                        }
                         "for" => {
                             let offset = parser.current_position();
                             parser.accept_current();

@@ -110,7 +110,7 @@ pub struct Snippet {
     line: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum WantedSpec<T> {
     Specific(T),
     Description(&'static str),

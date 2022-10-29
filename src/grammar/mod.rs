@@ -52,8 +52,13 @@ impl<'source> Parser<'source> {
     pub fn accept_current(&mut self) {
         self.current_tok = None;
     }
+
+    pub fn error_at(&self, span: Span, kind: ParseErrorKind) -> ParseError {
+        ParseError::new(kind).with_source(span, self.lexer.get_metadata())
+    }
+
     pub fn emit_error_at<T>(&self, span: Span, kind: ParseErrorKind) -> ParseRes<T> {
-        Err(ParseError::new(kind).with_source(span, self.lexer.get_metadata()))
+        Err(self.error_at(span, kind))
     }
     pub fn expect_a_token(&mut self, wanted: Option<WantedSpec<TokenKind>>) -> ParseRes<TokenKind> {
         let span = self.lexer.current_span();
@@ -62,6 +67,12 @@ impl<'source> Parser<'source> {
             Ok,
         )
     }
+
+    pub fn error_at_current_token(&self, reason: ParseErrorKind) -> ParseError {
+        let span = self.current_token_span();
+        self.error_at(span, reason)
+    }
+
     pub fn reject_current_token<T>(&self, reason: ParseErrorKind) -> ParseRes<T> {
         let span = self.current_token_span();
         self.emit_error_at(span, reason)
