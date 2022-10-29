@@ -98,7 +98,7 @@ pub fn compile_statement<'code>(
                 );
                 continue_point
             } else {
-                loop_entrypoint
+                condition_entrypoint
             };
 
             // compile the body
