@@ -130,16 +130,16 @@ pub unsafe fn rename_block(ir: &mut IR, target: BlockBinding, replace_with: Bloc
         }
         end_rename_block(&mut block.end, target, replace_with);
     }
-    // rename refs in the branching maps
-    for list in ir
+    // rename refs in the branching maps & function entrypoints
+    for x in ir
         .forward_map
         .values_mut()
-        .chain(ir.backwards_map.values_mut())
+        .flat_map(|x| x.iter_mut())
+        .chain(ir.backwards_map.values_mut().flat_map(|x| x.iter_mut()))
+        .chain(ir.function_entrypoints.iter_mut())
     {
-        for x in list.iter_mut() {
-            if x == &target {
-                *x = replace_with;
-            }
+        if x == &target {
+            *x = replace_with;
         }
     }
 

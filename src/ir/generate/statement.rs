@@ -13,6 +13,7 @@ pub fn compile_statement<'code>(
     bindings: &mut BindingCounter,
     statement: ast::Statement<'code>,
     variables: &mut VariableTracker<'code>,
+    functions: &HashMap<&'code str, BlockBinding>,
     current_loop: Option<LoopStatus>,
     block_depth: usize,
     source_meta: &SourceMetadata,
@@ -53,6 +54,7 @@ pub fn compile_statement<'code>(
                 condition,
                 bindings,
                 variables,
+                functions,
                 block_depth,
                 source_meta,
             )
@@ -86,6 +88,7 @@ pub fn compile_statement<'code>(
                     bindings,
                     *stmt,
                     variables,
+                    functions,
                     current_loop,
                     block_depth,
                     source_meta,
@@ -108,6 +111,7 @@ pub fn compile_statement<'code>(
                 bindings,
                 *body,
                 variables,
+                functions,
                 Some(LoopStatus {
                     continue_point,
                     break_point: exit.block(),
@@ -175,6 +179,7 @@ pub fn compile_statement<'code>(
                     expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_meta,
                 )
@@ -198,6 +203,7 @@ pub fn compile_statement<'code>(
                 expr,
                 bindings,
                 variables,
+                functions,
                 block_depth,
                 source_meta,
             )
@@ -223,6 +229,7 @@ pub fn compile_statement<'code>(
                     init,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_meta,
                 )
@@ -255,6 +262,7 @@ pub fn compile_statement<'code>(
             block,
             bindings,
             variables,
+            functions,
             current_loop,
             block_depth + 1,
             source_meta,
@@ -271,6 +279,7 @@ pub fn compile_statement<'code>(
                     condition_expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_meta,
                 )
@@ -293,6 +302,7 @@ pub fn compile_statement<'code>(
                         bindings,
                         *true_stmt,
                         variables,
+                        functions,
                         current_loop,
                         block_depth,
                         source_meta,
@@ -313,6 +323,7 @@ pub fn compile_statement<'code>(
                             bindings,
                             *false_stmt,
                             variables,
+                            functions,
                             current_loop,
                             block_depth,
                             source_meta,

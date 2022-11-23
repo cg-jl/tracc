@@ -8,12 +8,32 @@ impl<'source> Parse<'source> for Function<'source> {
             let (name, _) = parser.parse()?;
             parser.expect_token(TokenKind::OpenParen)?;
             parser.accept_current();
+
+            let mut args = Vec::new();
+            while parser.expect_a_token(Some(crate::error::WantedSpec::Description(
+                "argument or ')' to close the parameter list",
+            )))? != TokenKind::CloseParen
+            {
+                parser.expect_token(TokenKind::Identifier)?;
+                parser.accept_current();
+
+                args.push(parser.parse()?);
+                if parser
+                    .expect_a_token(Some(crate::error::WantedSpec::Description("comma or ')'")))?
+                    != TokenKind::Comma
+                {
+                    break;
+                } else {
+                    parser.accept_current();
+                }
+            }
+
             parser.expect_token(TokenKind::CloseParen)?;
             parser.accept_current();
 
             let body = parser.parse()?;
 
-            Ok(Self { name, body })
+            Ok(Self { name, body, args })
 
             // parser.expect_token(TokenKind::OpenBrace)?;
             // parser.accept_current();

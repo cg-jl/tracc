@@ -11,9 +11,7 @@ pub mod lifetimes;
 
 // TODO: output some information on phi nodes per block edge between parent/child.
 
-pub use lifetimes::{
-    compute_lifetime_collisions, compute_lifetimes, CollisionMap, Lifetime, LifetimeMap,
-};
+pub use lifetimes::{CollisionMap, Lifetime, LifetimeMap};
 
 pub use binding_usage::{get_usage_map, BindingUsage, UsageMap};
 
@@ -78,6 +76,11 @@ pub fn is_indirect_child_of(
     } else {
         antecessors(ir, possible_child).any(|indirect_parent| indirect_parent == possible_parent)
     }
+}
+
+#[inline]
+pub fn statements<'i>(ir: &'i IR) -> impl Iterator<Item = &'i Statement> + 'i {
+    ir.code.iter().flat_map(|block| block.statements.iter())
 }
 
 pub fn statements_with_addresses<'i>(
@@ -218,7 +221,11 @@ impl<'code> Iterator for BottomTopTraversal<'code> {
     }
 }
 
-pub fn predecessors(ir: &IR, block: BlockBinding) -> TopBottomTraversal {
+pub fn full_flow_traversal(ir: &IR) -> TopBottomTraversal {
+    TopBottomTraversal::new(ir, ir.function_entrypoints.clone())
+}
+
+pub fn flow_order_traversal(ir: &IR, block: BlockBinding) -> TopBottomTraversal {
     TopBottomTraversal::new(ir, vec![block])
 }
 
@@ -305,7 +312,7 @@ impl<'code> From<&'code IR> for TopBottomTraversal<'code> {
         if code.code.is_empty() {
             Self::new(code, vec![])
         } else {
-            Self::new(code, vec![BlockBinding(0)])
+            Self::new(code, code.function_entrypoints.clone())
         }
     }
 }

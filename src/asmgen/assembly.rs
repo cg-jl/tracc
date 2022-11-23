@@ -7,14 +7,14 @@ use std::fmt;
 // and make decisions to modify or not the state.
 
 #[derive(Debug, Clone)]
-pub enum Assembly {
+pub enum Assembly<'code> {
     Directive(Directive),
-    Label(String),
-    Instruction(Instruction),
+    Label(Label<'code>),
+    Instruction(Instruction<'code>),
     Comment(String),
 }
 
-impl fmt::Display for Assembly {
+impl fmt::Display for Assembly<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Directive(direct) => write!(f, "\t.{}", direct),
@@ -25,8 +25,8 @@ impl fmt::Display for Assembly {
     }
 }
 
-impl Assembly {
-    pub fn map_instruction<F>(mapper: F) -> impl Fn(&mut Self)
+impl Assembly<'_> {
+    pub fn map_instruction<F>(mapper: F) -> impl for<'r> Fn(&mut Assembly<'r>)
     where
         F: Fn(&mut Instruction),
     {
@@ -38,14 +38,14 @@ impl Assembly {
     }
 }
 
-impl From<Instruction> for Assembly {
-    fn from(instr: Instruction) -> Self {
+impl<'code> From<Instruction<'code>> for Assembly<'code> {
+    fn from(instr: Instruction<'code>) -> Self {
         Self::Instruction(instr)
     }
 }
 
-impl From<Branch> for Assembly {
-    fn from(branch: Branch) -> Self {
+impl<'code> From<Branch<'code>> for Assembly<'code> {
+    fn from(branch: Branch<'code>) -> Self {
         Self::Instruction(Instruction::Branch(branch))
     }
 }
@@ -57,7 +57,7 @@ pub enum Directive {
     Architecture(String),
 }
 
-impl From<Directive> for Assembly {
+impl From<Directive> for Assembly<'_> {
     fn from(d: Directive) -> Self {
         Self::Directive(d)
     }
@@ -74,7 +74,7 @@ impl fmt::Display for Directive {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum Instruction {
+pub enum Instruction<'code> {
     /// Return from a function
     Ret,
     /// Move data to a register
@@ -168,29 +168,47 @@ pub enum Instruction {
     },
 
     /// Branch for different situations
-    Branch(Branch),
+    Branch(Branch<'code>),
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum Branch {
+pub enum Branch<'code> {
     /// normal (unconditional) branch, always executed
     Unconditional {
         register: Option<Register>,
-        label: Label,
+        label: Label<'code>,
     },
     /// branch with link (aka call)
-    Linked { label: Label },
+    Linked { label: Label<'code> },
     /// Conditional branch
-    Conditional { condition: Condition, label: Label },
+    Conditional {
+        condition: Condition,
+        label: Label<'code>,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum Label {
-    Block { num: usize },
-    Epilogue,
+pub enum Label<'code> {
+    Named(&'code str),
+    Numbered(usize),
 }
 
-impl fmt::Display for Instruction {
+impl Label<'_> {
+    pub fn has_number(&self, n: usize) -> bool {
+        match self {
+            Label::Named(_) => false,
+            Label::Numbered(a) => *a == n,
+        }
+    }
+}
+
+// #[derive(Debug, Clone, Copy)]
+// pub enum Label {
+//     Block { num: usize },
+//     Epilogue,
+// }
+
+impl fmt::Display for Instruction<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Eor {
@@ -241,22 +259,22 @@ impl fmt::Display for Instruction {
     }
 }
 
-impl fmt::Display for Label {
+impl fmt::Display for Label<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Block { num } => write!(f, ".LBB{}", num),
-            Self::Epilogue => f.write_str(".epilogue"),
+            Label::Named(name) => write!(f, "{name}"),
+            Label::Numbered(n) => write!(f, ".L{n}"),
         }
     }
 }
 
-impl From<Label> for Assembly {
-    fn from(label: Label) -> Self {
-        Self::Label(label.to_string())
+impl<'code> From<Label<'code>> for Assembly<'code> {
+    fn from(label: Label<'code>) -> Self {
+        Self::Label(label)
     }
 }
 
-impl fmt::Display for Branch {
+impl fmt::Display for Branch<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Conditional { condition, label } => {
@@ -300,35 +318,35 @@ macro_rules! write_instruction {
     ($formatter:expr, $name:expr, $($args:expr),+) => { $formatter.write_fmt($crate::format_instr!($name, $($args),+)) }
 }
 
-impl Instruction {
-    pub fn map_over_memory<F>(mapper: F) -> impl Fn(&mut Self)
+impl Instruction<'_> {
+    pub fn map_over_memory<F>(mapper: F) -> impl for<'code> Fn(&mut Instruction<'code>)
     where
         F: Fn(&mut Memory),
     {
-        move |instr| match instr {
-            Self::Str {
+        move |instr: &mut Instruction| match instr {
+            Instruction::Str {
                 ref mut address, ..
             } => mapper(address),
-            Self::Ldr {
+            Instruction::Ldr {
                 ref mut address, ..
             } => mapper(address),
-            Self::Add { .. }
-            | Self::And { .. }
-            | Self::Orr { .. }
-            | Self::Eor { .. }
-            | Self::Lsl { .. }
-            | Self::Lsr { .. }
-            | Self::MSub { .. }
-            | Self::Mov { .. }
-            | Self::Sub { .. }
-            | Self::Neg { .. }
-            | Self::Cset { .. }
-            | Self::MvN { .. }
-            | Self::Cmp { .. }
-            | Self::Mul { .. }
-            | Self::Div { .. }
-            | Self::Branch(_)
-            | Self::Ret => {}
+            Instruction::Add { .. }
+            | Instruction::And { .. }
+            | Instruction::Orr { .. }
+            | Instruction::Eor { .. }
+            | Instruction::Lsl { .. }
+            | Instruction::Lsr { .. }
+            | Instruction::MSub { .. }
+            | Instruction::Mov { .. }
+            | Instruction::Sub { .. }
+            | Instruction::Neg { .. }
+            | Instruction::Cset { .. }
+            | Instruction::MvN { .. }
+            | Instruction::Cmp { .. }
+            | Instruction::Mul { .. }
+            | Instruction::Div { .. }
+            | Instruction::Branch(_)
+            | Instruction::Ret => {}
         }
     }
 }
@@ -461,16 +479,20 @@ impl BitSize {
 #[derive(Debug, Clone, Copy)]
 pub struct Memory {
     pub register: Register,
-    pub offset: Offset,
+    pub offset: usize,
 }
 
 impl fmt::Display for Memory {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let offset = self.offset.determined_size();
-        if offset == 0 {
+        if self.offset == 0 {
             write!(f, "[{}]", self.register)
         } else {
-            write!(f, "[{}, {}]", self.register, Data::Immediate(offset as i32))
+            write!(
+                f,
+                "[{}, {}]",
+                self.register,
+                Data::Immediate(self.offset as i32)
+            )
         }
     }
 }
@@ -478,19 +500,8 @@ impl fmt::Display for Memory {
 impl Memory {
     pub fn partition(self, block_size: usize) -> impl Iterator<Item = Self> {
         let Memory { register, offset } = self;
-        offset
-            .partition(block_size)
-            .map(move |offset| Memory { register, offset })
+        partition(block_size, offset).map(move |offset| Memory { register, offset })
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Offset {
-    /// offset that is added directly to the register
-    Determined(usize),
-    /// offset that is not yet fully determined and needs
-    /// finalization of some context
-    Undetermined(usize),
 }
 
 fn partition(block_size: usize, mut offset_begin: usize) -> impl Iterator<Item = usize> {
@@ -499,27 +510,6 @@ fn partition(block_size: usize, mut offset_begin: usize) -> impl Iterator<Item =
         offset_begin += block_size;
         Some(curr)
     })
-}
-
-impl Offset {
-    pub fn partition(self, block_size: usize) -> Box<dyn Iterator<Item = Self>> {
-        match self {
-            Self::Determined(begin) => Box::new(
-                partition(block_size, block_size)
-                    .take_while(move |x| *x <= begin)
-                    .map(Self::Determined),
-            ),
-            Self::Undetermined(begin) => {
-                Box::new(partition(block_size, begin).map(Self::Undetermined))
-            }
-        }
-    }
-    fn determined_size(&self) -> usize {
-        match self {
-            Self::Determined(det) => *det,
-            _ => unreachable!(),
-        }
-    }
 }
 
 impl Condition {

@@ -7,13 +7,11 @@ pub fn compile_block<'code>(
     statements: impl IntoIterator<Item = (ast::Statement<'code>, Span)>,
     bindings: &mut BindingCounter,
     variables: &mut VariableTracker<'code>,
+    functions: &HashMap<&'code str, BlockBinding>,
     current_loop: Option<statement::LoopStatus>,
     block_depth: usize,
     source_info: &SourceMetadata,
 ) -> Result<BlockBuilder, StE> {
-    // clean the variables for now
-    variables.variables_at_depth(block_depth).clear();
-
     for (st, st_span) in statements {
         builder = statement::compile_statement(
             state,
@@ -21,6 +19,7 @@ pub fn compile_block<'code>(
             bindings,
             st,
             variables,
+            functions,
             current_loop,
             block_depth,
             source_info,

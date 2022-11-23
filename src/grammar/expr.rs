@@ -61,12 +61,49 @@ fn parse_primary<'source>(parser: &mut Parser<'source>) -> ParseRes<(Expr<'sourc
                 let source = parser.current_token_source();
                 let span = parser.current_token_span();
                 parser.accept_current();
-                Ok((
-                    Expr::Variable {
-                        name: Source { span, source },
-                    },
-                    span,
-                ))
+
+                if parser.peek_token()? == Some(TokenKind::OpenParen) {
+                    let offset = span.offset;
+                    parser.accept_current();
+
+                    let mut args = Vec::new();
+
+                    while parser
+                        .expect_a_token(Some(WantedSpec::Description("argument or close paren")))?
+                        != TokenKind::CloseParen
+                    {
+                        args.push(parser.parse()?);
+                        if parser
+                            .expect_a_token(Some(WantedSpec::Description("comma or close paren")))?
+                            == TokenKind::Comma
+                        {
+                            parser.accept_current();
+                        } else {
+                            break;
+                        }
+                    }
+
+                    parser.expect_token(TokenKind::CloseParen)?;
+                    let end = parser.current_position();
+                    parser.accept_current();
+                    Ok((
+                        Expr::Call {
+                            name: (source, span),
+                            args,
+                        },
+                        Span {
+                            offset,
+                            len: end - offset,
+                        },
+                    ))
+                } else {
+                    Ok((
+                        Expr::Variable {
+                            name: Source { span, source },
+                        },
+                        span,
+                    ))
+                }
             }
             tok => parser.reject_current_token(ParseErrorKind::Expected {
                 found: tok,
@@ -85,6 +122,7 @@ fn parse_primary<'source>(parser: &mut Parser<'source>) -> ParseRes<(Expr<'sourc
                 },
             );
         }
+
         Ok(expr)
     })
 }

@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use super::{
     statement, Binding, BindingCounter, BlockBuilder, Branch, ByteSize, Condition, IRGenState,
     PhiDescriptor, Source, SourceMetadata, Value, VarE, VarError, VariableTracker,
 };
-use crate::ast;
+use crate::{ast, ir::BlockBinding};
 
 // TODO: consider refactoring logic expressions to use `merge_branches` or even a new utility that
 // spits out a phi node (from ternary expression).
@@ -14,6 +16,7 @@ pub fn compile_expr<'code>(
     expr: ast::Expr<'code>,
     bindings: &mut BindingCounter,
     variables: &VariableTracker<'code>,
+    functions: &HashMap<&'code str, BlockBinding>,
     block_depth: usize,
     source_info: &SourceMetadata<'code>,
 ) -> Result<(BlockBuilder, Value), VarE> {
@@ -46,6 +49,7 @@ pub fn compile_expr<'code>(
                     *condition_expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_info,
                 )
@@ -64,6 +68,7 @@ pub fn compile_expr<'code>(
                     *true_expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_info,
                 )
@@ -82,6 +87,7 @@ pub fn compile_expr<'code>(
                     *false_expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_info,
                 )
@@ -129,6 +135,7 @@ pub fn compile_expr<'code>(
                 *expr,
                 bindings,
                 variables,
+                functions,
                 block_depth,
                 source_info,
             )
@@ -164,6 +171,7 @@ pub fn compile_expr<'code>(
                     *lhs_expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_info,
                 )
@@ -177,6 +185,7 @@ pub fn compile_expr<'code>(
                     *rhs_expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_info,
                 )
@@ -194,6 +203,7 @@ pub fn compile_expr<'code>(
                     *lhs_expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_info,
                 )
@@ -207,6 +217,7 @@ pub fn compile_expr<'code>(
                     *rhs_expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_info,
                 )
@@ -226,6 +237,7 @@ pub fn compile_expr<'code>(
                     *lhs_expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_info,
                 )
@@ -240,6 +252,7 @@ pub fn compile_expr<'code>(
                     *rhs_expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_info,
                 )
@@ -257,6 +270,7 @@ pub fn compile_expr<'code>(
                     *lhs_expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_info,
                 )
@@ -275,6 +289,7 @@ pub fn compile_expr<'code>(
                         *rhs_expr,
                         bindings,
                         variables,
+                        functions,
                         block_depth,
                         source_info,
                     )
@@ -349,6 +364,7 @@ pub fn compile_expr<'code>(
                     *rhs_expr,
                     bindings,
                     variables,
+                    functions,
                     block_depth,
                     source_info,
                 )
@@ -380,6 +396,47 @@ pub fn compile_expr<'code>(
                 Ok((builder, Value::Binding(result_binding)))
             }
         },
+        ast::Expr::Call {
+            name: (name, name_span),
+            args,
+        } => {
+            let function_block = functions.get(name).copied().ok_or_else(|| {
+                VarE::new(VarError::UnknownFunction(name.to_string()))
+                    .with_source(name_span, source_info)
+            })?;
+
+            let args_len = args.len();
+
+            let (block, args) = args.into_iter().try_fold(
+                (builder, Vec::with_capacity(args_len)),
+                |(builder, mut arg_bindings), (e, span)| {
+                    let (mut builder, value) = compile_expr(
+                        state,
+                        builder,
+                        e,
+                        bindings,
+                        variables,
+                        functions,
+                        block_depth,
+                        source_info,
+                    )
+                    .map_err(|e| e.with_backup_source(span, source_info))?;
+
+                    let arg_binding = bindings.next_binding();
+                    arg_bindings.push(arg_binding);
+                    builder.assign(arg_binding, value);
+                    Ok((builder, arg_bindings))
+                },
+            )?;
+
+            Ok((
+                block,
+                Value::Call {
+                    label: function_block,
+                    args,
+                },
+            ))
+        }
     }
 }
 

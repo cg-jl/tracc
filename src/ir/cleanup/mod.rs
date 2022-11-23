@@ -184,8 +184,9 @@ pub fn prune_unreached_blocks(ir: &mut IR) {
         let mut unreached = Vec::new();
 
         // start by getting the 'not even registered' blocks.
-        let mut queue: Vec<_> = (1..ir.code.len())
+        let mut queue: Vec<_> = (0..ir.code.len())
             .map(BlockBinding)
+            .filter(|x| !ir.function_entrypoints.contains(x))
             .filter(|binding| !ir.backwards_map.contains_key(binding))
             .collect();
 
@@ -238,4 +239,9 @@ pub fn prune_unreached_blocks(ir: &mut IR) {
         // UNSAFE: safe. the block is no longer used.
         unsafe { refactor::remove_block(ir, unused_binding) };
     }
+
+    // re-compute the branching graph
+    let (forward_map, backwards_map) = super::generate::generate_branching_graphs(&ir.code);
+    ir.forward_map = forward_map;
+    ir.backwards_map = backwards_map;
 }

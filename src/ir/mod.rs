@@ -21,6 +21,7 @@ pub struct IR {
     pub code: IRCode,
     pub backwards_map: BranchingMap,
     pub forward_map: BranchingMap,
+    pub function_entrypoints: Vec<BlockBinding>,
 }
 
 impl IR {
@@ -142,6 +143,11 @@ pub enum Value {
     Xor {
         lhs: Binding,
         rhs: CouldBeConstant,
+    },
+    // Call label with arguments
+    Call {
+        label: BlockBinding,
+        args: Vec<Binding>,
     },
     // Constant value
     Constant(i32),

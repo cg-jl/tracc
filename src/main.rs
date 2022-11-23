@@ -46,10 +46,15 @@ fn run() -> Result<(), anyhow::Error> {
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
     tracing::debug!(target: "main", "parsed: {program:?}");
-    let (function_name, ir) = tracc::ir::generate::compile_function(
-        program.0.into_iter().next().unwrap(),
-        &meta,
-    )?;
+    let (ir, function_names) = match tracc::ir::generate::compile_program(program, &meta) {
+        Ok(v) => v,
+        Err(e) => {
+            for error in e {
+                eprintln!("{}", error);
+            }
+            std::process::exit(1);
+        }
+    };
 
     tracing::debug!(target: "main", "before fold:{ir:?}");
 
@@ -57,7 +62,7 @@ fn run() -> Result<(), anyhow::Error> {
 
     tracing::debug!(target: "main", "after fold:{ir:?}");
 
-    let output = tracc::asmgen::codegen_function(function_name.to_string(), ir).cons(
+    let output = tracc::asmgen::codegen(ir, function_names).cons(
         tracc::asmgen::assembly::Directive::Architecture("armv8-a".into()),
     );
 

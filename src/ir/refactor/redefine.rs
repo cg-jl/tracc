@@ -37,6 +37,7 @@ impl Rename for Value {
             Value::Phi { nodes } => nodes
                 .iter_mut()
                 .for_each(|node| node.rename(target, rename_as)),
+            Value::Call { args, .. } => args.iter_mut().for_each(|b| b.rename(target, rename_as)),
             Value::Cmp {
                 condition: _,
                 lhs,

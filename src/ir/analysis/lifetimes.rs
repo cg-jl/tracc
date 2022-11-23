@@ -1,6 +1,4 @@
-use crate::ir::{
-    analysis, Binding, BlockBinding, BlockEnd, Branch, Statement, Value, IR,
-};
+use crate::ir::{analysis, Binding, BlockBinding, BlockEnd, Branch, Statement, Value, IR};
 use std::{
     collections::{HashMap, HashSet},
     ops::ControlFlow,
@@ -8,113 +6,9 @@ use std::{
 
 pub type LifetimeMap = HashMap<Binding, Lifetime>;
 
-pub fn compute_lifetimes(ir: &IR) -> Vec<Lifetime> {
-    let mut lifetime_map = LifetimeMap::new();
-
-    let mut die_map = get_lifetime_ends(ir);
-
-    for (key, def) in get_defs(ir) {
-        let die = match die_map.remove(&key) {
-            Some(die) => die,
-            // if a defined value wasn't caught on another statement, then it wasn't used.
-            None => {
-                lifetime_map.insert(
-                    key,
-                    Lifetime {
-                        attached_binding: key,
-                        start: def,
-                        ends: vec![def],
-                    },
-                );
-                continue;
-            }
-        };
-        debug_assert!(
-            lifetime_map
-                .insert(
-                    key,
-                    Lifetime {
-                        attached_binding: key,
-                        start: def,
-                        ends: if die.is_empty() { vec![def] } else { die }
-                    }
-                )
-                .is_none(),
-            "each variable is declared once and dies once"
-        );
-    }
-
-    lifetime_map.into_values().collect()
-}
-
 pub type CollisionMap = HashMap<Binding, HashSet<Binding>>;
 pub type CollisionMapWithLocations =
     HashMap<Binding, HashMap<Binding, (BlockAddress, BlockAddress)>>;
-
-pub fn compute_lifetime_collisions(ir: &IR, lifetimes: &[Lifetime]) -> CollisionMap {
-    let with_locations = compute_lifetime_collisions_with_locations(ir, lifetimes);
-    use crate::ir::Value;
-
-    with_locations
-        .into_iter()
-        .map(|(k, collisions)| {
-            (
-                k,
-                collisions
-                    .into_iter()
-                    .filter_map(|(collision, mut locations)| {
-                        locations.retain(|(_, end)| {
-                            // filter out the locations that include a phi node with those two values.
-                            let nodes = if let Some(Statement::Assign {
-                                index: _,
-                                value: Value::Phi { nodes },
-                            }) = ir.get_statement(end)
-                            {
-                                nodes
-                            } else {
-                                return true;
-                            };
-                            let found_k = nodes.iter().find(|desc| desc.value == k).is_some();
-                            let found_col =
-                                nodes.iter().find(|desc| desc.value == collision).is_some();
-                            !(found_k && found_col)
-                        });
-
-                        if locations.is_empty() {
-                            None
-                        } else {
-                            Some(collision)
-                        }
-                    })
-                    .collect(),
-            )
-        })
-        .collect()
-}
-
-fn compute_lifetime_collisions_with_locations<'code>(
-    ir: &'code IR,
-    lifetimes: &'code [Lifetime],
-) -> impl Iterator<
-    Item = (
-        Binding,
-        HashMap<Binding, HashSet<(BlockAddress, BlockAddress)>>,
-    ),
-> + 'code {
-    lifetimes.iter().map(|lifetime| {
-        let mut locations = HashMap::new();
-        lifetimes
-            .iter()
-            .filter(|l| l.attached_binding != lifetime.attached_binding)
-            .for_each(|l| {
-                let intersections = lifetime.find_intersections(l, ir);
-                if !intersections.is_empty() {
-                    locations.insert(l.attached_binding, intersections);
-                }
-            });
-        (lifetime.attached_binding, locations)
-    })
-}
 
 pub fn get_defs(ir: &IR) -> impl Iterator<Item = (Binding, BlockAddress)> + '_ {
     // go through each block and the statements which define a binding
@@ -177,7 +71,7 @@ fn get_lifetime_ends(ir: &IR) -> HashMap<Binding, Vec<BlockAddress>> {
                 .keys()
                 .copied()
                 .filter(|&k| {
-                    analysis::predecessors(ir, k)
+                    analysis::flow_order_traversal(ir, k)
                         .skip(1)
                         .any(|child| die_map.contains_key(&child))
                 })

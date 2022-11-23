@@ -7,6 +7,7 @@ impl Error for LexErrorKind {}
 impl fmt::Display for TokenKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Comma => write!(f, "comma ','"),
             Self::Colon => write!(f, "colon ':'"),
             Self::CloseBrace => write!(f, "closing brace '}}'"),
             Self::OpenBrace => write!(f, "opening brace '{{'"),
@@ -133,6 +134,10 @@ impl<'a> Token<'a> {
     pub const fn open_brace(source: Source<'a>) -> Self {
         Self::new(TokenKind::OpenBrace, source)
     }
+
+    pub const fn comma(source: Source<'a>) -> Self {
+        Self::new(TokenKind::Comma, source)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +151,7 @@ pub enum TokenKind {
     Semicolon,
     Whitespace,
     Colon,
+    Comma,
     Operator { kind: Operator, has_equal: bool },
 }
 
@@ -242,6 +248,10 @@ impl<'source> Lexer<'source> {
         if let Some(pos) = self.eat_char(':') {
             self.advance();
             return Ok(Some(Token::colon(self.source_from_len(pos, 1))));
+        }
+        if let Some(pos) = self.eat_char(',') {
+            self.advance();
+            return Ok(Some(Token::comma(self.source_from_len(pos, 1))));
         }
         if let Some(src) = self.identifier() {
             return Ok(Some(Token::identifier(src)));

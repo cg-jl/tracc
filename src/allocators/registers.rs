@@ -1,6 +1,7 @@
 //! Register analysis of the code
 use crate::asmgen::assembly::{Condition, RegisterID};
 use crate::ir::{analysis::CollisionMap, Binding, BlockEnd, IR};
+use crate::ir::{Statement, Value};
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -9,121 +10,96 @@ use std::collections::HashSet;
 
 pub type RegisterMap = HashMap<Binding, RegisterID>;
 
-#[derive(Debug)]
-pub enum AllocatorHints {
-    InMemory,
-    Usable {
-        used_in_return: bool,
-        is_zero: bool,
-        used_through_call: bool,
-        from_phi_node: Option<HashSet<Binding>>,
-        is_phi_node_with: HashSet<Binding>,
-    },
-}
-
-#[derive(Debug)]
-enum ImmediateHint {
-    InMemory,
-    Usable {
-        used_in_return: bool,
-        is_zero: bool,
-        used_through_call: bool,
-    },
+#[derive(Debug, Default)]
+pub struct AllocatorHints {
+    in_memory: HashSet<Binding>,
+    used_in_return: HashSet<Binding>,
+    returned_from_call: HashSet<Binding>,
+    from_phi_node: HashMap<Binding, HashSet<Binding>>,
+    is_phi_node_with: HashMap<Binding, HashSet<Binding>>,
+    zeroes: HashSet<Binding>,
 }
 
 struct HintBuilder {
+    target_binding: Binding,
     phi_nodes_locked: bool,
-    hints: AllocatorHints,
 }
 
 impl HintBuilder {
-    pub fn new() -> Self {
+    pub fn new(target_binding: Binding) -> Self {
         Self {
+            target_binding,
             phi_nodes_locked: false,
-            hints: AllocatorHints::Usable {
-                is_phi_node_with: HashSet::new(),
-                used_through_call: false,
-                used_in_return: false,
-                is_zero: false,
-                from_phi_node: None,
-            },
         }
     }
 
-    pub fn add_phi_edge(&mut self, bindings: HashSet<Binding>) {
-        if let AllocatorHints::Usable {
-            is_phi_node_with, ..
-        } = &mut self.hints
-        {
-            is_phi_node_with.extend(bindings);
-        }
+    pub fn from_ref(target_binding: &Binding) -> Self {
+        Self::new(*target_binding)
     }
 
-    pub fn caught_used_through_call(&mut self) {
-        if let AllocatorHints::Usable {
-            used_through_call, ..
-        } = &mut self.hints
-        {
-            *used_through_call = true;
-        }
+    pub fn add_phi_edge(&mut self, hints: &mut AllocatorHints, bindings: HashSet<Binding>) {
+        hints
+            .is_phi_node_with
+            .entry(self.target_binding)
+            .or_default()
+            .extend(bindings);
     }
 
-    pub fn caught_returned(&mut self) {
-        if let AllocatorHints::Usable { used_in_return, .. } = &mut self.hints {
-            *used_in_return = true;
-        }
+    pub fn is_return_from_call(&self, hints: &mut AllocatorHints) {
+        hints.returned_from_call.insert(self.target_binding);
     }
 
-    pub fn caught_zero(&mut self) {
-        if let AllocatorHints::Usable { is_zero, .. } = &mut self.hints {
-            *is_zero = true;
-        }
+    pub fn caught_returned(&mut self, hints: &mut AllocatorHints) {
+        hints.used_in_return.insert(self.target_binding);
     }
 
-    pub fn add_phi_node(&mut self, others: HashSet<Binding>) {
+    pub fn caught_zero(&mut self, hints: &mut AllocatorHints) {
+        hints.zeroes.insert(self.target_binding);
+    }
+
+    pub fn add_phi_node(&mut self, hints: &mut AllocatorHints, others: HashSet<Binding>) {
         if !self.phi_nodes_locked {
-            if let AllocatorHints::Usable { from_phi_node, .. } = &mut self.hints {
-                match from_phi_node {
-                    Some(ref mut already_in) => {
-                        // we can have more
-                        if already_in.is_subset(&others) {
-                            already_in.extend(others);
-                        } else if !already_in.is_superset(&others) {
-                            // since we've got discrepancies, phi nodes will be locked
-                            // to `None`, since I don't know what to do here.
-                            self.phi_nodes_locked = true;
-                            *from_phi_node = None;
-                        }
+            let from_phi_node = hints
+                .from_phi_node
+                .remove_entry(&self.target_binding)
+                .map(|s| s.1);
+
+            match from_phi_node {
+                Some(mut already_in) => {
+                    // we can have more
+                    if already_in.is_subset(&others) {
+                        already_in.extend(others);
+                        // put it back.
+                        hints.from_phi_node.insert(self.target_binding, already_in);
+                    } else if !already_in.is_superset(&others) {
+                        // since we've got discrepancies, phi nodes will be locked
+                        // to `None`, since I don't know what to do here.
+                        self.phi_nodes_locked = true;
                     }
-                    None => *from_phi_node = Some(others),
+                }
+                None => {
+                    hints.from_phi_node.insert(self.target_binding, others);
                 }
             }
         }
     }
 
-    pub fn finish(self) -> AllocatorHints {
-        self.hints
-    }
-
-    pub fn value_is_memory(&mut self) {
-        self.hints = AllocatorHints::InMemory;
+    pub fn value_is_memory(&mut self, hints: &mut AllocatorHints) {
+        hints.in_memory.insert(self.target_binding);
     }
 }
 
-impl Default for HintBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub fn make_allocator_hints(code: &IR) -> HashMap<Binding, AllocatorHints> {
+pub fn make_allocator_hints(code: &IR) -> AllocatorHints {
     let mut map = HashMap::<Binding, HintBuilder>::new();
-    for block in crate::ir::analysis::TopBottomTraversal::from(code) {
-        for statement in &code[block].statements {
+    let mut hints = AllocatorHints::default();
+    for block in &code.code {
+        for statement in &block.statements {
             if let crate::ir::Statement::Assign { index, value } = statement {
                 match value {
                     crate::ir::Value::Constant(0) => {
-                        map.entry(*index).or_default().caught_zero();
+                        map.entry(*index)
+                            .or_insert_with_key(HintBuilder::from_ref)
+                            .caught_zero(&mut hints);
                     }
                     crate::ir::Value::Phi { nodes } => {
                         let other_bindings: HashSet<_> =
@@ -134,25 +110,35 @@ pub fn make_allocator_hints(code: &IR) -> HashMap<Binding, AllocatorHints> {
                             .for_each(|node| {
                                 let mut all = other_bindings.clone();
                                 all.remove(&node); // remove self
-                                map.entry(node).or_default().add_phi_edge(all);
+                                map.entry(node)
+                                    .or_insert_with_key(HintBuilder::from_ref)
+                                    .add_phi_edge(&mut hints, all);
                             });
-                        map.entry(*index).or_default().add_phi_node(other_bindings);
+                        map.entry(*index)
+                            .or_insert_with_key(HintBuilder::from_ref)
+                            .add_phi_node(&mut hints, other_bindings);
                     }
                     crate::ir::Value::Allocate { .. } => {
-                        map.entry(*index).or_default().value_is_memory()
+                        map.entry(*index)
+                            .or_insert_with_key(HintBuilder::from_ref)
+                            .value_is_memory(&mut hints);
+                    }
+                    crate::ir::Value::Call { .. } => {
+                        map.entry(*index)
+                            .or_insert_with_key(HintBuilder::from_ref)
+                            .is_return_from_call(&mut hints);
                     }
                     _ => (),
                 }
-                // TODO: match call
             }
         }
-        if let BlockEnd::Return(binding) = code[block].end {
-            map.entry(binding).or_default().caught_returned();
+        if let BlockEnd::Return(binding) = block.end {
+            map.entry(binding)
+                .or_insert_with_key(HintBuilder::from_ref)
+                .caught_returned(&mut hints);
         }
     }
-    map.into_iter()
-        .map(|(binding, builder)| (binding, builder.finish()))
-        .collect()
+    hints
 }
 
 #[allow(dead_code)] // this function will be used upon having calls, don't worry
@@ -591,90 +577,69 @@ fn linear_alloc_block(
 pub fn alloc_registers(
     ir: &IR,
     need_allocation: Vec<Binding>,
-    alloc_hints: HashMap<Binding, AllocatorHints>,
+    alloc_hints: AllocatorHints,
 ) -> CodegenHints {
     tracing::trace!(target: "register_alloc", "requested allocations: {need_allocation:?}");
     tracing::trace!(target: "register_alloc", "allocator hints: {alloc_hints:?}");
     // TODO: reserve phi nodes hints for later, when all of its dependencies are allocated.
     // and so on.
     let mut state = AllocatorState::new();
-    let mut might_need_call_save = HashSet::new();
-    let mut might_need_move_to_x0 = HashSet::new();
     let mut codegen_hints = CodegenHints::default();
-    let (immediate_alloc_hints, mut phi_nodes, mut phi_edges, used_in_return, used_through_call) = {
-        let mut used_in_return_set = HashSet::new();
-        let mut used_through_call_set = HashSet::new();
-        let mut immediate_allocs = HashMap::new();
-        let mut phi_nodes = HashMap::new();
-        let mut phi_targets = HashMap::new();
 
-        for (binding, hints) in alloc_hints {
-            match hints {
-                AllocatorHints::InMemory => {
-                    tracing::debug!(target: "register_alloc::hints", "found memory use case: {binding}");
-                    immediate_allocs.insert(binding, ImmediateHint::InMemory);
-                }
-                AllocatorHints::Usable {
-                    used_in_return,
-                    is_zero,
-                    used_through_call,
-                    from_phi_node,
-                    is_phi_node_with,
-                } => {
-                    if used_through_call {
-                        used_through_call_set.insert(binding);
-                        tracing::debug!(target: "register_alloc::hints", "found used through call: {binding}");
-                        might_need_call_save.insert(binding);
-                    }
-                    if used_in_return {
-                        used_in_return_set.insert(binding);
-
-                        tracing::debug!(target: "register_alloc::hints", "found used in return: {binding}");
-                        might_need_move_to_x0.insert(binding);
-                    }
-
-                    // only put it in zero register
-                    if is_zero && !used_in_return {
-                        tracing::debug!(target: "register_alloc::hints", "{binding} is zero");
-                        codegen_hints
-                            .registers
-                            .insert(binding, RegisterID::ZeroRegister);
-                    }
-
-                    immediate_allocs.insert(
-                        binding,
-                        ImmediateHint::Usable {
-                            used_in_return,
-                            is_zero,
-                            used_through_call,
-                        },
-                    );
-                    if let Some(nodes) = from_phi_node {
-                        tracing::trace!(target: "register_alloc::hints", "found source phi node for {binding}: {nodes:?}");
-                        phi_nodes.insert(binding, nodes);
-                    }
-                    if !is_phi_node_with.is_empty() {
-                        tracing::trace!(target: "register_alloc::hints", "found phi node usage neighbors for {binding}: {is_phi_node_with:?}");
-                        phi_targets.insert(binding, is_phi_node_with);
-                    }
-                }
-            };
-        }
-
-        (
-            immediate_allocs,
-            phi_nodes,
-            phi_targets,
-            used_in_return_set,
-            used_through_call_set,
-        )
-    };
+    let AllocatorHints {
+        in_memory,
+        used_in_return,
+        returned_from_call,
+        from_phi_node: mut phi_nodes,
+        is_phi_node_with: mut phi_edges,
+        zeroes,
+    } = alloc_hints;
+    // all the returned bindings get instantly allocated to r0.
+    for ret in returned_from_call {
+        codegen_hints
+            .registers
+            .insert(ret, RegisterID::GeneralPurpose { index: 0 });
+    }
 
     codegen_hints.stores_condition = super::flag::get_used_flags(ir).collect();
 
     use crate::ir::analysis;
 
     let mut all_lifetimes = analysis::lifetimes::make_sorted_lifetimes(ir);
+
+    let mut used_through_call = HashSet::new();
+
+    // for all of the bindings that are defined as a result from a call, check if anything that is
+    // defined before them is used after them.
+    let call_addresses = analysis::statements_with_addresses(ir).filter_map(|(statement, addr)| {
+        if matches!(
+            statement,
+            Statement::Assign {
+                value: Value::Call { .. },
+                ..
+            }
+        ) {
+            Some(addr)
+        } else {
+            None
+        }
+    });
+
+    for addr in call_addresses {
+        let block_lifetimes = &all_lifetimes[addr.block.0];
+        used_through_call.extend(
+            block_lifetimes
+                .ordered_by_start
+                .iter()
+                .copied()
+                .filter(|b| {
+                    block_lifetimes.binding_starts[&b] < addr.statement
+                        && block_lifetimes.binding_ends[&b] > addr.statement
+                }),
+        )
+    }
+
+    tracing::trace!(target: "alloc::hints", "found used through call: {used_through_call:?}");
 
     for full_lifetime in all_lifetimes {
         linear_alloc_block(
@@ -761,8 +726,7 @@ int main() {
         )
         .unwrap();
         let lifetimes = crate::ir::analysis::compute_lifetimes(&ir);
-        let collisions =
-            crate::ir::analysis::compute_lifetime_collisions(&ir, &lifetimes);
+        let collisions = crate::ir::analysis::compute_lifetime_collisions(&ir, &lifetimes);
         // TODO: test traversal for allocator hints
         let hints = make_allocator_hints(&ir);
         let result = alloc_registers(&ir, collisions.keys().cloned().collect(), hints);

@@ -340,6 +340,7 @@ fn value_propagate_constant(
         // a phi node is a decision point. Until a decision is made no constant
         // is chosen.
         Value::Phi { .. } => PropagationResult::unchanged(value),
+        Value::Call { .. } => PropagationResult::unchanged(value),
         Value::Cmp {
             condition,
             lhs,

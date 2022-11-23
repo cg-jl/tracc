@@ -31,59 +31,113 @@ pub fn generate_branching_graphs(ir: &IRCode) -> (BranchingMap, BranchingMap) {
     (forward_map, backwards_map)
 }
 
-impl From<Vec<BasicBlock>> for IR {
-    fn from(code: Vec<BasicBlock>) -> Self {
-        let (forward_map, backwards_map) = generate_branching_graphs(&code);
-        Self {
-            forward_map,
-            backwards_map,
-            code,
+pub fn compile_program<'code>(
+    ast::Program(functions): ast::Program<'code>,
+    source_meta: &SourceMetadata<'code>,
+) -> Result<(IR, Vec<&'code str>), Vec<StE>> {
+    let mut state = IRGenState::default();
+    let mut bindings = BindingCounter::default();
+    let mut registered_functions = HashMap::with_capacity(functions.len());
+
+    let mut errors = Vec::new();
+    let mut names = Vec::with_capacity(functions.len());
+    let mut function_entrypoints = Vec::with_capacity(functions.len());
+
+    for function in functions {
+        let res = compile_function(
+            &mut state,
+            &mut bindings,
+            &mut registered_functions,
+            function,
+            source_meta,
+        );
+
+        match res {
+            Ok((name, range)) => {
+                names.push(name);
+                function_entrypoints.push(range);
+            }
+            Err(e) => {
+                errors.push(e);
+            }
         }
+    }
+
+    if errors.is_empty() {
+        let ir: IRCode = state.release().collect();
+        let (forward_map, backwards_map) = generate_branching_graphs(&ir);
+
+        let mut ir = IR {
+            code: ir,
+            backwards_map,
+            forward_map,
+            function_entrypoints,
+        };
+
+        tracing::info!(target: "irgen", "cleaning up generated code to remove garbo");
+        tracing::debug!(target: "irgen", "ir before cleanup: {ir:?}");
+        // run some cleanup on the generated code, because we might have generated
+        // too much garbage
+        super::cleanup::run_safe_cleanup(&mut ir);
+        super::cleanup::prune_unreached_blocks(&mut ir);
+
+        Ok((ir, names))
+    } else {
+        Err(errors)
     }
 }
 
-pub fn compile_function<'code>(
+fn compile_function<'code>(
+    state: &mut IRGenState,
+    bindings: &mut BindingCounter,
+    functions: &mut HashMap<&'code str, BlockBinding>,
     f: ast::Function<'code>,
     source_meta: &SourceMetadata<'code>,
-) -> Result<(&'code str, IR), StE> {
+) -> Result<(&'code str, BlockBinding), StE> {
+    tracing::trace!(target: "irgen::astshow", "compiling function: {f:?}");
     let ast::Function {
         name: ast::Identifier(name),
+        args,
         body: ast::Block { statements },
     } = f;
-    let mut state = IRGenState::default();
-    let mut binding_counter = BindingCounter::default();
     let mut env = VariableTracker::default();
-    let entry = state.new_block();
+    let mut entry = state.new_block();
+    let function_entry = entry.block();
+
+    // register the function. TODO: error when the function is stated twice.
+    functions.insert(name, entry.block());
+
+    // register all the arguments to be variables.
+    // TODO: we'll have to make something in codegen to put the variables in the correct place,
+    // both when calling and when receiving!
+    {
+        let env = env.variables_at_depth(0);
+        for (variable, var_span) in args {
+            let var_binding = bindings.next_binding();
+            entry.allocate(var_binding, 4); // all the bindings are ints right now.
+            env.insert(variable.0, (var_binding, ByteSize::U32));
+        }
+    }
+
+    tracing::trace!(target: "irgen::function", "after putting variables in env: {env:?}");
+
     let mut end = block::compile_block(
-        &mut state,
+        state,
         entry,
         statements,
-        &mut binding_counter,
+        bindings,
         &mut env,
+        functions,
         None,
         0,
         source_meta,
     )?;
-    let ret = binding_counter.next_binding();
+    let ret = bindings.next_binding();
     end.assign(ret, 0);
-    end.finish_block(&mut state, ret);
-    let ir: IRCode = state.release().collect();
-    let (forward_map, backwards_map) = generate_branching_graphs(&ir);
+    let end_index = end.block().0;
+    end.finish_block(state, ret);
 
-    let mut ir = IR {
-        code: ir,
-        backwards_map,
-        forward_map,
-    };
-
-    tracing::info!(target: "irgen", "cleaning up generated code to remove garbo");
-    tracing::debug!(target: "irgen", "ir before cleanup: {ir:?}");
-    // run some cleanup on the generated code, because we might have generated
-    // too much garbage
-    super::cleanup::run_safe_cleanup(&mut ir);
-    super::cleanup::prune_unreached_blocks(&mut ir);
-
-    Ok((name, ir))
+    Ok((name, function_entry))
 }
 
 // TODO: make block builder struct
@@ -217,6 +271,7 @@ impl IRGenState {
 
 type VariableMemories<'code> = HashMap<&'code str, (Binding, ByteSize)>;
 
+#[derive(Debug)]
 pub struct VariableTracker<'code> {
     memories: Vec<VariableMemories<'code>>,
 }
@@ -228,7 +283,8 @@ impl<'code> VariableTracker<'code> {
         }
     }
     pub fn get(&self, name: &str, depth: usize) -> Option<&(Binding, ByteSize)> {
-        self.memories[..=depth]
+        tracing::trace!(target: "irgen::variables::get", "getting {name:?} from {depth}");
+        self.memories[..=depth.min(self.memories.len() - 1)]
             .iter()
             .rev()
             .fold(None, |acc, next| acc.or_else(|| next.get(name)))
@@ -255,6 +311,8 @@ pub enum VarError {
     UnknownVariable(String),
     #[error("variable {0:?} was already declared")]
     Redeclared(String),
+    #[error("unknown function: {0:?}")]
+    UnknownFunction(String),
 }
 
 #[derive(Error, Debug)]

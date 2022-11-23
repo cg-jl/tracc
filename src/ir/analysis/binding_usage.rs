@@ -97,6 +97,7 @@ impl BindingUsage for CouldBeConstant {
 impl BindingUsage for Value {
     fn contains_binding(&self, search_target: Binding) -> bool {
         match self {
+            Value::Call { args, .. } => args.iter().any(|b| b.contains_binding(search_target)),
             Value::Allocate { size: _ } => false,
             Value::Phi { nodes } => nodes
                 .iter()
@@ -138,6 +139,7 @@ impl BindingUsage for Value {
         match self {
             Value::Constant(_) | Value::Allocate { size: _ } => ControlFlow::Continue(()),
             Value::Phi { nodes } => nodes.iter().try_for_each(|node| f(node.value)),
+            Value::Call { args, .. } => args.iter().copied().try_for_each(f),
             Value::Add { lhs, rhs }
             | Value::Subtract { lhs, rhs }
             | Value::Lsl { lhs, rhs }

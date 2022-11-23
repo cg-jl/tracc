@@ -69,6 +69,15 @@ impl fmt::Display for Value {
                 }
                 Ok(())
             }
+            Value::Call { label, args } => {
+                f.write_str("call ")?;
+                label.fmt(f)?;
+                for arg in args {
+                    f.write_str(", ")?;
+                    arg.fmt(f)?;
+                }
+                Ok(())
+            }
             Value::Cmp {
                 condition,
                 lhs,

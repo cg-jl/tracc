@@ -16,12 +16,19 @@ impl fmt::Debug for Program<'_> {
 
 pub struct Function<'source> {
     pub name: Identifier<'source>,
+    pub args: Vec<(Identifier<'source>, Span)>,
     pub body: Block<'source>,
 }
 
 impl fmt::Debug for Function<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Function {:?}", self.name)?;
+        write!(f, "Function {:?}(", self.name)?;
+        if !self.args.is_empty() {
+            for (arg, span) in &self.args {
+                write!(f, "{:?}@{:?}", arg.0, span.as_range())?;
+            }
+        }
+        writeln!(f, ")");
         format_block(&self.body.statements, f, 1)
     }
 }
@@ -189,6 +196,14 @@ fn format_statement(
 fn format_expr(expr: &Expr, expr_span: Span, f: &mut fmt::Formatter, depth: usize) -> fmt::Result {
     let spacing = " ".repeat(depth);
     match expr {
+        Expr::Call { name, args } => {
+            writeln!(f, "Call {:?}@{:?}", name.0, name.1.as_range())?;
+            for (i, arg) in args.iter().enumerate() {
+                writeln!(f, "{}  arg {i}:", spacing.clone())?;
+                format_expr(&arg.0, arg.1, f, depth + 2)?;
+            }
+            Ok(())
+        }
         Expr::Ternary {
             condition,
             value_true,
@@ -264,6 +279,10 @@ pub enum Expr<'source> {
         condition: (Box<Expr<'source>>, Span),
         value_true: (Box<Expr<'source>>, Span),
         value_false: (Box<Expr<'source>>, Span),
+    },
+    Call {
+        name: (&'source str, Span),
+        args: Vec<(Expr<'source>, Span)>,
     },
 }
 

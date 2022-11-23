@@ -33,6 +33,7 @@ impl BindingUsage for Value {
         match self {
             Value::Allocate { .. } => false,
             Value::Phi { nodes } => nodes.iter().any(|node| node.uses_binding(binding)),
+            Value::Call { args, .. } => args.iter().any(|b| b.uses_binding(binding)),
             Value::Cmp {
                 condition: _,
                 lhs,

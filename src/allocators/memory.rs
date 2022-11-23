@@ -54,7 +54,7 @@ pub fn figure_out_allocations(ir: &IR, mut allocations_needed: AllocMap) -> (Mem
     let mut total_blocks = 0usize;
     for lifetime in all {
         let mut active = ActiveBindingSet::new();
-        let mut free_blocks = HashSet::new();
+        let mut free_blocks: HashSet<_> = (0..total_blocks).collect();
         for binding in lifetime.ordered_by_start.iter().copied() {
             let start = lifetime.binding_starts[&binding];
 
@@ -62,6 +62,7 @@ pub fn figure_out_allocations(ir: &IR, mut allocations_needed: AllocMap) -> (Mem
 
             // expire old intervals
             tracing::trace!(target: "alloc::memory::block", "currently active: {active:?}");
+            tracing::trace!(target: "alloc::memory::block", "free blocks: {free_blocks:?}");
             let end_i = active
                 .bindings
                 .iter()
@@ -92,6 +93,7 @@ pub fn figure_out_allocations(ir: &IR, mut allocations_needed: AllocMap) -> (Mem
             // find a spot with N consecutive free blocks.
             let found_offset = (0..=total_blocks.saturating_sub(allocated_size))
                 .position(|i| (0..allocated_size).all(|offset| free_blocks.contains(&(i + offset))))
+                .inspect(|found| tracing::trace!("found offset: {found}"))
                 .unwrap_or_else(|| {
                     // try to find a spot at the end where some amount of blocks is free, so we don't
                     // have to allocate extra blocks for some part of the allocation.
@@ -130,7 +132,7 @@ pub fn figure_out_allocations(ir: &IR, mut allocations_needed: AllocMap) -> (Mem
                     binding,
                     assembly::Memory {
                         register: assembly::Register::StackPointer,
-                        offset: assembly::Offset::Determined(block * 4),
+                        offset: block * 4,
                     },
                 )
             })
