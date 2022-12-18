@@ -13,9 +13,7 @@ use crate::{
 };
 
 #[allow(clippy::needless_lifetimes)] // I prefer an explicit lifetime here.
-pub fn get_used_flags<'code>(
-    ir: &'code IR,
-) -> impl Iterator<Item = (Binding, Condition)> + 'code {
+pub fn get_used_flags<'code>(ir: &'code IR) -> impl Iterator<Item = (Binding, Condition)> + 'code {
     ir.code
         .iter()
         .flat_map(|block| {

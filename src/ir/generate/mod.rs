@@ -42,8 +42,10 @@ pub fn compile_program<'code>(
     let mut errors = Vec::new();
     let mut names = Vec::with_capacity(functions.len());
     let mut function_entrypoints = Vec::with_capacity(functions.len());
+    let mut function_argument_bindings = Vec::with_capacity(functions.len());
 
     for function in functions {
+        let arg_count = function.args.len();
         let res = compile_function(
             &mut state,
             &mut bindings,
@@ -53,9 +55,10 @@ pub fn compile_program<'code>(
         );
 
         match res {
-            Ok((name, range)) => {
+            Ok((name, range, arg_range)) => {
                 names.push(name);
                 function_entrypoints.push(range);
+                function_argument_bindings.push(arg_range);
             }
             Err(e) => {
                 errors.push(e);
@@ -72,6 +75,7 @@ pub fn compile_program<'code>(
             backwards_map,
             forward_map,
             function_entrypoints,
+            function_argument_bindings,
         };
 
         tracing::info!(target: "irgen", "cleaning up generated code to remove garbo");
@@ -93,7 +97,8 @@ fn compile_function<'code>(
     functions: &mut HashMap<&'code str, BlockBinding>,
     f: ast::Function<'code>,
     source_meta: &SourceMetadata<'code>,
-) -> Result<(&'code str, BlockBinding), StE> {
+) -> Result<(&'code str, BlockBinding, core::ops::Range<usize>), StE> {
+    let arg_range = bindings.latest_binding..bindings.latest_binding + f.args.len();
     tracing::trace!(target: "irgen::astshow", "compiling function: {f:?}");
     let ast::Function {
         name: ast::Identifier(name),
@@ -137,7 +142,7 @@ fn compile_function<'code>(
     let end_index = end.block().0;
     end.finish_block(state, ret);
 
-    Ok((name, function_entry))
+    Ok((name, function_entry, arg_range))
 }
 
 // TODO: make block builder struct

@@ -22,6 +22,7 @@ pub struct IR {
     pub backwards_map: BranchingMap,
     pub forward_map: BranchingMap,
     pub function_entrypoints: Vec<BlockBinding>,
+    pub function_argument_bindings: Vec<core::ops::Range<usize>>,
 }
 
 impl IR {

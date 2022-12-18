@@ -164,7 +164,6 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         })
         .collect();
 
-
     let block_labels = {
         let mut label_count = 0usize;
         let mut block_labels: HashMap<_, _> = function_block_spans
@@ -243,6 +242,17 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                 &stores_condition,
                 &block_labels,
             );
+
+            let is_start_of_function = function_block_spans[function_index].start.0 == index;
+
+
+            if is_start_of_function {
+                for (index, binding) in ir.function_argument_bindings[function_index].clone().into_iter().map(Binding).enumerate() {
+                    compiled_block.push_front(assembly::Instruction::Str { register: assembly::Register::GeneralPurpose { index: index as u8, bit_size: assembly::BitSize::Bit32 } , address: memory[&binding] });
+                }
+            }
+
+
             match block.end {
                 BlockEnd::Branch(b) => match b {
                     Branch::Unconditional { target } => {
@@ -302,7 +312,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                 BlockEnd::Return(_) => {
                     tracing::trace!(target: "asmgen::ends", "returning from {index}, stack info: {stack_info:?}");
                     if let Some(info) = stack_info {
-                         if  function_block_spans[function_index].end.0 != index 
+                         if  function_block_spans[function_index].end.0 != index
                              /*&& !info.epilogue_label.has_number(index)*/
                         {
                             used_epilogue_labels.insert(function_index);
@@ -367,7 +377,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         last_epilogue_insertion = range.end.0 + 1;
         dbg!(range.end);
 
-        if used_epilogue_labels.contains(&func_i)  {
+        if used_epilogue_labels.contains(&func_i) {
             asm_blocks[range.end.0 + 1].push_front(info.epilogue_label);
         }
     }
