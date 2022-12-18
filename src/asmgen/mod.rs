@@ -40,6 +40,12 @@ impl core::fmt::Debug for BlockRange {
 }
 
 pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOutput {
+    let global_decls: Vec<_> = function_names
+        .iter()
+        .copied()
+        .map(|c| assembly::Directive::Global(c.to_string()))
+        .collect();
+
     let need_allocation = analysis::statements_with_addresses(&ir)
         .filter_map(|(s, _)| {
             if let Statement::Assign { index, .. } = s {
@@ -382,7 +388,8 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         }
     }
 
-    asm_blocks.into_iter().collect()
+    let all_asm: AssemblyOutput = asm_blocks.into_iter().collect();
+    all_asm.chain_back(global_decls)
 }
 
 fn compile_block<'code>(
