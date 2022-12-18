@@ -88,6 +88,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         "TODO: implement moves to return register (or generic move to register)"
     );
 
+    #[derive(Debug)]
     struct StackInfo<'code> {
         epilogue_label: assembly::Label<'code>,
         allocation_size: usize,
@@ -163,6 +164,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         })
         .collect();
 
+
     let block_labels = {
         let mut label_count = 0usize;
         let mut block_labels: HashMap<_, _> = function_block_spans
@@ -217,6 +219,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
         block_labels
     };
+    dbg!(&needs_prologue_and_epilogue);
     let mut used_epilogue_labels = HashSet::new();
 
     // now, let's compile everything into blocks and add epilogues/prologues wherever needed.
@@ -261,12 +264,14 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                             .map(|c| (c, true))
                             .unwrap_or((assembly::Condition::NotEquals, false));
 
+                        tracing::trace!(target: "asmgen", "true = {target_true}, false = {target_false}, current = {index}");
                         let (condition, condition_target, rest_target) =
                             if target_true.0 == index + 1 {
                                 (condition.opposite(), target_false, target_true)
                             } else {
                                 (condition, target_true, target_false)
                             };
+
 
                         if !flag_is_condition {
                             compiled_block.push_back(assembly::Instruction::Cmp {
@@ -285,6 +290,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                             label: block_labels[&condition_target],
                         });
 
+
                         if rest_target.0 != index + 1 {
                             compiled_block.push_back(assembly::Branch::Unconditional {
                                 register: None,
@@ -294,9 +300,10 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                     }
                 },
                 BlockEnd::Return(_) => {
+                    tracing::trace!(target: "asmgen::ends", "returning from {index}, stack info: {stack_info:?}");
                     if let Some(info) = stack_info {
-                        if function_block_spans[function_index].end.0 != index
-                            && !info.epilogue_label.has_number(index)
+                         if  function_block_spans[function_index].end.0 != index 
+                             /*&& !info.epilogue_label.has_number(index)*/
                         {
                             used_epilogue_labels.insert(function_index);
                             compiled_block.push_back(assembly::Branch::Unconditional {
@@ -324,9 +331,12 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
     let mut needs_prologue_and_epilogue: Vec<_> = needs_prologue_and_epilogue.into_iter().collect();
     needs_prologue_and_epilogue.sort_unstable_by_key(|k| k.0);
 
+    tracing::trace!(target: "asmgen::epilogues", "needs_prologue_and_epilogue: {needs_prologue_and_epilogue:?}");
+
     let mut last_epilogue_insertion = asm_blocks.len();
     for (i, (func_i, info)) in needs_prologue_and_epilogue.into_iter().enumerate() {
         let range = &mut function_block_spans[func_i];
+        dbg!(range.end);
 
         if last_epilogue_insertion <= range.start.0 {
             range.start.0 += 1;
@@ -355,8 +365,9 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
         asm_blocks.insert(range.end.0 + 1, epilogue);
         last_epilogue_insertion = range.end.0 + 1;
+        dbg!(range.end);
 
-        if used_epilogue_labels.contains(&func_i) && !block_labels.contains_key(&range.end) {
+        if used_epilogue_labels.contains(&func_i)  {
             asm_blocks[range.end.0 + 1].push_front(info.epilogue_label);
         }
     }
