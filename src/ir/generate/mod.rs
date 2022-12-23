@@ -299,7 +299,7 @@ impl<'code> VariableTracker<'code> {
     pub fn variables_at_depth(&mut self, depth: usize) -> &mut VariableMemories<'code> {
         // depth is not going to be an arbitrary amount longer, this just has
         // to cover the case when we increment the depth of the blocks
-        if depth == self.memories.len() {
+        while depth >= self.memories.len() {
             self.memories.push(VariableMemories::default())
         }
         &mut self.memories[depth]
