@@ -446,7 +446,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
             }
 
             if i < regids.len() {
-                save.push_back(assembly::Instruction::Ldr {
+                save.push_back(assembly::Instruction::Str {
                     register: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
                     address: start.with_offset(i * 8),
                 });
