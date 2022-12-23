@@ -7,19 +7,19 @@ try_run() {
 
 # source dest
 try_compile_with_gcc() {
-    try_run "~/sdks/gcc-arm/bin/aarch64-none-linux-gnu-gcc -static -o $2 $1"
+    try_run "make -s $1.gcc"
 }
 
 try_compile_with_project() {
-  try_run "cargo run -- -o $1.s $1" && try_compile_with_gcc "$1.s" "$1.cc"
+    try_run "make -s $1.tracc"
 }
 
 try_compile_normal() {
-  try_compile_with_gcc $1 "$1.gcc"
+  try_compile_with_gcc $1
 }
 
 compare_results() {
-  qemu-aarch64 ./$1.cc
+  qemu-aarch64 ./$1.tracc
   local res1=$?
   qemu-aarch64 ./$1.gcc
   local res2=$?
@@ -49,7 +49,7 @@ test_stage() {
   done
   local res=0
   for i in $path/*.c; do
-    if ! test_one $i "`basename $i`"; then
+    if ! test_one "${i%%.*}" "`basename $i`"; then
       res=1
     fi
   done
@@ -57,7 +57,7 @@ test_stage() {
 }
 
 if [ "$1" = "--one" ]; then
-    test_one $2 "`basename $2`"
+    test_one "`basename $2`"
     exit $?
 fi
 
