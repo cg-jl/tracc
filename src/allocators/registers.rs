@@ -510,7 +510,7 @@ fn linear_alloc_block(
             if used_through_call.contains(&binding) {
                 tracing::trace!(target: "alloc::registers", "caught {binding} used through call");
                 // try a callee-saved register, otherwise hint that we couldn't
-                (9..=15)
+                (19..=28)
                     .map(RegisterID::from)
                     .find(|reg| !used.contains_key(reg))
                     // register that we used a callee-saved register.
