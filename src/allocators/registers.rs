@@ -730,6 +730,13 @@ pub fn alloc_registers(
         saved.dedup();
     }
 
+    codegen_hints.need_move_to_return_reg.extend(
+        returned_from_call
+            .iter()
+            .copied()
+            .filter(|b| codegen_hints.registers[b] != RegisterID::from(0)),
+    );
+
     codegen_hints.need_move_from_r0.extend(
         returned_from_call
             .into_iter()

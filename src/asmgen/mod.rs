@@ -370,7 +370,13 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                         }
                     }
                 },
-                BlockEnd::Return(_) => {
+                BlockEnd::Return(b) => {
+                    if registers[&b] != RegisterID::from(0) {
+                        compiled_block.push_back(assembly::Instruction::Mov {
+                            target: assembly::Register::GeneralPurpose { index: 0, bit_size: assembly::BitSize::Bit32 },
+                            source: assembly::Data::Register(assembly::Register::from_id(registers[&b], assembly::BitSize::Bit32)),
+                        });
+                    }
                     tracing::trace!(target: "asmgen::ends", "returning from {index}, stack info: {stack_info:?}");
                     if let Some(info) = stack_info {
                          if  function_block_spans[function_index].end.0 != index
