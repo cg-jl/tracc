@@ -8,7 +8,7 @@ use std::fmt;
 
 #[derive(Debug, Clone)]
 pub enum Assembly<'code> {
-    Directive(Directive),
+    Directive(Directive<'code>),
     Label(Label<'code>),
     Instruction(Instruction<'code>),
     Comment(String),
@@ -50,20 +50,20 @@ impl<'code> From<Branch<'code>> for Assembly<'code> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum Directive {
-    Global(String),
-    Type(String, String),
-    Architecture(String),
+#[derive(Debug, Clone, Copy)]
+pub enum Directive<'code> {
+    Global(&'code str),
+    Type(&'code str, &'code str),
+    Architecture(&'static str),
 }
 
-impl From<Directive> for Assembly<'_> {
-    fn from(d: Directive) -> Self {
+impl<'code> From<Directive<'code>> for Assembly<'code> {
+    fn from(d: Directive<'code>) -> Self {
         Self::Directive(d)
     }
 }
 
-impl fmt::Display for Directive {
+impl fmt::Display for Directive<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Global(name) => write!(f, "global {}", name),

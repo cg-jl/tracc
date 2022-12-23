@@ -56,10 +56,10 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
             }),
     );
 
-    let global_decls: Vec<_> = function_names
+    let per_function_decls: Vec<_> = function_names
         .iter()
         .copied()
-        .map(|c| assembly::Directive::Global(c.to_string()))
+        .map(assembly::Directive::Global)
         .collect();
 
     let need_allocation = analysis::statements_with_addresses(&ir)
@@ -480,8 +480,11 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         }
     }
 
-    let all_asm: AssemblyOutput = asm_blocks.into_iter().collect();
-    all_asm.chain_back(global_decls)
+    for (global_decl, func_range) in per_function_decls.into_iter().zip(function_block_spans) {
+        asm_blocks[func_range.start.0].push_front(global_decl);
+    }
+
+    asm_blocks.into_iter().collect()
 }
 
 fn compile_block<'code>(
