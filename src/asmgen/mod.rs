@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 #[derive(Clone, Copy)]
-struct BlockRange {
+pub struct BlockRange {
     pub start: BlockBinding,
     pub end: BlockBinding,
 }
@@ -123,10 +123,28 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
     debug_assert!(completely_spilled.is_empty(), "shouldn't have any spills");
 
-    let (memory, total_mem_size) =
-        memory::figure_out_allocations(&ir, alloc_map.clone(), |func_i| {
-            callee_saved_per_function[func_i].len()
-        });
+    let mut function_block_spans: Vec<_> = ir
+        .function_entrypoints
+        .iter()
+        .copied()
+        .map(|starting_block| {
+            let ending_block = crate::ir::analysis::flow_order_traversal(&ir, starting_block)
+                .filter(|block| matches!(ir.code[block.0].end, BlockEnd::Return(_)))
+                .max()
+                .expect("no ending block?");
+
+            BlockRange {
+                start: starting_block,
+                end: ending_block,
+            }
+        })
+        .collect();
+    let (memory, total_mem_size) = memory::figure_out_allocations(
+        &ir,
+        alloc_map.clone(),
+        |func_i| callee_saved_per_function[func_i].len(),
+        &function_block_spans,
+    );
 
     // since the binding was moved to wzr, no need to re-move stuff here
     for binding in registers.iter().filter_map(|(binding, reg)| {
@@ -152,23 +170,6 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         epilogue_label: assembly::Label<'code>,
         allocation_size: usize,
     }
-
-    let mut function_block_spans: Vec<_> = ir
-        .function_entrypoints
-        .iter()
-        .copied()
-        .map(|starting_block| {
-            let ending_block = crate::ir::analysis::flow_order_traversal(&ir, starting_block)
-                .filter(|block| matches!(ir.code[block.0].end, BlockEnd::Return(_)))
-                .max()
-                .expect("no ending block?");
-
-            BlockRange {
-                start: starting_block,
-                end: ending_block,
-            }
-        })
-        .collect();
 
     // register the functions that need allocation
     let mut needs_prologue_and_epilogue: HashMap<_, _> = (0..function_block_spans.len())

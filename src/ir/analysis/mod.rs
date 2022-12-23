@@ -195,6 +195,37 @@ impl<'code> From<&'code IR> for BottomTopTraversal<'code> {
     }
 }
 
+pub fn fill_indirect_parents(ir: &IR) -> HashMap<BlockBinding, HashSet<BlockBinding>> {
+    let mut map = HashMap::<BlockBinding, HashSet<_>>::new();
+    for root in ir.function_entrypoints.iter().copied() {
+        let mut traversal = flow_order_traversal(ir, root);
+        let _ = traversal.next();
+        while let Some(child) = traversal.next() {
+            map.entry(child)
+                .or_default()
+                .extend(traversal.visited.iter().copied());
+        }
+    }
+    map
+}
+
+pub fn antecessors_filtering_branches<'ir>(
+    ir: &'ir IR,
+    block: BlockBinding,
+    mut filter_branch: impl FnMut(BlockBinding) -> bool + 'ir,
+) -> impl Iterator<Item = BlockBinding> + 'ir {
+    let mut queue = vec![block];
+    let mut visited = HashSet::new();
+    std::iter::from_fn(move || {
+        Some(loop {
+            let n = queue.pop()?;
+            if visited.insert(n) && filter_branch(n) {
+                break n;
+            }
+        })
+    })
+}
+
 pub fn iterate_with_bindings(
     code: &[BasicBlock],
 ) -> impl Iterator<Item = (BlockBinding, &BasicBlock)> {
@@ -239,27 +270,11 @@ pub fn flow_order_traversal_from_parts(
     TopBottomTraversal::from_parts(forward_map, vec![block])
 }
 
-pub fn predecessors_filtering_branches<'ir>(
-    ir: &'ir IR,
-    block_from: BlockBinding,
-    mut continue_branch: impl FnMut(BlockBinding) -> bool + 'ir,
-) -> impl Iterator<Item = BlockBinding> + 'ir {
-    let mut queue = vec![block_from];
-    let mut visited = HashSet::new();
-    std::iter::from_fn(move || {
-        let next = queue.pop().filter(|block| visited.insert(*block))?;
-        if continue_branch(next) {
-            queue.extend(ir.forward_map.get(&next).into_iter().flatten().copied());
-        }
-        Some(next)
-    })
-}
-
 pub struct TopBottomTraversal<'code> {
     /// the code graph
     forward_map: &'code BranchingMap,
     /// visited set to avoid loops
-    visited: HashSet<BlockBinding>,
+    pub visited: HashSet<BlockBinding>,
     /// a queue to know what we have yet to process
     queue: Vec<BlockBinding>,
 }
