@@ -130,6 +130,7 @@ pub unsafe fn rename_block(ir: &mut IR, target: BlockBinding, replace_with: Bloc
         }
         end_rename_block(&mut block.end, target, replace_with);
     }
+
     // rename refs in the branching maps & function entrypoints
     for x in ir
         .forward_map

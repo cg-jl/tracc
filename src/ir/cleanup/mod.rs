@@ -179,6 +179,7 @@ pub fn remove_redundant_jumps(ir: &mut IR) {
 
 /// prune not reached blocks
 pub fn prune_unreached_blocks(ir: &mut IR) {
+    tracing::debug!(target: "cleanup::prune-unreached", "IR: {ir:?}");
     // #1. Walk the CFG and prune unreached blocks from the map
     let unused_blocks = {
         let mut unreached = Vec::new();
@@ -193,7 +194,7 @@ pub fn prune_unreached_blocks(ir: &mut IR) {
         // now propagate to their children
         while !queue.is_empty() {
             let next = queue.pop().unwrap();
-            if unreached.contains(&next) {
+            if unreached.contains(&next) || ir.function_entrypoints.contains(&next) {
                 continue;
             }
             unreached.push(next);

@@ -14,6 +14,7 @@ fn fold_ir_blocks(ir: &mut IR) {
 }
 
 pub fn constant_fold(mut ir: IR) -> IR {
+    tracing::debug!(target: "fold", "IR before folding: {ir:?}");
     cleanup::run_safe_cleanup(&mut ir);
     while try_merge(&mut ir) {
         cleanup::prune_unreached_blocks(&mut ir);
