@@ -59,11 +59,18 @@ pub fn can_block_be_removed(ir: &IR, block: BlockBinding) -> bool {
 pub fn find_leaf_blocks<'code>(
     forward_map: &'code BranchingMap,
     backwards_map: &'code BranchingMap,
+    roots: &'code [BlockBinding],
 ) -> impl Iterator<Item = BlockBinding> + 'code {
     backwards_map
         .keys()
         .copied()
         .filter(move |key| !forward_map.contains_key(key))
+        .chain(
+            roots
+                .iter()
+                .copied()
+                .filter(|root| !forward_map.contains_key(root)),
+        )
 }
 
 pub fn is_indirect_child_of(
@@ -190,7 +197,8 @@ impl<'code> From<&'code IR> for BottomTopTraversal<'code> {
     fn from(ir: &'code IR) -> Self {
         Self::new(
             ir,
-            find_leaf_blocks(&ir.forward_map, &ir.backwards_map).collect(),
+            find_leaf_blocks(&ir.forward_map, &ir.backwards_map, &ir.function_entrypoints)
+                .collect(),
         )
     }
 }
