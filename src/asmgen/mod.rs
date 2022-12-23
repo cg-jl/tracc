@@ -192,10 +192,10 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
                 let total_offsets = bindings_with_offsets
                     .into_iter()
-                    .map(|(b, offt)| offt + alloc_map[b]);
+                    .map(|(b, offt)| offt + alloc_map[b])
+                    .chain(Some(callee_saved_per_function[func_i].len() * 8));
 
-                let raw_size =
-                    total_offsets.max().unwrap_or(0) + callee_saved_per_function[func_i].len() * 8;
+                let raw_size = total_offsets.max().unwrap();
 
                 let rem = raw_size % 16;
                 if rem == 0 {
