@@ -106,7 +106,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
             }
         }
 
-        dbg!(cspf)
+        cspf
     };
 
     let alloc_map = memory::make_alloc_map(&ir.code);

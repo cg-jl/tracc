@@ -408,13 +408,12 @@ fn linear_alloc_block(
     let mut active = ActiveBindingSet::new();
     let mut used = HashMap::new();
 
-    tracing::trace!(target: "alloc::registers::block", "ordered by start: {ordered_bindings_by_start:?}");
-    tracing::trace!(target: "alloc::registers::block", "ends: {ends:?}");
-    tracing::trace!(target: "alloc::registers::block", "starts: {starts:?}");
+    //     tracing::trace!(target: "alloc::registers::block", "ordered by start: {ordered_bindings_by_start:?}");
+    //     tracing::trace!(target: "alloc::registers::block", "ends: {ends:?}");
+    //     tracing::trace!(target: "alloc::registers::block", "starts: {starts:?}");
 
     for binding in ordered_bindings_by_start.iter().copied() {
         let start = starts[&binding];
-        tracing::trace!(target: "alloc::registers::block", "allocating {binding}, which starts at {start}");
         // expire old intervals
         let end_i = active
             .bindings
@@ -670,9 +669,7 @@ pub fn alloc_registers(
                         .unwrap(),
                 )
             })
-            .position(|(entry, end)| {
-                dbg!((entry.0..=end.0)).contains(&dbg!(full_lifetime.block_index))
-            })
+            .position(|(entry, end)| (entry.0..=end.0).contains(&full_lifetime.block_index))
             .expect("all blocks should belong to a function");
         linear_alloc_block(
             &mut codegen_hints,
