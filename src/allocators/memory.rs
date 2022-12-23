@@ -245,17 +245,25 @@ pub fn make_memory_lifetimes(
     // 2. Gather all requested binding ends.
     for block in analysis::BottomTopTraversal::from(ir) {
         for (stmt_index, statement) in ir[block].statements.iter().enumerate().rev() {
-            statement.visit_value_bindings(|b| {
-                if allocations_needed.contains_key(&b)
-                    && binding_end_blocks.entry(b).or_default().insert(block)
-                {
-                    all[block.0]
-                        .binding_ends
-                        .insert(MemBinding::IR(b), stmt_index);
+            match statement {
+                Statement::Store { mem_binding, .. }
+                | Statement::Assign {
+                    value: Value::Load { mem_binding, .. },
+                    ..
+                } => {
+                    if allocations_needed.contains_key(mem_binding)
+                        && binding_end_blocks
+                            .entry(*mem_binding)
+                            .or_default()
+                            .insert(block)
+                    {
+                        all[block.0]
+                            .binding_ends
+                            .insert(MemBinding::IR(*mem_binding), stmt_index);
+                    }
                 }
-
-                std::ops::ControlFlow::<()>::Continue(())
-            });
+                _ => (),
+            }
         }
     }
 
