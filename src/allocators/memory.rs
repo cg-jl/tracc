@@ -1,8 +1,10 @@
 //! First step of code generation is to get the stack memory usage for the code
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use tracing::{debug, span, Level};
 
+use crate::ir::analysis::lifetimes::BlockLifetimes;
 use crate::ir::{BasicBlock, Binding, BlockBinding, Statement, Value, IR};
 
 use crate::asmgen::assembly;
@@ -13,7 +15,7 @@ use analysis::lifetimes::BlockAddress;
 
 type DependencyMap = HashMap<BlockBinding, Vec<Binding>>;
 
-pub type MemoryMap = HashMap<Binding, assembly::Memory>;
+pub type MemoryMap = HashMap<MemBinding, assembly::Memory>;
 
 // assumes to != 0
 pub fn align(value: usize, to: usize) -> usize {
@@ -24,6 +26,19 @@ pub fn align(value: usize, to: usize) -> usize {
     }
 }
 
+impl MemBinding {
+    pub fn get_alloc_block_size<F: FnOnce(usize) -> usize>(
+        &self,
+        alloc_map: &AllocMap,
+        used_callee_saved_registers: F,
+    ) -> usize {
+        match self {
+            MemBinding::CalleeSaves(f) => used_callee_saved_registers(*f) * 2,
+            MemBinding::IR(b) => alloc_map[b],
+        }
+    }
+}
+
 // what allocate_graph does:
 //  - start on the leaves and follow through their preceding blocks
 //  - if the place is not taken, assign that index
@@ -31,8 +46,12 @@ use crate::ir::analysis::{self, CollisionMap, Lifetime};
 
 type AllocMap = HashMap<Binding, usize>;
 
-pub fn figure_out_allocations(ir: &IR, mut allocations_needed: AllocMap) -> (MemoryMap, usize) {
-    let all = make_memory_lifetimes(ir, &allocations_needed);
+pub fn figure_out_allocations(
+    ir: &IR,
+    mut allocations_needed: AllocMap,
+    used_callee_saved_registers: impl Fn(usize) -> usize,
+) -> (MemoryMap, usize) {
+    let all = make_memory_lifetimes(ir, &allocations_needed).into_vec();
 
     tracing::trace!(target: "alloc::memory", "aligning allocations: {allocations_needed:?}");
     // align all the allocations to four bytes.
@@ -53,8 +72,12 @@ pub fn figure_out_allocations(ir: &IR, mut allocations_needed: AllocMap) -> (Mem
     // per block, let's allocate memory!
     let mut total_blocks = 0usize;
     for lifetime in all {
+        let block_index = lifetime.block_index;
         let mut active = ActiveBindingSet::new();
         let mut free_blocks: HashSet<_> = (0..total_blocks).collect();
+
+        // then, allocate the rest of needed bindings using linear allocation
+
         for binding in lifetime.ordered_by_start.iter().copied() {
             let start = lifetime.binding_starts[&binding];
 
@@ -72,12 +95,20 @@ pub fn figure_out_allocations(ir: &IR, mut allocations_needed: AllocMap) -> (Mem
             for dropped_binding in active.bindings.drain(..end_i) {
                 tracing::trace!(target: "alloc::memory::block", "freeing {dropped_binding}");
                 let location = allocated_blocks[&dropped_binding];
-                for i in 0..allocations_needed[&dropped_binding] {
+                for i in 0..binding
+                    .get_alloc_block_size(&allocations_needed, &used_callee_saved_registers)
+                {
                     free_blocks.insert(i + location);
                 }
             }
 
-            let allocated_size = allocations_needed[&binding];
+            let allocated_size =
+                binding.get_alloc_block_size(&allocations_needed, &used_callee_saved_registers);
+
+            // skip empty allocations from unneeded callee saves.
+            if allocated_size == 0 {
+                continue;
+            }
 
             if let Some(already_allocated) = allocated_blocks.get(&binding).copied() {
                 tracing::trace!(target: "alloc::memory", "{binding} already allocated to offset {already_allocated:?}");
@@ -154,14 +185,25 @@ pub type LoadDependencies = HashMap<Binding, HashSet<analysis::lifetimes::BlockA
 pub fn make_memory_lifetimes(
     ir: &IR,
     allocations_needed: &AllocMap,
-) -> Vec<analysis::lifetimes::BlockLifetimes> {
+) -> Box<[analysis::lifetimes::BlockLifetimes<MemBinding>]> {
     // memory lifetimes are more tricky because memory bindings have 'multiple' starts and ends.
     // Since the allocator accounts for bindings that it has already allocated (those just
     // contribute to the free blocks), we can push multiple starts and ends per memory. We'll also
     // have to take into account the lifetimes that pass through blocks without being used
     // explicitly inside them.
     let mut alive_memories = vec![HashSet::new(); ir.code.len()].into_boxed_slice();
-    let mut all = vec![analysis::lifetimes::BlockLifetimes::default(); ir.code.len()];
+    let mut all = {
+        let mut all = Box::new_uninit_slice(ir.code.len());
+        all.iter_mut().enumerate().for_each(|(i, m)| {
+            m.write(BlockLifetimes {
+                block_index: i,
+                ordered_by_start: Default::default(),
+                binding_starts: Default::default(),
+                binding_ends: Default::default(),
+            });
+        });
+        unsafe { all.assume_init() }
+    };
 
     for block in analysis::TopBottomTraversal::from(ir) {
         let mut this_block_alive_mems: HashSet<_> = ir
@@ -172,6 +214,36 @@ pub fn make_memory_lifetimes(
             .flat_map(|antecessor| alive_memories[antecessor.0].iter().copied())
             .collect();
 
+        let function_index = ir
+            .function_entrypoints
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, entry)| {
+                (
+                    entry,
+                    ir.function_endpoints
+                        .iter()
+                        .filter(move |(_, i)| **i == index)
+                        .map(|t| t.0)
+                        .copied()
+                        .max()
+                        .unwrap(),
+                )
+            })
+            .position(|(entry, end)| (entry.0..=end.0).contains(&block.0))
+            .expect("all blocks should belong to a function");
+
+        let callee_saves = MemBinding::CalleeSaves(function_index);
+
+        // NOTE: Here we don't insert the callee saves into the alive memories since we're going
+        // to repeat this for all blocks, so anyway they're getting added.
+        all[block.0].binding_starts.insert(callee_saves, 0);
+        all[block.0]
+            .binding_ends
+            .insert(callee_saves, ir[block].statements.len());
+        all[block.0].ordered_by_start.push(callee_saves);
+
         for (statement, stmt) in ir[block].statements.iter().enumerate() {
             match stmt {
                 Statement::Assign {
@@ -181,22 +253,23 @@ pub fn make_memory_lifetimes(
                 | Statement::Store { mem_binding, .. }
                     if allocations_needed.contains_key(mem_binding) =>
                 {
+                    let mem_binding = MemBinding::IR(*mem_binding);
                     // if we haven't encountered it already in this block, extend its lifetime
                     // to here and mark its start
-                    if !all[block.0].binding_starts.contains_key(mem_binding) {
+                    if !all[block.0].binding_starts.contains_key(&mem_binding) {
                         tracing::trace!(target: "alloc::memory::lifetimes", "found usage of {mem_binding} for the first time at {block} @{statement}");
                         for antecessor in analysis::antecessors(ir, block) {
-                            alive_memories[antecessor.0].insert(*mem_binding);
+                            alive_memories[antecessor.0].insert(mem_binding);
                             // make the memory lifetime span to the end of each block (since it
                             // continues to live up to here)
                             all[antecessor.0]
                                 .binding_ends
-                                .insert(*mem_binding, ir[antecessor].statements.len());
+                                .insert(mem_binding, ir[antecessor].statements.len());
                         }
-                        all[block.0].ordered_by_start.push(*mem_binding);
+                        all[block.0].ordered_by_start.push(mem_binding);
                         all[block.0].binding_starts.insert(
-                            *mem_binding,
-                            if this_block_alive_mems.contains(mem_binding) {
+                            mem_binding,
+                            if this_block_alive_mems.contains(&mem_binding) {
                                 0
                             } else {
                                 statement
@@ -205,12 +278,13 @@ pub fn make_memory_lifetimes(
                     }
 
                     // set it as dead. Why? Well, it's the last use of the memory that we've seen.
-                    all[block.0].binding_ends.insert(*mem_binding, statement);
-                    this_block_alive_mems.remove(mem_binding);
+                    all[block.0].binding_ends.insert(mem_binding, statement);
+                    this_block_alive_mems.remove(&mem_binding);
                 }
                 _ => {}
             }
         }
+
         // for all the memories still alive that weren't declared here push them into it.
         for left_alive in this_block_alive_mems.iter().copied() {
             if !all[block.0].binding_starts.contains_key(&left_alive) {
@@ -226,11 +300,14 @@ pub fn make_memory_lifetimes(
     }
 
     for lifetimes in all.iter_mut() {
+        lifetimes
+            .ordered_by_start
+            .sort_unstable_by_key(|k| lifetimes.binding_starts[k]);
         // NOTE: using unstable sort for now, until I have no other choice than keeping traversal
         // order
-        let mut taken = core::mem::take(&mut lifetimes.ordered_by_start);
-        taken.sort_unstable_by_key(|k| lifetimes.binding_starts[k]);
-        lifetimes.ordered_by_start = taken;
+        // let mut taken = core::mem::take(&mut lifetimes.ordered_by_start);
+        // taken.sort_unstable_by_key(|k| lifetimes.binding_starts[k]);
+        // lifetimes.ordered_by_start = taken;
     }
 
     tracing::debug!(target: "alloc::memory", "gathered memory lifetimes per block: {all:#?}");
@@ -251,4 +328,19 @@ fn list_memory_defs(block: &[Statement]) -> impl Iterator<Item = (Binding, usize
             None
         }
     })
+}
+
+#[derive(Debug, Hash, Eq, PartialEq, PartialOrd, Clone, Copy)]
+pub enum MemBinding {
+    CalleeSaves(usize),
+    IR(Binding),
+}
+
+impl fmt::Display for MemBinding {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            MemBinding::CalleeSaves(func) => write!(f, "[callee saves for @{func}]"),
+            MemBinding::IR(b) => b.fmt(f),
+        }
+    }
 }

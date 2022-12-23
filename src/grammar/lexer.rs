@@ -412,7 +412,9 @@ impl<'source> Lexer<'source> {
 
     fn skip_whitespace(&mut self) -> Option<Source<'source>> {
         let current = self.current_offset();
+
         let mut last_pos = current;
+
         while let Some((pos, _)) = self
             .input
             .peek()

@@ -141,13 +141,15 @@ pub fn make_allocator_hints(code: &IR) -> AllocatorHints {
     hints
 }
 
-#[allow(dead_code)] // this function will be used upon having calls, don't worry
-fn is_callee_saved(register: u8) -> bool {
-    (9..=15).contains(&register)
-}
-
 #[derive(Debug, Default)]
 pub struct CodegenHints {
+    /// bindings that need to be moved to another register after call
+    pub need_move_from_r0: HashSet<Binding>,
+
+    /// counts of callee saved registers that are used in each function, so that they can
+    /// be saved before using them.
+    pub callee_saved_per_function: Vec<Vec<RegisterID>>,
+
     #[allow(dead_code)]
     /// list of bindings that couldn't be allocated the return register but are to be returned.
     pub need_move_to_return_reg: HashSet<Binding>,
@@ -340,13 +342,13 @@ impl AllocatorState {
 // for each binding being used.
 
 #[derive(Debug)]
-pub struct ActiveBindingSet {
+pub struct ActiveBindingSet<Binding> {
     pub bindings: Vec<Binding>,
 }
 
 use crate::ir::analysis::lifetimes::BlockAddress;
 
-impl ActiveBindingSet {
+impl<Binding: PartialEq + PartialOrd + Eq + std::hash::Hash + Copy> ActiveBindingSet<Binding> {
     pub fn add(&mut self, binding: Binding, ends: &HashMap<Binding, usize>) {
         let binding_end = ends[&binding];
         for i in 0..self.bindings.len() {
@@ -367,11 +369,7 @@ impl ActiveBindingSet {
     }
 
     pub fn remove(&mut self, binding: Binding) -> bool {
-        let found = self
-            .bindings
-            .iter()
-            .copied()
-            .position(|other| other == binding);
+        let found = self.bindings.iter().position(|other| *other == binding);
 
         if let Some(i) = found {
             self.bindings.remove(i);
@@ -405,6 +403,7 @@ fn linear_alloc_block(
     used_in_return: &HashSet<Binding>,
     starts: &HashMap<Binding, usize>,
     ends: &HashMap<Binding, usize>,
+    function_index: usize,
 ) {
     let mut active = ActiveBindingSet::new();
     let mut used = HashMap::new();
@@ -510,10 +509,15 @@ fn linear_alloc_block(
         // try to find an available register.
         let unused_register = phi_alloc.or_else(|| {
             if used_through_call.contains(&binding) {
+                tracing::trace!(target: "alloc::registers", "caught {binding} used through call");
                 // try a callee-saved register, otherwise hint that we couldn't
                 (9..=15)
                     .map(RegisterID::from)
                     .find(|reg| !used.contains_key(reg))
+                    // register that we used a callee-saved register.
+                    .inspect(|x| {
+                        codegen_hints.callee_saved_per_function[function_index].push(*x);
+                    })
                     .or_else(|| {
                         (0..15)
                             .chain((16..=30))
@@ -586,6 +590,8 @@ pub fn alloc_registers(
     let mut state = AllocatorState::new();
     let mut codegen_hints = CodegenHints::default();
 
+    codegen_hints.callee_saved_per_function = vec![Vec::new(); ir.function_entrypoints.len()];
+
     let AllocatorHints {
         in_memory,
         used_in_return,
@@ -594,12 +600,6 @@ pub fn alloc_registers(
         is_phi_node_with: mut phi_edges,
         zeroes,
     } = alloc_hints;
-    // all the returned bindings get instantly allocated to r0.
-    for ret in returned_from_call {
-        codegen_hints
-            .registers
-            .insert(ret, RegisterID::GeneralPurpose { index: 0 });
-    }
 
     codegen_hints.stores_condition = super::flag::get_used_flags(ir).collect();
 
@@ -607,41 +607,73 @@ pub fn alloc_registers(
 
     let mut all_lifetimes = analysis::lifetimes::make_sorted_lifetimes(ir);
 
-    let mut used_through_call = HashSet::new();
+    let used_through_call =
+        {
+            let mut used_through_call = HashSet::new();
 
-    // for all of the bindings that are defined as a result from a call, check if anything that is
-    // defined before them is used after them.
-    let call_addresses = analysis::statements_with_addresses(ir).filter_map(|(statement, addr)| {
-        if matches!(
-            statement,
-            Statement::Assign {
-                value: Value::Call { .. },
-                ..
+            // for all of the bindings that are defined as a result from a call, check if anything that is
+            // defined before them is used after them.
+            let call_addresses =
+                analysis::statements_with_addresses(ir).filter_map(|(statement, addr)| {
+                    if matches!(
+                        statement,
+                        Statement::Assign {
+                            value: Value::Call { .. },
+                            ..
+                        }
+                    ) {
+                        Some(addr)
+                    } else {
+                        None
+                    }
+                });
+
+            for addr in call_addresses {
+                let block_lifetimes = &all_lifetimes[addr.block.0];
+                used_through_call.extend(block_lifetimes.ordered_by_start.iter().copied().filter(
+                    |b| {
+                        block_lifetimes.binding_starts[&b] < addr.statement
+                            && block_lifetimes.binding_ends[&b] > addr.statement
+                    },
+                ))
             }
-        ) {
-            Some(addr)
-        } else {
-            None
-        }
-    });
-
-    for addr in call_addresses {
-        let block_lifetimes = &all_lifetimes[addr.block.0];
-        used_through_call.extend(
-            block_lifetimes
-                .ordered_by_start
-                .iter()
-                .copied()
-                .filter(|b| {
-                    block_lifetimes.binding_starts[&b] < addr.statement
-                        && block_lifetimes.binding_ends[&b] > addr.statement
-                }),
-        )
-    }
+            used_through_call
+        };
 
     tracing::trace!(target: "alloc::hints", "found used through call: {used_through_call:?}");
 
-    for full_lifetime in all_lifetimes {
+    // all the returned bindings get instantly allocated to r0.
+    // if they are used through a call, they need an instant move to the    // newly assigned register.
+    for ret in &returned_from_call {
+        if !used_through_call.contains(ret) {
+            codegen_hints
+                .registers
+                .insert(*ret, RegisterID::GeneralPurpose { index: 0 });
+        }
+    }
+
+    for full_lifetime in all_lifetimes.into_iter() {
+        let function_index = ir
+            .function_entrypoints
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, entry)| {
+                (
+                    entry,
+                    ir.function_endpoints
+                        .iter()
+                        .filter(move |(_, i)| **i == index)
+                        .map(|t| t.0)
+                        .copied()
+                        .max()
+                        .unwrap(),
+                )
+            })
+            .position(|(entry, end)| {
+                dbg!((entry.0..=end.0)).contains(&dbg!(full_lifetime.block_index))
+            })
+            .expect("all blocks should belong to a function");
         linear_alloc_block(
             &mut codegen_hints,
             &mut phi_nodes,
@@ -651,8 +683,20 @@ pub fn alloc_registers(
             &used_in_return,
             &full_lifetime.binding_starts,
             &full_lifetime.binding_ends,
+            function_index,
         );
     }
+
+    for saved in codegen_hints.callee_saved_per_function.iter_mut() {
+        saved.sort_unstable(); // <- the sort is needed so we can remove all duplicates.
+        saved.dedup();
+    }
+
+    codegen_hints.need_move_from_r0.extend(
+        returned_from_call
+            .into_iter()
+            .filter(|b| used_through_call.contains(b)),
+    );
 
     codegen_hints
 }

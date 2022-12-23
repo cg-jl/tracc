@@ -141,8 +141,20 @@ pub enum Instruction<'code> {
     },
     /// Store a register into memory
     Str { register: Register, address: Memory },
+    /// Store a pair of registers into memory
+    Stp {
+        a: Register,
+        b: Register,
+        address: Memory,
+    },
     /// Load a register from memory
     Ldr { register: Register, address: Memory },
+    /// Load a pair of registers from memory
+    Ldp {
+        a: Register,
+        b: Register,
+        address: Memory,
+    },
     /// Bitwise AND
     // NOTE: `s` suffix is available
     // NOTE: register and immediate controlled LS(R|L)/ROR/ASR is available
@@ -240,7 +252,9 @@ impl fmt::Display for Instruction<'_> {
             Self::Add { target, lhs, rhs } => write_instruction!(f, "add", target, lhs, rhs),
             Self::Sub { target, lhs, rhs } => write_instruction!(f, "sub", target, lhs, rhs),
             Self::Str { register, address } => write_instruction!(f, "str", register, address),
+            Self::Stp { a, b, address } => write_instruction!(f, "stp", a, b, address),
             Self::Ldr { register, address } => write_instruction!(f, "ldr", register, address),
+            Self::Ldp { a, b, address } => write_instruction!(f, "ldp", a, b, address),
             Self::Mul { target, lhs, rhs } => write_instruction!(f, "mul", target, lhs, rhs),
             Self::Div {
                 target,
@@ -325,6 +339,15 @@ impl Instruction<'_> {
     {
         move |instr: &mut Instruction| match instr {
             Instruction::Str {
+                ref mut address, ..
+            }
+            | Instruction::Ldr {
+                ref mut address, ..
+            }
+            | Instruction::Stp {
+                ref mut address, ..
+            }
+            | Instruction::Ldp {
                 ref mut address, ..
             } => mapper(address),
             Instruction::Ldr {
@@ -498,6 +521,13 @@ impl fmt::Display for Memory {
 }
 
 impl Memory {
+    pub fn with_offset(self, offset: usize) -> Self {
+        Self {
+            register: self.register,
+            offset: self.offset + offset,
+        }
+    }
+
     pub fn partition(self, block_size: usize) -> impl Iterator<Item = Self> {
         let Memory { register, offset } = self;
         partition(block_size, offset).map(move |offset| Memory { register, offset })

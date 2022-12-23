@@ -67,7 +67,6 @@ fn run() -> Result<(), anyhow::Error> {
     );
 
     //tracc::asmgen::registers::debug_what_im_doing(&ir);
-    // dbg!(memory_map, stack_size);
 
     // let program = tracc::variables::convert_program(program, &meta)?;
     // let output = program.compile();

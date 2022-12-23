@@ -14,6 +14,13 @@ impl<'code> AssemblyOutput<'code> {
         Self(VecDeque::new())
     }
 
+    pub fn insert_asm(&mut self, location: usize, out: AssemblyOutput<'code>) {
+        self.0.reserve_exact(out.0.len());
+        for (offset, value) in out.into_iter().enumerate() {
+            self.0.insert(offset + location, value);
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

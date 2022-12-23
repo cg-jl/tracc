@@ -229,6 +229,16 @@ pub fn flow_order_traversal(ir: &IR, block: BlockBinding) -> TopBottomTraversal 
     TopBottomTraversal::new(ir, vec![block])
 }
 
+/// Same as `flow_order_traversal`, but accepts only the required parts to initialize the traversal
+/// iterator. Used in parts where some part of the IR is being mutated and some part is being
+/// exclusively read.
+pub fn flow_order_traversal_from_parts(
+    forward_map: &BranchingMap,
+    block: BlockBinding,
+) -> TopBottomTraversal {
+    TopBottomTraversal::from_parts(forward_map, vec![block])
+}
+
 pub fn predecessors_filtering_branches<'ir>(
     ir: &'ir IR,
     block_from: BlockBinding,
@@ -255,6 +265,14 @@ pub struct TopBottomTraversal<'code> {
 }
 
 impl<'ir> TopBottomTraversal<'ir> {
+    fn from_parts(forward_map: &'ir BranchingMap, queue: Vec<BlockBinding>) -> Self {
+        Self {
+            forward_map,
+            queue,
+            visited: HashSet::new(),
+        }
+    }
+
     fn new(ir: &'ir IR, queue: Vec<BlockBinding>) -> Self {
         Self {
             forward_map: &ir.forward_map,

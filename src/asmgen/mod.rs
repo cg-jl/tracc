@@ -1,7 +1,10 @@
 pub mod assembly;
 pub mod has_binding;
 mod output;
+
 use self::assembly::Condition;
+use crate::allocators::memory::MemBinding;
+use crate::asmgen::assembly::RegisterID;
 
 // TODO: change output for a better builder (block based, receives IR branching maps for finishing)
 use super::allocators::*;
@@ -40,6 +43,19 @@ impl core::fmt::Debug for BlockRange {
 }
 
 pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOutput {
+    // now, let's get the function block ends since we're not going to modify branches anymore.
+    ir.function_endpoints.extend(
+        ir.function_entrypoints
+            .iter()
+            .copied()
+            .enumerate()
+            .flat_map(|(function_index, entrypoint)| {
+                analysis::flow_order_traversal_from_parts(&ir.forward_map, entrypoint)
+                    .filter(|block| !ir.forward_map.contains_key(block))
+                    .map(move |block| (block, function_index))
+            }),
+    );
+
     let global_decls: Vec<_> = function_names
         .iter()
         .copied()
@@ -57,12 +73,41 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         .collect();
 
     let registers::CodegenHints {
+        mut need_move_from_r0,
+        callee_saved_per_function,
         need_move_to_return_reg,
         save_upon_call,
         mut completely_spilled,
         mut registers,
         stores_condition,
     } = registers::alloc_registers(&ir, need_allocation, registers::make_allocator_hints(&ir));
+
+    let callee_saved_per_function = {
+        let mut cspf = callee_saved_per_function;
+
+        // know if any function does a call
+        for (callee_saved, function_entrypoint) in
+            cspf.iter_mut().zip(ir.function_entrypoints.iter().copied())
+        {
+            let fn_traversal = analysis::flow_order_traversal(&ir, function_entrypoint);
+            let statements = fn_traversal.flat_map(|block| &ir[block].statements);
+            let values = statements.filter_map(|st| {
+                if let Statement::Assign { value, .. } = st {
+                    Some(value)
+                } else {
+                    None
+                }
+            });
+            let has_call = values.into_iter().any(|v| matches!(v, Value::Call { .. }));
+            tracing::trace!(target: "codegen::callee_saved", "function_entrypoint: {function_entrypoint} has call: {has_call}");
+            if has_call {
+                callee_saved.insert(0, assembly::RegisterID::from(29));
+                callee_saved.insert(1, assembly::RegisterID::from(30));
+            }
+        }
+
+        dbg!(cspf)
+    };
 
     let alloc_map = memory::make_alloc_map(&ir.code);
 
@@ -73,7 +118,10 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
     debug_assert!(completely_spilled.is_empty(), "shouldn't have any spills");
 
-    let (memory, total_mem_size) = memory::figure_out_allocations(&ir, alloc_map.clone());
+    let (memory, total_mem_size) =
+        memory::figure_out_allocations(&ir, alloc_map.clone(), |func_i| {
+            callee_saved_per_function[func_i].len()
+        });
 
     // since the binding was moved to wzr, no need to re-move stuff here
     for binding in registers.iter().filter_map(|(binding, reg)| {
@@ -134,20 +182,15 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                 });
 
                 let bindings_with_offsets: Vec<_> = defined_bindings
-                    .filter_map(|b| memory.get(b).map(|mem| (b, mem.offset)))
+                    .filter_map(|b| memory.get(&MemBinding::IR(*b)).map(|mem| (b, mem.offset)))
                     .collect();
-
-                assert_eq!(
-                    bindings_with_offsets.iter().map(|a| a.1).min().unwrap_or(0),
-                    0,
-                    "Each function's memory has to start at offset zero!"
-                );
 
                 let total_offsets = bindings_with_offsets
                     .into_iter()
                     .map(|(b, offt)| offt + alloc_map[b]);
 
-                let raw_size = total_offsets.max().unwrap_or(0);
+                let raw_size =
+                    total_offsets.max().unwrap_or(0) + callee_saved_per_function[func_i].len() * 8;
 
                 let rem = raw_size % 16;
                 if rem == 0 {
@@ -224,7 +267,6 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
         block_labels
     };
-    dbg!(&needs_prologue_and_epilogue);
     let mut used_epilogue_labels = HashSet::new();
 
     // now, let's compile everything into blocks and add epilogues/prologues wherever needed.
@@ -245,6 +287,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                 block.statements,
                 &memory,
                 &registers,
+                &mut need_move_from_r0,
                 &stores_condition,
                 &block_labels,
             );
@@ -254,7 +297,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
             if is_start_of_function {
                 for (index, binding) in ir.function_argument_bindings[function_index].clone().into_iter().map(Binding).enumerate() {
-                    compiled_block.push_front(assembly::Instruction::Str { register: assembly::Register::GeneralPurpose { index: index as u8, bit_size: assembly::BitSize::Bit32 } , address: memory[&binding] });
+                    compiled_block.push_front(assembly::Instruction::Str { register: assembly::Register::GeneralPurpose { index: index as u8, bit_size: assembly::BitSize::Bit32 } , address: memory[&MemBinding::IR(binding)] });
                 }
             }
 
@@ -352,7 +395,6 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
     let mut last_epilogue_insertion = asm_blocks.len();
     for (i, (func_i, info)) in needs_prologue_and_epilogue.into_iter().enumerate() {
         let range = &mut function_block_spans[func_i];
-        dbg!(range.end);
 
         if last_epilogue_insertion <= range.start.0 {
             range.start.0 += 1;
@@ -361,17 +403,62 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
             range.end.0 += 1;
         }
 
-        asm_blocks[range.start.0].0.insert(
-            1,
-            assembly::Instruction::Sub {
+        let (save_registers, load_registers) = {
+            let mut load = AssemblyOutput::new();
+            let mut save = AssemblyOutput::from(assembly::Instruction::Sub {
                 target: assembly::Register::StackPointer,
                 lhs: assembly::Register::StackPointer,
                 rhs: assembly::Data::Immediate(info.allocation_size as i32),
+            });
+            let regids = &callee_saved_per_function[func_i];
+            let mut i = 0;
+            let start = memory[&MemBinding::CalleeSaves(func_i)];
+            while (i + 1) < regids.len() {
+                save.push_back(assembly::Instruction::Stp {
+                    a: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
+                    b: assembly::Register::from_id(regids[i + 1], assembly::BitSize::Bit64),
+                    address: start.with_offset(i * 8),
+                });
+                // make sure to save the stack pointer to x29
+                // TODO: we can detect that we need to store the stack pointer before allocating!
+                // why not pass that as an allocator hint? maybe extend the allocator to not be
+                // focused on bindings but rather just on lifetimes?
+                if (regids[i] == RegisterID::GeneralPurpose { index: 29 }) {
+                    save.push_back(assembly::Instruction::Mov {
+                        target: assembly::Register::GeneralPurpose {
+                            index: 29,
+                            bit_size: assembly::BitSize::Bit64,
+                        },
+                        source: assembly::Data::Register(assembly::Register::StackPointer),
+                    });
+                }
+                load.push_front(assembly::Instruction::Ldp {
+                    a: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
+                    b: assembly::Register::from_id(regids[i + 1], assembly::BitSize::Bit64),
+                    address: start.with_offset(i * 8),
+                });
+
+                i += 2;
             }
-            .into(),
-        );
+
+            if i < regids.len() {
+                save.push_back(assembly::Instruction::Ldr {
+                    register: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
+                    address: start.with_offset(i * 8),
+                });
+                load.push_front(assembly::Instruction::Ldr {
+                    register: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
+                    address: start.with_offset(i * 8),
+                });
+            }
+
+            (save, load)
+        };
+
+        asm_blocks[range.start.0].insert_asm(1, save_registers);
 
         // epilogue: deallocate memory and return.
+
         let epilogue = AssemblyOutput::from(assembly::Instruction::Add {
             target: assembly::Register::StackPointer,
             lhs: assembly::Register::StackPointer,
@@ -379,9 +466,10 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         })
         .chain_one(assembly::Instruction::Ret);
 
+        let epilogue = load_registers.chain(epilogue);
+
         asm_blocks.insert(range.end.0 + 1, epilogue);
         last_epilogue_insertion = range.end.0 + 1;
-        dbg!(range.end);
 
         if used_epilogue_labels.contains(&func_i) {
             asm_blocks[range.end.0 + 1].push_front(info.epilogue_label);
@@ -396,6 +484,7 @@ fn compile_block<'code>(
     block: Vec<Statement>,
     memory: &memory::MemoryMap,
     registers: &registers::RegisterMap,
+    need_move_from_r0: &mut HashSet<Binding>,
     stores_condition: &HashMap<Binding, Condition>,
     block_labels: &HashMap<BlockBinding, assembly::Label<'code>>,
 ) -> AssemblyOutput<'code> {
@@ -421,7 +510,18 @@ fn compile_block<'code>(
                 .into(),
                 Statement::Assign { index, value } => {
                     let register = registers[&index];
-                    compile_value(value, register, memory, registers, block_labels)
+                    let gen = compile_value(value, register, memory, registers, block_labels);
+                    if need_move_from_r0.remove(&index) {
+                        gen.chain_one(assembly::Instruction::Mov {
+                            target: assembly::Register::from_id(register, assembly::BitSize::Bit32),
+                            source: assembly::Data::Register(assembly::Register::GeneralPurpose {
+                                index: 0,
+                                bit_size: assembly::BitSize::Bit32,
+                            }),
+                        })
+                    } else {
+                        gen
+                    }
                 }
                 Statement::Store {
                     mem_binding,
@@ -435,7 +535,7 @@ fn compile_block<'code>(
                             registers[&binding],
                             assembly::BitSize::Bit32,
                         ),
-                        address: memory[&mem_binding],
+                        address: memory[&MemBinding::IR(mem_binding)],
                     }
                     .into(),
                 },
@@ -500,7 +600,7 @@ fn compile_value<'code>(
             byte_size: _, // TODO: use different instruction/register size depending on byte size
         } => assembly::Instruction::Ldr {
             register: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
-            address: memory[&mem_binding],
+            address: memory[&MemBinding::IR(mem_binding)],
         }
         .into(),
         Value::Negate { binding } => assembly::Instruction::Neg {

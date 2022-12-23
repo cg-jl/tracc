@@ -160,14 +160,15 @@ impl Lifetime {
     }
 }
 
-#[derive(Default, Debug, Clone)]
-pub struct BlockLifetimes {
-    pub ordered_by_start: Vec<Binding>,
-    pub binding_starts: HashMap<Binding, usize>,
-    pub binding_ends: HashMap<Binding, usize>,
+#[derive(Debug, Clone)]
+pub struct BlockLifetimes<LB> {
+    pub block_index: usize,
+    pub ordered_by_start: Vec<LB>,
+    pub binding_starts: HashMap<LB, usize>,
+    pub binding_ends: HashMap<LB, usize>,
 }
 
-pub fn make_sorted_lifetimes(ir: &IR) -> Vec<BlockLifetimes> {
+pub fn make_sorted_lifetimes(ir: &IR) -> Vec<BlockLifetimes<Binding>> {
     let mut lasting_lifetimes = vec![HashSet::new(); ir.code.len()].into_boxed_slice();
     let mut collected = Vec::with_capacity(ir.code.len());
     for block in analysis::TopBottomTraversal::from(ir) {
@@ -177,9 +178,19 @@ pub fn make_sorted_lifetimes(ir: &IR) -> Vec<BlockLifetimes> {
             .flat_map(|block| lasting_lifetimes[block.0].iter().copied())
             .collect();
 
+        let mut calcd_lifetimes = BlockLifetimes {
+            block_index: block.0,
+            ordered_by_start: Vec::new(),
+            binding_starts: HashMap::new(),
+            binding_ends: HashMap::new(),
+        };
+
         // calculate the block's local lifetimes.
-        let mut calcd_lifetimes =
-            make_block_lifetimes(&ir[block].statements, &mut this_block_lifetimes);
+        make_block_lifetimes(
+            &ir[block].statements,
+            &mut this_block_lifetimes,
+            &mut calcd_lifetimes,
+        );
 
         lasting_lifetimes[block.0] = this_block_lifetimes;
 
@@ -193,8 +204,11 @@ pub fn make_sorted_lifetimes(ir: &IR) -> Vec<BlockLifetimes> {
 // We'll have to take into account those by keeping track of what values are alive on each block
 // and if they end, remove that "aliveness" for the rest of the branch.... For that I'll need to
 // look at all the block's antecessors and any value that hasn't found and end
-fn make_block_lifetimes(block: &[Statement], still_alive: &mut HashSet<Binding>) -> BlockLifetimes {
-    let mut result: BlockLifetimes = Default::default();
+fn make_block_lifetimes(
+    block: &[Statement],
+    still_alive: &mut HashSet<Binding>,
+    result: &mut BlockLifetimes<Binding>,
+) {
     tracing::info!(target: "lifetimes::block", "filling in lifetime information");
 
     for (statement, stmt) in block.iter().enumerate() {
@@ -243,8 +257,6 @@ fn make_block_lifetimes(block: &[Statement], still_alive: &mut HashSet<Binding>)
     result
         .ordered_by_start
         .sort_by_key(|binding| result.binding_starts[binding]);
-
-    result
 }
 
 #[derive(Clone, Debug)]
@@ -430,7 +442,6 @@ mod tests {
                 }),
             },
         ]);
-        dbg!(&ir.backwards_map);
 
         use crate::allocators::memory;
         let lifetimes = memory::compute_memory_lifetimes(&ir, &memory::make_alloc_map(&ir.code));
@@ -448,8 +459,6 @@ mod tests {
         ));
 
         let collisions = compute_lifetime_collisions(&ir, &lifetimes);
-
-        dbg!(&ir);
 
         assert!(collisions[&Binding(1)].contains(&Binding(0)));
     }
@@ -551,9 +560,7 @@ mod tests {
                 end: BlockEnd::Return(Binding(2)),
             },
         ]);
-        dbg!(&ir);
         let lifetimes = compute_lifetimes(&ir);
-        dbg!(&lifetimes);
 
         assert!(lifetimes[0]
             .find_intersections(&lifetimes[1], &ir)
