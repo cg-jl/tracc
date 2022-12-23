@@ -15,6 +15,7 @@ pub struct AllocatorHints {
     in_memory: HashSet<Binding>,
     used_in_return: HashSet<Binding>,
     returned_from_call: HashSet<Binding>,
+    used_as_arguments: HashMap<Binding, u8>,
     from_phi_node: HashMap<Binding, HashSet<Binding>>,
     is_phi_node_with: HashMap<Binding, HashSet<Binding>>,
     zeroes: HashSet<Binding>,
@@ -123,10 +124,13 @@ pub fn make_allocator_hints(code: &IR) -> AllocatorHints {
                             .or_insert_with_key(HintBuilder::from_ref)
                             .value_is_memory(&mut hints);
                     }
-                    crate::ir::Value::Call { .. } => {
+                    crate::ir::Value::Call { args, .. } => {
                         map.entry(*index)
                             .or_insert_with_key(HintBuilder::from_ref)
                             .is_return_from_call(&mut hints);
+                        for (i, arg) in args.iter().copied().enumerate() {
+                            hints.used_as_arguments.insert(arg, i as u8);
+                        }
                     }
                     _ => (),
                 }
@@ -146,11 +150,13 @@ pub struct CodegenHints {
     /// bindings that need to be moved to another register after call
     pub need_move_from_r0: HashSet<Binding>,
 
+    /// bindings that need a move to arguments
+    pub need_move_to_args: HashMap<Binding, u8>,
+
     /// counts of callee saved registers that are used in each function, so that they can
     /// be saved before using them.
     pub callee_saved_per_function: Vec<Vec<RegisterID>>,
 
-    #[allow(dead_code)]
     /// list of bindings that couldn't be allocated the return register but are to be returned.
     pub need_move_to_return_reg: HashSet<Binding>,
     /// list of bindings that couldn't be allocated a callee-saved register so they need to be
@@ -401,6 +407,7 @@ fn linear_alloc_block(
     ordered_bindings_by_start: &[Binding],
     used_through_call: &HashSet<Binding>,
     used_in_return: &HashSet<Binding>,
+    used_as_arguments: &HashMap<Binding, u8>,
     starts: &HashMap<Binding, usize>,
     ends: &HashMap<Binding, usize>,
     function_index: usize,
@@ -504,8 +511,35 @@ fn linear_alloc_block(
             })
         });
 
+        let result_register = phi_alloc.or_else(|| {
+            used_in_return
+                .contains(&binding)
+                .then(|| {
+                    (0..=8)
+                        .map(RegisterID::from)
+                        .find(|r| !used.contains_key(r))
+                })
+                .flatten()
+        });
+
+        // if the binding has to be an argument, try
+        let argument_register = result_register.or_else(|| {
+            used_as_arguments.get(&binding).and_then(|arg_index| {
+                if used.contains_key(&RegisterID::from(*arg_index)) {
+                    // this register is being used. For the moment just add a hint that this one needs
+                    // a move. TODO: discard the current binding being used from using this register by
+                    // sending it to the spilled set and making this argument's lifetime start before,
+                    // so that the next time it won't try this one. Maybe this range should be avoided
+                    // whatsoever by non-argument registers.
+                    None
+                } else {
+                    Some(RegisterID::from(*arg_index))
+                }
+            })
+        });
+
         // try to find an available register.
-        let unused_register = phi_alloc.or_else(|| {
+        let unused_register = argument_register.or_else(|| {
             if used_through_call.contains(&binding) {
                 tracing::trace!(target: "alloc::registers", "caught {binding} used through call");
                 // try a callee-saved register, otherwise hint that we couldn't
@@ -527,9 +561,9 @@ fn linear_alloc_block(
                             })
                     })
             } else {
-                (0..15)
+                (9..15)
                     .chain((16..=30))
-                    .chain((9..=15))
+                    .chain((0..=8))
                     .map(RegisterID::from)
                     .find(|reg| !used.contains_key(reg))
             }
@@ -596,6 +630,7 @@ pub fn alloc_registers(
         returned_from_call,
         from_phi_node: mut phi_nodes,
         is_phi_node_with: mut phi_edges,
+        used_as_arguments,
         zeroes,
     } = alloc_hints;
 
@@ -678,11 +713,17 @@ pub fn alloc_registers(
             &full_lifetime.ordered_by_start,
             &used_through_call,
             &used_in_return,
+            &used_as_arguments,
             &full_lifetime.binding_starts,
             &full_lifetime.binding_ends,
             function_index,
         );
     }
+
+    codegen_hints.need_move_to_args = used_as_arguments
+        .into_iter()
+        .filter(|(k, v)| codegen_hints.registers[k] != RegisterID::from(*v))
+        .collect();
 
     for saved in codegen_hints.callee_saved_per_function.iter_mut() {
         saved.sort_unstable(); // <- the sort is needed so we can remove all duplicates.

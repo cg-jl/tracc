@@ -81,11 +81,17 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         mut need_move_from_r0,
         callee_saved_per_function,
         need_move_to_return_reg,
+        need_move_to_args,
         save_upon_call,
         mut completely_spilled,
         mut registers,
         stores_condition,
     } = registers::alloc_registers(&ir, need_allocation, registers::make_allocator_hints(&ir));
+
+    assert!(
+        need_move_to_args.is_empty(),
+        "TODO: implement moving to the correct argument registers"
+    );
 
     let callee_saved_per_function = {
         let mut cspf = callee_saved_per_function;
@@ -584,8 +590,9 @@ fn compile_value<'code>(
         // and the register allocator is responsible for putting all the bindings in the same place
         Value::Phi { .. } => AssemblyOutput::new(),
 
-        Value::Call { label, args: _ } => {
+        Value::Call { label, args } => {
             // TODO: ensure the arguments are in the correct place
+
             // TODO: callee-saved values!
             // TODO: move-before-call and move-after-call hints! This includes both moving arguments
             // and moving values to callee-saved registers.
