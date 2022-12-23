@@ -57,7 +57,7 @@ test_stage() {
 }
 
 if [ "$1" = "--one" ]; then
-    test_one "`basename $2`"
+    test_one "${2%%.*}" "`basename $2`"
     exit $?
 fi
 
