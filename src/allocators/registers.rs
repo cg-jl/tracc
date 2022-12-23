@@ -422,7 +422,6 @@ fn linear_alloc_block(
             .unwrap_or(active.bindings.len());
 
         for dropped_binding in active.bindings.drain(..end_i) {
-            tracing::trace!(target: "alloc::registers", "dropping {dropped_binding}");
             let reg = &codegen_hints.registers[&dropped_binding];
             if used[reg] == 1 {
                 used.remove(reg);
@@ -633,13 +632,14 @@ pub fn alloc_registers(
                     |b| {
                         block_lifetimes.binding_starts[&b] < addr.statement
                             && block_lifetimes.binding_ends[&b] > addr.statement
+                            && need_allocation.contains(&b)
                     },
                 ))
             }
             used_through_call
         };
 
-    tracing::trace!(target: "alloc::hints", "found used through call: {used_through_call:?}");
+    tracing::trace!(target: "alloc::registers::hints", "found used through call: {used_through_call:?}");
 
     // all the returned bindings get instantly allocated to r0.
     // if they are used through a call, they need an instant move to the    // newly assigned register.

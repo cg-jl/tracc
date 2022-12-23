@@ -64,8 +64,12 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
     let need_allocation = analysis::statements_with_addresses(&ir)
         .filter_map(|(s, _)| {
-            if let Statement::Assign { index, .. } = s {
-                Some(*index)
+            if let Statement::Assign { index, value } = s {
+                if matches!(value, Value::Allocate { .. }) {
+                    None
+                } else {
+                    Some(*index)
+                }
             } else {
                 None
             }

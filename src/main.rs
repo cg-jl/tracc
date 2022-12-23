@@ -45,7 +45,7 @@ fn run() -> Result<(), anyhow::Error> {
     let out_file = opt.output.unwrap_or_else(|| filename.with_extension("s"));
     let meta = SourceMetadata::new(&file).with_file(filename);
     let program: Program = Parser::new(&meta).parse()?;
-    tracing::debug!(target: "main", "parsed: {program:?}");
+    tracing::debug!(target: "main::grammar", "parsed: {program:?}");
     let (ir, function_names) = match tracc::ir::generate::compile_program(program, &meta) {
         Ok(v) => v,
         Err(e) => {
@@ -56,11 +56,9 @@ fn run() -> Result<(), anyhow::Error> {
         }
     };
 
-    tracing::debug!(target: "main", "before fold:{ir:?}");
-
     let ir = tracc::ir::fold::constant_fold(ir);
 
-    tracing::debug!(target: "main", "after fold:{ir:?}");
+    tracing::debug!(target: "main::ir", "IR: {ir:?}");
 
     let output = tracc::asmgen::codegen(ir, function_names).cons(
         tracc::asmgen::assembly::Directive::Architecture("armv8-a".into()),
