@@ -416,45 +416,46 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                 rhs: assembly::Data::Immediate(info.allocation_size as i32),
             });
             let regids = &callee_saved_per_function[func_i];
-            let mut i = 0;
-            let start = memory[&MemBinding::CalleeSaves(func_i)];
-            while (i + 1) < regids.len() {
-                save.push_back(assembly::Instruction::Stp {
-                    a: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
-                    b: assembly::Register::from_id(regids[i + 1], assembly::BitSize::Bit64),
-                    address: start.with_offset(i * 8),
-                });
-                // make sure to save the stack pointer to x29
-                // TODO: we can detect that we need to store the stack pointer before allocating!
-                // why not pass that as an allocator hint? maybe extend the allocator to not be
-                // focused on bindings but rather just on lifetimes?
-                if (regids[i] == RegisterID::GeneralPurpose { index: 29 }) {
-                    save.push_back(assembly::Instruction::Mov {
-                        target: assembly::Register::GeneralPurpose {
-                            index: 29,
-                            bit_size: assembly::BitSize::Bit64,
-                        },
-                        source: assembly::Data::Register(assembly::Register::StackPointer),
+            if let Some(start) = memory.get(&MemBinding::CalleeSaves(func_i)) {
+                let mut i = 0;
+                while (i + 1) < regids.len() {
+                    save.push_back(assembly::Instruction::Stp {
+                        a: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
+                        b: assembly::Register::from_id(regids[i + 1], assembly::BitSize::Bit64),
+                        address: start.with_offset(i * 8),
+                    });
+                    // make sure to save the stack pointer to x29
+                    // TODO: we can detect that we need to store the stack pointer before allocating!
+                    // why not pass that as an allocator hint? maybe extend the allocator to not be
+                    // focused on bindings but rather just on lifetimes?
+                    if (regids[i] == RegisterID::GeneralPurpose { index: 29 }) {
+                        save.push_back(assembly::Instruction::Mov {
+                            target: assembly::Register::GeneralPurpose {
+                                index: 29,
+                                bit_size: assembly::BitSize::Bit64,
+                            },
+                            source: assembly::Data::Register(assembly::Register::StackPointer),
+                        });
+                    }
+                    load.push_front(assembly::Instruction::Ldp {
+                        a: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
+                        b: assembly::Register::from_id(regids[i + 1], assembly::BitSize::Bit64),
+                        address: start.with_offset(i * 8),
+                    });
+
+                    i += 2;
+                }
+
+                if i < regids.len() {
+                    save.push_back(assembly::Instruction::Str {
+                        register: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
+                        address: start.with_offset(i * 8),
+                    });
+                    load.push_front(assembly::Instruction::Ldr {
+                        register: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
+                        address: start.with_offset(i * 8),
                     });
                 }
-                load.push_front(assembly::Instruction::Ldp {
-                    a: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
-                    b: assembly::Register::from_id(regids[i + 1], assembly::BitSize::Bit64),
-                    address: start.with_offset(i * 8),
-                });
-
-                i += 2;
-            }
-
-            if i < regids.len() {
-                save.push_back(assembly::Instruction::Str {
-                    register: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
-                    address: start.with_offset(i * 8),
-                });
-                load.push_front(assembly::Instruction::Ldr {
-                    register: assembly::Register::from_id(regids[i], assembly::BitSize::Bit64),
-                    address: start.with_offset(i * 8),
-                });
             }
 
             (save, load)
