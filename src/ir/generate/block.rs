@@ -26,5 +26,7 @@ pub fn compile_block<'code>(
         )
         .map_err(|e| e.with_backup_source(st_span, source_info))?;
     }
+    // clear our variables since we're exiting the block
+    variables.variables_at_depth(block_depth).clear();
     Ok(builder)
 }
