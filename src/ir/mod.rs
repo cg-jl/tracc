@@ -17,12 +17,18 @@ pub type BranchingMap = HashMap<BlockBinding, Vec<BlockBinding>>;
 
 pub type IRCode = Vec<BasicBlock>;
 
+#[derive(Clone, Copy)]
+pub struct BlockRange {
+    pub start: BlockBinding,
+    pub end: BlockBinding,
+}
+
 pub struct IR {
     pub code: IRCode,
     pub backwards_map: BranchingMap,
     pub forward_map: BranchingMap,
     pub function_entrypoints: Vec<BlockBinding>,
-    pub function_endpoints: HashMap<BlockBinding, usize>,
+    pub function_block_ranges: Vec<BlockRange>,
     pub function_argument_bindings: Vec<core::ops::Range<usize>>,
 }
 

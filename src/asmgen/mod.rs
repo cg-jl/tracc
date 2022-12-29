@@ -16,12 +16,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
-#[derive(Clone, Copy)]
-pub struct BlockRange {
-    pub start: BlockBinding,
-    pub end: BlockBinding,
-}
-
 impl BlockRange {
     #[inline]
     pub fn contains_index(&self, index: usize) -> bool {
@@ -45,16 +39,24 @@ impl core::fmt::Debug for BlockRange {
 
 pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOutput {
     // now, let's get the function block ends since we're not going to modify branches anymore.
-    ir.function_endpoints.extend(
+    ir.function_block_ranges.extend(
         ir.function_entrypoints
             .iter()
             .copied()
-            .enumerate()
-            .flat_map(|(function_index, entrypoint)| {
-                analysis::flow_order_traversal_from_parts(&ir.forward_map, entrypoint)
-                    .filter(|block| !ir.forward_map.contains_key(block))
-                    .map(move |block| (block, function_index))
-            }),
+            .map(|starting_block| {
+                let max_block = crate::ir::analysis::flow_order_traversal_from_parts(
+                    &ir.forward_map,
+                    starting_block,
+                )
+                .max()
+                .expect("all CFGs end somewhere!");
+
+                BlockRange {
+                    start: starting_block,
+                    end: max_block,
+                }
+            })
+            .collect::<Vec<_>>(),
     );
 
     let global_decls: Vec<_> = function_names
@@ -129,28 +131,10 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
     debug_assert!(completely_spilled.is_empty(), "shouldn't have any spills");
 
-    let mut function_block_spans: Vec<_> = ir
-        .function_entrypoints
-        .iter()
-        .copied()
-        .map(|starting_block| {
-            let ending_block = crate::ir::analysis::flow_order_traversal(&ir, starting_block)
-                .filter(|block| matches!(ir.code[block.0].end, BlockEnd::Return(_)))
-                .max()
-                .expect("no ending block?");
-
-            BlockRange {
-                start: starting_block,
-                end: ending_block,
-            }
-        })
-        .collect();
-    let (memory, total_mem_size) = memory::figure_out_allocations(
-        &ir,
-        alloc_map.clone(),
-        |func_i| callee_saved_per_function[func_i].len(),
-        &function_block_spans,
-    );
+    let (memory, total_mem_size) =
+        memory::figure_out_allocations(&ir, alloc_map.clone(), |func_i| {
+            callee_saved_per_function[func_i].len()
+        });
 
     // since the binding was moved to wzr, no need to re-move stuff here
     for binding in registers.iter().filter_map(|(binding, reg)| {
@@ -178,10 +162,10 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
     }
 
     // register the functions that need allocation
-    let mut needs_prologue_and_epilogue: HashMap<_, _> = (0..function_block_spans.len())
+    let mut needs_prologue_and_epilogue: HashMap<_, _> = (0..ir.function_block_ranges.len())
         .filter_map(|func_i| {
             let stack_size = {
-                let statements = ir.code[function_block_spans[func_i].as_range()]
+                let statements = ir.code[ir.function_block_ranges[func_i].as_range()]
                     .iter()
                     .flat_map(|b| b.statements.iter());
 
@@ -227,7 +211,8 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
     let block_labels = {
         let mut label_count = 0usize;
-        let mut block_labels: HashMap<_, _> = function_block_spans
+        let mut block_labels: HashMap<_, _> = ir
+            .function_block_ranges
             .iter()
             .map(|r| r.start)
             .zip(function_names.into_iter().map(assembly::Label::Named))
@@ -287,7 +272,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         .into_iter()
         .enumerate()
         .map(|(index, block)| {
-            let function_index = function_block_spans
+            let function_index = ir.function_block_ranges
                 .iter()
                 .position(|r| r.contains_index(index));
             let function_index = match function_index {
@@ -304,7 +289,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                 &block_labels,
             );
 
-            let is_start_of_function = function_block_spans[function_index].start.0 == index;
+            let is_start_of_function = ir.function_block_ranges[function_index].start.0 == index;
 
 
             if is_start_of_function {
@@ -379,7 +364,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                     }
                     tracing::trace!(target: "asmgen::ends", "returning from {index}, stack info: {stack_info:?}");
                     if let Some(info) = stack_info {
-                         if  function_block_spans[function_index].end.0 != index
+                         if  ir.function_block_ranges[function_index].end.0 != index
                              /*&& !info.epilogue_label.has_number(index)*/
                         {
                             used_epilogue_labels.insert(function_index);
@@ -412,7 +397,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
     let mut last_epilogue_insertion = asm_blocks.len();
     for (i, (func_i, info)) in needs_prologue_and_epilogue.into_iter().enumerate() {
-        let range = &mut function_block_spans[func_i];
+        let range = &mut ir.function_block_ranges[func_i];
 
         if last_epilogue_insertion <= range.start.0 {
             range.start.0 += 1;

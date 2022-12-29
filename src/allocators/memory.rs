@@ -5,7 +5,7 @@ use std::fmt;
 use tracing::{debug, span, Level};
 
 use crate::ir::analysis::lifetimes::BlockLifetimes;
-use crate::ir::{BasicBlock, Binding, BlockBinding, Statement, Value, IR};
+use crate::ir::{BasicBlock, Binding, BlockBinding, BlockRange, Statement, Value, IR};
 
 use crate::asmgen::assembly;
 use analysis::lifetimes::BlockAddress;
@@ -50,9 +50,9 @@ pub fn figure_out_allocations(
     ir: &IR,
     mut allocations_needed: AllocMap,
     used_callee_saved_registers: impl Fn(usize) -> usize,
-    function_block_ranges: &[BlockRange],
 ) -> (MemoryMap, usize) {
-    let all = make_memory_lifetimes(ir, &allocations_needed, function_block_ranges).into_vec();
+    let mut all =
+        make_memory_lifetimes(ir, &allocations_needed, &ir.function_block_ranges).into_vec();
 
     tracing::trace!(target: "alloc::memory", "aligning allocations: {allocations_needed:?}");
     // align all the allocations to four bytes.
@@ -70,11 +70,15 @@ pub fn figure_out_allocations(
 
     let mut allocated_blocks = HashMap::new();
 
+    let choose_lifetime = move || {
+        let best_index = (0..all.len()).max_by_key(|i| all[*i].ordered_by_start.len())?;
+        Some(all.remove(best_index))
+    };
+
     // per block, let's allocate memory!
     let mut total_blocks = 0usize;
-    for block in analysis::full_flow_traversal(ir) {
-        let block_index = block.0;
-        let lifetime = &all[block_index];
+    for lifetime in std::iter::from_fn(choose_lifetime) {
+        let block_index = lifetime.block_index;
         let mut active = ActiveBindingSet::new();
         let mut free_blocks: HashSet<_> = (0..total_blocks).collect();
 
@@ -184,7 +188,6 @@ pub fn make_alloc_map(code: &[BasicBlock]) -> AllocMap {
 // tracks per dependency where it is loaded.
 pub type LoadDependencies = HashMap<Binding, HashSet<analysis::lifetimes::BlockAddress>>;
 
-use crate::asmgen::BlockRange;
 pub fn make_memory_lifetimes(
     ir: &IR,
     allocations_needed: &AllocMap,
@@ -244,6 +247,7 @@ pub fn make_memory_lifetimes(
 
     // 2. Gather all requested binding ends.
     for block in analysis::BottomTopTraversal::from(ir) {
+        dbg!(block);
         for (stmt_index, statement) in ir[block].statements.iter().enumerate().rev() {
             match statement {
                 Statement::Store { mem_binding, .. }
@@ -271,14 +275,20 @@ pub fn make_memory_lifetimes(
     // We'll do this safely by starting in the end block and only processing the branches that lead to the start block.
     let indirect_parents = analysis::fill_indirect_parents(ir);
 
+    tracing::trace!(target: "alloc::memory", "indirect parents: {indirect_parents:#?}");
+    tracing::trace!(target: "alloc::memory", "backwards graph: {:#?}", &ir.backwards_map);
+
     for (binding, end_block, start_block) in binding_end_blocks
         .into_iter()
-        .flat_map(|(k, end_blocks)| {
-            let start_block = *binding_start_blocks.get(&k).unwrap();
-            end_blocks.into_iter().map(move |end| (k, end, start_block))
+        .flat_map(|(binding, end_blocks)| {
+            let start_block = *binding_start_blocks.get(&binding).unwrap();
+            end_blocks
+                .into_iter()
+                .map(move |end| (binding, end, start_block))
         })
         .filter(|(_, end, start)| start != end)
     {
+        dbg!(binding, end_block, start_block);
         let mem_binding = MemBinding::IR(binding);
         all[start_block.0]
             .binding_ends
@@ -286,14 +296,15 @@ pub fn make_memory_lifetimes(
         for middle_block in analysis::antecessors_filtering_branches(ir, end_block, |b| {
             indirect_parents[&b].contains(&start_block)
         }) {
-            all[middle_block.0]
+            let pushed_as_start = all[middle_block.0]
                 .binding_ends
-                .insert(mem_binding, ir[middle_block].statements.len());
-            if all[middle_block.0]
+                .insert(mem_binding, ir[middle_block].statements.len())
+                .is_none();
+            let pushed_as_end = all[middle_block.0]
                 .binding_starts
                 .insert(mem_binding, 0)
-                .is_none()
-            {
+                .is_none();
+            if pushed_as_end || pushed_as_start {
                 all[middle_block.0].ordered_by_start.push(mem_binding);
             }
         }

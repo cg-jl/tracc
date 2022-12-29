@@ -76,8 +76,8 @@ pub fn compile_program<'code>(
             forward_map,
             function_entrypoints,
             function_argument_bindings,
-            function_endpoints: HashMap::new(), // NOTE: the function endpoints are filled only
-                                                // in asmgen since we don't need them before.
+            function_block_ranges: Vec::new(), // NOTE: the function endpoints are filled only
+                                                   // in asmgen since we don't need them before.
         };
 
         tracing::info!(target: "irgen", "cleaning up generated code to remove garbo");

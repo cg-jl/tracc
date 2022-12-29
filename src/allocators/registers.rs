@@ -686,25 +686,18 @@ pub fn alloc_registers(
         }
     }
 
-    for full_lifetime in all_lifetimes.into_iter() {
+    // It's important that we allocate first the blocks that have the most constraints.
+    let choose_lifetime = move || {
+        let best_index =
+            (0..all_lifetimes.len()).max_by_key(|i| all_lifetimes[*i].ordered_by_start.len())?;
+        Some(all_lifetimes.remove(best_index))
+    };
+
+    for full_lifetime in std::iter::from_fn(choose_lifetime) {
         let function_index = ir
-            .function_entrypoints
+            .function_block_ranges
             .iter()
-            .copied()
-            .enumerate()
-            .map(|(index, entry)| {
-                (
-                    entry,
-                    ir.function_endpoints
-                        .iter()
-                        .filter(move |(_, i)| **i == index)
-                        .map(|t| t.0)
-                        .copied()
-                        .max()
-                        .unwrap(),
-                )
-            })
-            .position(|(entry, end)| (entry.0..=end.0).contains(&full_lifetime.block_index))
+            .position(|range| range.contains_index(full_lifetime.block_index))
             .expect("all blocks should belong to a function");
         linear_alloc_block(
             &mut codegen_hints,

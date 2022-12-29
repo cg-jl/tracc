@@ -11,6 +11,7 @@ pub mod lifetimes;
 
 // TODO: output some information on phi nodes per block edge between parent/child.
 
+use itertools::Itertools;
 pub use lifetimes::{CollisionMap, Lifetime, LifetimeMap};
 
 pub use binding_usage::{get_usage_map, BindingUsage, UsageMap};
@@ -205,15 +206,29 @@ impl<'code> From<&'code IR> for BottomTopTraversal<'code> {
 
 pub fn fill_indirect_parents(ir: &IR) -> HashMap<BlockBinding, HashSet<BlockBinding>> {
     let mut map = HashMap::<BlockBinding, HashSet<_>>::new();
-    for root in ir.function_entrypoints.iter().copied() {
-        let mut traversal = flow_order_traversal(ir, root);
-        let _ = traversal.next();
-        while let Some(child) = traversal.next() {
-            map.entry(child)
-                .or_default()
-                .extend(traversal.visited.iter().copied());
-        }
+
+    let mut queue = ir.function_entrypoints.clone();
+    let mut visited = HashSet::new();
+
+    while let Some(next) = queue.pop() {
+        let children = ir
+            .forward_map
+            .get(&next)
+            .into_iter()
+            .flat_map(|x| x.iter().copied())
+            .inspect(|child| {
+                map.entry(*child).or_default().extend(
+                    ir.backwards_map
+                        .get(&next)
+                        .into_iter()
+                        .flat_map(|x| x.iter().copied())
+                        .chain(Some(next)),
+                );
+            });
+
+        queue.extend(children.filter(|child| visited.insert(*child)));
     }
+
     map
 }
 
