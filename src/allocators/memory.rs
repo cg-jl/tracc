@@ -247,7 +247,6 @@ pub fn make_memory_lifetimes(
 
     // 2. Gather all requested binding ends.
     for block in analysis::BottomTopTraversal::from(ir) {
-        dbg!(block);
         for (stmt_index, statement) in ir[block].statements.iter().enumerate().rev() {
             match statement {
                 Statement::Store { mem_binding, .. }
@@ -288,7 +287,6 @@ pub fn make_memory_lifetimes(
         })
         .filter(|(_, end, start)| start != end)
     {
-        dbg!(binding, end_block, start_block);
         let mem_binding = MemBinding::IR(binding);
         all[start_block.0]
             .binding_ends

@@ -724,7 +724,7 @@ pub fn alloc_registers(
     }
 
     codegen_hints.need_move_to_return_reg.extend(
-        returned_from_call
+        used_in_return
             .iter()
             .copied()
             .filter(|b| codegen_hints.registers[b] != RegisterID::from(0)),
@@ -794,7 +794,7 @@ mod tests {
     fn compile_source_into_ir(source: &str) -> anyhow::Result<crate::ir::IR> {
         let meta = crate::error::SourceMetadata::new(source).with_file("<test program>".into());
         let program = crate::grammar::Parser::new(&meta).parse()?;
-        let (_function_name, ir) = crate::ir::generate::compile_function(program, &meta)?;
+        let (ir, _function_names) = crate::ir::generate::compile_program(program, &meta)?;
         Ok(ir)
     }
 
