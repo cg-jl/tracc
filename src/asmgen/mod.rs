@@ -82,7 +82,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
     let registers::CodegenHints {
         mut need_move_from_r0,
         callee_saved_per_function,
-        need_move_to_return_reg,
+        need_move_to_return_reg: _, // the detection is done otherwise.
         need_move_to_args,
         save_upon_call,
         mut completely_spilled,
@@ -150,10 +150,6 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
     }
 
     debug_assert!(save_upon_call.is_empty(), "TODO: implement save upon call");
-    debug_assert!(
-        need_move_to_return_reg.is_empty(),
-        "TODO: implement moves to return register (or generic move to register)"
-    );
 
     #[derive(Debug)]
     struct StackInfo<'code> {
