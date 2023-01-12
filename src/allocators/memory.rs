@@ -212,16 +212,13 @@ pub fn make_memory_lifetimes(
     };
 
     // 0. Set up all functions
-    for (block_index, lt) in all.iter_mut().enumerate() {
-        let function_index = function_block_ranges
-            .iter()
-            .position(|range| range.contains(BlockBinding(block_index)))
-            .unwrap();
+    for (function_index, block_range) in function_block_ranges.iter().copied().enumerate() {
         let callee_saves = MemBinding::CalleeSaves(function_index);
-        lt.ordered_by_start.push(callee_saves);
-        lt.binding_starts.insert(callee_saves, 0);
-        lt.binding_ends
-            .insert(callee_saves, ir[BlockBinding(block_index)].statements.len());
+        for (lt, block) in all[block_range.as_range()].iter_mut().zip(&ir[block_range]) {
+            lt.ordered_by_start.push(callee_saves);
+            lt.binding_starts.insert(callee_saves, 0);
+            lt.binding_ends.insert(callee_saves, block.statements.len());
+        }
     }
 
     let mut binding_start_blocks = HashMap::new();
