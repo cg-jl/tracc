@@ -253,3 +253,11 @@ impl core::ops::IndexMut<BlockBinding> for IR {
         &mut self.code[index.0]
     }
 }
+
+impl core::ops::Index<BlockRange> for IR {
+    type Output = [BasicBlock];
+
+    fn index(&self, index: BlockRange) -> &Self::Output {
+        &self.code[index.as_range()]
+    }
+}

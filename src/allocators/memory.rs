@@ -95,7 +95,7 @@ pub fn figure_out_allocations(
             let end_i = active
                 .bindings
                 .iter()
-                .position(|other| lifetime.binding_ends[other] > start)
+                .position(|other| lifetime.binding_ends[other] >= start)
                 .unwrap_or(active.bindings.len());
 
             for dropped_binding in active.bindings.drain(..end_i) {
@@ -193,143 +193,116 @@ pub fn make_memory_lifetimes(
     allocations_needed: &AllocMap,
     function_block_ranges: &[BlockRange],
 ) -> Box<[analysis::lifetimes::BlockLifetimes<MemBinding>]> {
-    // memory lifetimes are more tricky because memory bindings have 'multiple' starts and ends.
-    // Since the allocator accounts for bindings that it has already allocated (those just
-    // contribute to the free blocks), we can push multiple starts and ends per memory. We'll also
-    // have to take into account the lifetimes that pass through blocks without being used
-    // explicitly inside them.
     let mut all = {
-        let mut all = Box::new_uninit_slice(ir.code.len());
-        all.iter_mut().enumerate().for_each(|(i, m)| {
-            m.write(BlockLifetimes {
-                block_index: i,
-                ordered_by_start: Default::default(),
-                binding_starts: Default::default(),
-                binding_ends: Default::default(),
+        let mut uall = Box::new_uninit_slice(ir.code.len());
+        for (block_index, wlt) in uall.iter_mut().enumerate() {
+            wlt.write(BlockLifetimes {
+                block_index,
+                ordered_by_start: Vec::new(),
+                binding_starts: HashMap::new(),
+                binding_ends: HashMap::new(),
             });
-        });
-        unsafe { all.assume_init() }
+        }
+
+        unsafe { uall.assume_init() }
     };
 
-    // 0. Set up all functions
+    for (block, maybe_parent) in analysis::track_last_parent(ir) {
+        // 1. Grab the lasting values from the parent.
+        if let Some(parent) = maybe_parent {
+            // Assume that they are used throughout all the block for now.
+
+            // move it directly.
+            all[block.0].ordered_by_start = all[parent.0].ordered_by_start.clone();
+            all[block.0].binding_starts = all[block.0]
+                .ordered_by_start
+                .iter()
+                .copied()
+                .map(|a| (a, 0))
+                .collect();
+        }
+
+        // 2. Register starts and ends of values.
+        for (st_index, statement) in ir[block].statements.iter().enumerate() {
+            use analysis::BindingUsage;
+            if let Statement::Assign {
+                index,
+                value: Value::Allocate { .. },
+            } = statement
+            {
+                let mem_binding = MemBinding::IR(*index);
+                all[block.0].binding_starts.insert(mem_binding, st_index);
+                all[block.0].ordered_by_start.push(mem_binding);
+            }
+
+            if let Statement::Store { mem_binding, .. }
+            | Statement::Assign {
+                value: Value::Load { mem_binding, .. },
+                ..
+            } = statement
+            {
+                let mem_binding = MemBinding::IR(*mem_binding);
+                all[block.0].binding_ends.insert(mem_binding, st_index);
+            }
+        }
+
+        // 3. Register "out-of-block" ends for anything that hasn't found an end to itself here.
+        for binding in all[block.0].ordered_by_start.iter().copied() {
+            let _ = all[block.0]
+                .binding_ends
+                .try_insert(binding, ir[block].statements.len());
+        }
+    }
+
+    let mut can_drop = vec![Vec::new(); ir.code.len()];
+    // go through the blocks in reverse and detect where can we drop memory blocks:
+    // - The memory block must not be used through the block (end == block len && start == 0)
+    // - The memory block must not be used through the block's children (only "forward" children? some
+    // sort of "scope" ranking might be needed for that.)
+    for block in analysis::BottomTopTraversal::from(ir) {
+        can_drop[block.0] = all[block.0]
+            .ordered_by_start
+            .iter()
+            .copied()
+            .filter(|b| {
+                // memory block must not be used
+                all[block.0].binding_ends[b] == ir[block].statements.len()
+                    && all[block.0].binding_starts[b] == 0
+                    && ir
+                        .forward_map
+                        .get(&block)
+                        .into_iter()
+                        .flatten()
+                        .all(|child| can_drop[child.0].contains(b))
+            })
+            .collect();
+    }
+
+    // Now, execute the drops
+    for (block_index, can_drop) in can_drop.into_iter().enumerate() {
+        for dropped_binding in can_drop {
+            let index = all[block_index]
+                .ordered_by_start
+                .iter()
+                .position(|b| b == &dropped_binding);
+            let index = unsafe { index.unwrap_unchecked() };
+            all[block_index].ordered_by_start.remove(index);
+            all[block_index].binding_starts.remove(&dropped_binding);
+            all[block_index].binding_ends.remove(&dropped_binding);
+        }
+    }
+
+    // Now insert all of the callee saves
     for (function_index, block_range) in function_block_ranges.iter().copied().enumerate() {
         let callee_saves = MemBinding::CalleeSaves(function_index);
         for (lt, block) in all[block_range.as_range()].iter_mut().zip(&ir[block_range]) {
-            lt.ordered_by_start.push(callee_saves);
+            lt.ordered_by_start.insert(0, callee_saves);
             lt.binding_starts.insert(callee_saves, 0);
             lt.binding_ends.insert(callee_saves, block.statements.len());
         }
     }
 
-    let mut binding_start_blocks = HashMap::new();
-
-    // 1. Gather all requested binding starts
-    for (lt, (bb, block)) in all
-        .iter_mut()
-        .zip(analysis::iterate_with_bindings(&ir.code))
-    {
-        for (stmt_index, statement) in block.statements.iter().enumerate() {
-            if let Statement::Assign { index, .. } = statement {
-                if allocations_needed.contains_key(index) {
-                    let binding = MemBinding::IR(*index);
-                    lt.ordered_by_start.push(binding);
-                    lt.binding_starts.insert(binding, stmt_index);
-                    binding_start_blocks.insert(*index, bb);
-                }
-            }
-        }
-    }
-
-    let mut binding_end_blocks: HashMap<_, HashSet<_>> = HashMap::new();
-
-    // 2. Gather all requested binding ends.
-    for block in analysis::BottomTopTraversal::from(ir) {
-        for (stmt_index, statement) in ir[block].statements.iter().enumerate().rev() {
-            match statement {
-                Statement::Store { mem_binding, .. }
-                | Statement::Assign {
-                    value: Value::Load { mem_binding, .. },
-                    ..
-                } => {
-                    if allocations_needed.contains_key(mem_binding)
-                        && binding_end_blocks
-                            .entry(*mem_binding)
-                            .or_default()
-                            .insert(block)
-                    {
-                        all[block.0]
-                            .binding_ends
-                            .insert(MemBinding::IR(*mem_binding), stmt_index);
-                    }
-                }
-                _ => (),
-            }
-        }
-    }
-
-    // 3. Now that we've got starts and ends, we have to fill in the 'middle' blocks.
-    // We'll do this safely by starting in the end block and only processing the branches that lead to the start block.
-    let indirect_parents = analysis::fill_indirect_parents(ir);
-
-    tracing::trace!(target: "alloc::memory", "indirect parents: {indirect_parents:#?}");
-    tracing::trace!(target: "alloc::memory", "backwards graph: {:#?}", &ir.backwards_map);
-
-    for (binding, end_block, start_block) in binding_end_blocks
-        .into_iter()
-        .flat_map(|(binding, end_blocks)| {
-            let start_block = *binding_start_blocks.get(&binding).unwrap();
-            end_blocks
-                .into_iter()
-                .map(move |end| (binding, end, start_block))
-        })
-        .filter(|(_, end, start)| start != end)
-    {
-        let mem_binding = MemBinding::IR(binding);
-        all[start_block.0]
-            .binding_ends
-            .insert(mem_binding, ir[start_block].statements.len());
-        for middle_block in analysis::antecessors_filtering_branches(ir, end_block, |b| {
-            indirect_parents[&b].contains(&start_block)
-        }) {
-            let pushed_as_start = all[middle_block.0]
-                .binding_ends
-                .insert(mem_binding, ir[middle_block].statements.len())
-                .is_none();
-            let pushed_as_end = all[middle_block.0]
-                .binding_starts
-                .insert(mem_binding, 0)
-                .is_none();
-            if pushed_as_end || pushed_as_start {
-                all[middle_block.0].ordered_by_start.push(mem_binding);
-            }
-        }
-    }
-
-    for lifetimes in all.iter_mut() {
-        // NOTE: we need stable sort so that things are kept in insertion order.
-        // when ordering, make sure to put bindings that are from blocks upper in the chain
-        // before bindings that come after, so compare their starting blocks before comparing their
-        // local position.
-        lifetimes
-            .ordered_by_start
-            .sort_unstable_by(|a, b| match (a, b) {
-                (MemBinding::CalleeSaves(_), MemBinding::IR(_)) => core::cmp::Ordering::Less,
-                (MemBinding::IR(_), MemBinding::CalleeSaves(_)) => core::cmp::Ordering::Greater,
-                (ma @ MemBinding::IR(a), mb @ MemBinding::IR(b)) => {
-                    match binding_start_blocks[a].cmp(&binding_start_blocks[b]) {
-                        core::cmp::Ordering::Equal => {
-                            lifetimes.binding_starts[ma].cmp(&lifetimes.binding_starts[mb])
-                        }
-                        other => other,
-                    }
-                }
-                (MemBinding::CalleeSaves(_), MemBinding::CalleeSaves(_)) => unreachable!(
-                    "what the fuck are two callee saves for different functions doing here?!"
-                ),
-            });
-    }
-
-    tracing::debug!(target: "alloc::memory", "gathered memory lifetimes per block: {all:#?}");
+    tracing::trace!(target: "lifetimes::mem", "gathered lifetimes: {:#?}", all);
 
     all
 }

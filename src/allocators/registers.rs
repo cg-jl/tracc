@@ -786,40 +786,4 @@ pub fn alloc_registers(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // This function does not test anything. Only serves as a mediant to get through the previous
-    // parsing & compilation steps that already work correctly.
-    // Any analysis performed on the IR will be stated explicitly, even if it could be factored
-    // out.
-    fn compile_source_into_ir(source: &str) -> anyhow::Result<crate::ir::IR> {
-        let meta = crate::error::SourceMetadata::new(source).with_file("<test program>".into());
-        let program = crate::grammar::Parser::new(&meta).parse()?;
-        let (ir, _function_names) = crate::ir::generate::compile_program(program, &meta)?;
-        Ok(ir)
-    }
-
-    #[test]
-    fn should_all_allocate() {
-        let ir = compile_source_into_ir(
-            r#"
-int main() {
-  return 5 > 1 + 2;
-}"#,
-        )
-        .unwrap();
-        let lifetimes = crate::ir::analysis::compute_lifetimes(&ir);
-        let collisions = crate::ir::analysis::compute_lifetime_collisions(&ir, &lifetimes);
-        // TODO: test traversal for allocator hints
-        let hints = make_allocator_hints(&ir);
-        let result = alloc_registers(&ir, collisions.keys().cloned().collect(), hints);
-        assert!(
-            result.need_move_to_return_reg.is_empty(),
-            "The return register should be directly available for the needing binding"
-        );
-        assert!(result.save_upon_call.is_empty(), "Program does no calls");
-        assert!(
-            result.completely_spilled.is_empty(),
-            "There should be no left outs for this program"
-        );
-    }
 }

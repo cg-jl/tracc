@@ -5,6 +5,7 @@ use std::ops::ControlFlow;
 
 use self::lifetimes::BlockAddress;
 
+use super::BlockRange;
 use super::{BasicBlock, Binding, BlockBinding, BranchingMap, Statement, Value, IR};
 mod binding_usage;
 pub mod lifetimes;
@@ -300,6 +301,78 @@ pub struct TopBottomTraversal<'code> {
     pub visited: HashSet<BlockBinding>,
     /// a queue to know what we have yet to process
     queue: Vec<BlockBinding>,
+}
+
+pub struct TrackLastParent<'code> {
+    forward_map: &'code BranchingMap,
+    visited: HashSet<BlockBinding>,
+    queue: Vec<BlockBinding>,
+    last_parent: Vec<(BlockBinding, BlockBinding)>,
+}
+
+// impl<'code, F, T> Iterator for TLPWith<'code, F, T>
+// where
+//     T: 'code,
+//     F: FnMut()
+// {
+//     type Item<'a> = (BlockBinding,  T);
+
+//     fn next<'a>(&'a mut self) -> Option<Self::Item> {
+//         todo!()
+//     }
+// }
+
+impl<'code> Iterator for TrackLastParent<'code> {
+    type Item = (BlockBinding, Option<BlockBinding>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.queue.pop()?;
+
+        let parent = if let Some((parent, last_visited_child)) = self.last_parent.last().copied() {
+            // if it's the last child for that parent, make sure to clean up the parent
+            if last_visited_child == next {
+                self.last_parent.pop();
+            }
+            Some(parent)
+        } else {
+            None
+        };
+
+        // the first child that enters the 'queue' is the last to be popped
+        let mut children = self
+            .forward_map
+            .get(&next)
+            .into_iter()
+            .flat_map(|x| x.into_iter().copied())
+            .filter(|x| self.visited.insert(*x));
+
+        if let Some(first_child) = children.next() {
+            self.last_parent.push((next, first_child));
+            self.queue.push(first_child);
+            self.queue.extend(children);
+        }
+
+        Some((next, parent))
+    }
+}
+
+pub fn track_last_parent<'ir>(ir: &'ir IR) -> TrackLastParent<'ir> {
+    TrackLastParent {
+        forward_map: &ir.forward_map,
+        visited: HashSet::new(),
+        queue: ir.function_entrypoints.clone(),
+        last_parent: Vec::new(),
+    }
+}
+
+pub fn track_last_parent_reverse<'ir>(ir: &'ir IR) -> TrackLastParent<'ir> {
+    TrackLastParent {
+        forward_map: &ir.backwards_map,
+        visited: HashSet::new(),
+        queue: find_leaf_blocks(&ir.forward_map, &ir.backwards_map, &ir.function_entrypoints)
+            .collect(),
+        last_parent: Vec::new(),
+    }
 }
 
 impl<'ir> TopBottomTraversal<'ir> {
