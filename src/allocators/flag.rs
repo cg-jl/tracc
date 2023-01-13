@@ -12,6 +12,16 @@ use crate::{
     ir::{Binding, Statement, Value, IR},
 };
 
+// We need a way to mark where certain "knowns" are invalidated, e.g "eq" will be invalidated in
+// some compares but not in others. Once we know that those are invalidated, we'll only need to check
+// that through the binding's lifetime inside the block (i.e from its definition to its use) there
+// is no invalidation of its comparison result. This way we can keep using a condition even if it's
+// not inside a register.
+//
+// The other problem that arises for this "parallelism" to work is that we have to track where
+// flags have a "flag-binding" duality, where they are used as values to e.g add (needs a register
+// allocated to it) or they're just used in a branch.
+
 #[allow(clippy::needless_lifetimes)] // I prefer an explicit lifetime here.
 pub fn get_used_flags<'code>(ir: &'code IR) -> impl Iterator<Item = (Binding, Condition)> + 'code {
     ir.code
