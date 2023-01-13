@@ -1,4 +1,4 @@
-TCH_PREFIX := ./toolchains/gcc-10.3/bin/aarch64-none-linux-gnu-
+TCH_PREFIX := ./toolchains/gnu-aarch64-12.2/bin/aarch64-none-linux-gnu-
 
 GCC := $(TCH_PREFIX)gcc
 
