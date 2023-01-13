@@ -727,7 +727,7 @@ pub fn alloc_registers(
         used_in_return
             .iter()
             .copied()
-            .filter(|b| codegen_hints.registers[b] != RegisterID::from(0)),
+            .filter(|b| codegen_hints.registers.get(b) != Some(&RegisterID::from(0))),
     );
 
     codegen_hints.need_move_from_r0.extend(

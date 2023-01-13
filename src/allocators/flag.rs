@@ -42,5 +42,6 @@ fn is_binding_usable_for_flag(binding: Binding, ir: &IR) -> bool {
             .statements
             .iter()
             .any(|statement| statement.contains_binding(binding))
+            || matches!(block.end, crate::ir::BlockEnd::Return(x) if x == binding)
     })
 }
