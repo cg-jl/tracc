@@ -6,7 +6,6 @@ int main() {
         int temp = a;
         a = a + b;
         b = temp;
-        i += 1;
     }
 
     return a;
