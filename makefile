@@ -1,4 +1,4 @@
-TCH_PREFIX := ./toolchains/out/bin/aarch64-linux-musl-
+TCH_PREFIX := aarch64-unknown-linux-gnu-
 
 GCC := $(TCH_PREFIX)gcc
 
@@ -10,7 +10,7 @@ GCC := $(TCH_PREFIX)gcc
 	cargo run -- -o $@ $<
 
 %.gcc: %.c
-	$(GCC) -o $@ $^ -static
+	$(GCC) -o $@ $^
 
 %.tracc: %.s
-	$(GCC) -o $@ $^ -static
+	$(GCC) -o $@ $^
