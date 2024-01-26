@@ -58,12 +58,7 @@ pub fn figure_out_allocations(
     tracing::trace!(target: "alloc::memory", "aligning allocations: {allocations_needed:?}");
     // align all the allocations to four bytes.
     for value in allocations_needed.values_mut() {
-        let rem = *value % 4;
-        if rem == 0 {
-            *value = *value / 4;
-        } else {
-            *value = *value / 4 + 1;
-        }
+        *value = value.div_ceil(4);
     }
 
     tracing::debug!(target: "alloc::memory", "aligned allocations to blocks: {allocations_needed:?}");
