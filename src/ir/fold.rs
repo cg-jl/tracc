@@ -4,12 +4,23 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 fn fold_ir_blocks(ir: &mut IR) {
-    // fold each block independently
+    // NOTE: This is the most common layer of cache we can get the constants to without having to
+    // worry about invalidation. 
+    // All blocks can benefit to any constants declared in other blocks,
+    // which comes handy when simplifying across loops. 
+    // The iteration order (by order of block generation) is mostly pre-order: We visit first the
+    // blocks that either form a loop or don't have any dependencies from e.g branching. Then other
+    // blocks can fold from cascaded information earlier.
+    let mut found_constants = ir
+        .code
+        .iter()
+        .flat_map(|block| scan_for_constants(&block.statements))
+        .collect();
+
     (0..ir.code.len())
         .map(BlockBinding)
-        .for_each(|binding| fold_block(ir, binding));
+        .for_each(|binding| fold_block(ir, binding, &mut found_constants));
 
-    // now recompute the backward/forward map
     (ir.forward_map, ir.backwards_map) = generate::generate_branching_graphs(&ir.code);
 }
 
@@ -144,39 +155,49 @@ fn merge_blocks(
     // TODO: set predecessor to the other basic block in the predecessor if there's a loop between
 }
 
-fn find_potential_folds(code: &[Statement]) -> (Vec<(usize, Binding, i32)>, HashMap<Binding, i32>) {
-    let mut found_constants = HashMap::new();
-
-    let mut folds = Vec::new();
-
-    for (index, statement) in code.iter().enumerate() {
+/// NOTE: this shouldn't be called per fold loop
+fn scan_for_constants<'s>(
+    code: impl IntoIterator<Item = &'s Statement> + 's,
+) -> impl Iterator<Item = (Binding, i32)> + 's {
+    code.into_iter().filter_map(|statement| {
         if let Statement::Assign {
             index,
             value: Value::Constant(c),
         } = statement
         {
-            found_constants.insert(*index, *c);
+            Some((*index, *c))
+        } else {
+            None
         }
-        use super::analysis::BindingUsage;
-        let found_constants = &found_constants;
+    })
+}
 
-        statement.visit_value_bindings(&mut |binding| {
-            if let Some(value) = found_constants.get(&binding).cloned() {
+fn find_potential_folds(
+    code: &[Statement],
+    constants: &HashMap<Binding, i32>,
+) -> Vec<(usize, Binding, i32)> {
+    let mut folds = Vec::new();
+
+    for (index, statement) in code.iter().enumerate() {
+        use super::analysis::BindingUsage;
+
+        statement.visit_value_bindings(|binding| {
+            if let Some(value) = constants.get(&binding).cloned() {
                 folds.push((index, binding, value));
             }
             std::ops::ControlFlow::<(), ()>::Continue(())
         });
     }
-    (folds, found_constants)
+    folds
 }
 
-fn fold_block(ir: &mut IR, block: BlockBinding) {
+fn fold_block(ir: &mut IR, block: BlockBinding, found_constants: &mut HashMap<Binding, i32>) {
     // fold as much of the statements as possible
     // let mut start_index = 0;
     let mut failed_folds: HashMap<usize, HashSet<(Binding, i32)>> = HashMap::new();
     loop {
         // collect into a vec to avoid reference issues
-        let (mut potential_folds, found_constants) = find_potential_folds(&ir[block].statements);
+        let mut potential_folds = find_potential_folds(&ir[block].statements, &found_constants);
 
         potential_folds.retain(|(index, binding, value)| {
             failed_folds
@@ -209,6 +230,7 @@ fn fold_block(ir: &mut IR, block: BlockBinding) {
             // Therefore we're going to forget all the previous bod folds from this index, to try
             // those unsucceeded folds again.
             if modified {
+                found_constants.extend(scan_for_constants(std::iter::once(&new_statement)));
                 forget.insert(index);
             } else {
                 // mark this fold as not succeeded.
