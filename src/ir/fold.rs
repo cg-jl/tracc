@@ -394,20 +394,24 @@ fn value_propagate_constant(
                 }
             }
             match rhs {
-                CouldBeConstant::Constant(ctant) if let Some(value) = known_constants.get(&lhs) => {
-                    PropagationResult::modified(Value::Constant(eval_condition(
-                        condition,
-                        *value,
-                        ctant,
-                    )))
+                CouldBeConstant::Constant(ctant) => {
+                    if let Some(value) = known_constants.get(&lhs) {
+                        PropagationResult::modified(Value::Constant(eval_condition(
+                            condition, *value, ctant,
+                        )))
+                    } else {
+                        PropagationResult::unchanged(value)
+                    }
                 }
-                CouldBeConstant::Binding(other) => {
 
+                CouldBeConstant::Binding(other) => {
                     let known_lhs = known_constants.get(&lhs).ok_or(lhs);
                     let known_rhs = known_constants.get(&other).ok_or(other);
 
                     match (known_lhs, known_rhs) {
-                        (Ok(lhs), Ok(rhs)) => PropagationResult::modified(Value::Constant(eval_condition(condition, *lhs, *rhs))),
+                        (Ok(lhs), Ok(rhs)) => PropagationResult::modified(Value::Constant(
+                            eval_condition(condition, *lhs, *rhs),
+                        )),
                         // we have half the thing
                         (Err(lhs), Ok(rhs)) => PropagationResult::modified(Value::Cmp {
                             condition,
@@ -415,39 +419,64 @@ fn value_propagate_constant(
                             rhs: (*rhs).into(),
                         }),
                         // if the condition is commutative, we can flip the arguments
-                        (Ok(&rhs), Err(lhs)) if condition.is_commutative() => PropagationResult::modified(Value::Cmp {
-                            condition,
-                            lhs,
-                            rhs: rhs.into(),
-                        }),
+                        (Ok(&rhs), Err(lhs)) if condition.is_commutative() => {
+                            PropagationResult::modified(Value::Cmp {
+                                condition,
+                                lhs,
+                                rhs: rhs.into(),
+                            })
+                        }
                         _ => PropagationResult::unchanged(value),
                     }
                 }
-                CouldBeConstant::Constant(_) => PropagationResult::unchanged(value),
             }
         }
         Value::Load {
             mem_binding,
             byte_size,
         } => todo!(),
-        Value::Negate { binding } => known_constants.get(&binding).copied().map(|x| (!x).wrapping_add(1)).ok_or(value).into(),
+        Value::Negate { binding } => known_constants
+            .get(&binding)
+            .copied()
+            .map(|x| (!x).wrapping_add(1))
+            .ok_or(value)
+            .into(),
 
-        Value::FlipBits { binding } => known_constants.get(&binding).copied().map(|x| !x).ok_or(value).into(),
+        Value::FlipBits { binding } => known_constants
+            .get(&binding)
+            .copied()
+            .map(|x| !x)
+            .ok_or(value)
+            .into(),
 
         Value::Add { lhs, rhs } => match rhs {
-            CouldBeConstant::Constant(c) => known_constants.get(&lhs).copied().map(|a| a.wrapping_add(c).into()),
-            CouldBeConstant::Binding(other) => match (get_known(known_constants, lhs), get_known(known_constants, other)) {
+            CouldBeConstant::Constant(c) => known_constants
+                .get(&lhs)
+                .copied()
+                .map(|a| a.wrapping_add(c).into()),
+            CouldBeConstant::Binding(other) => match (
+                get_known(known_constants, lhs),
+                get_known(known_constants, other),
+            ) {
                 (Ok(a), Ok(b)) => Some(a.wrapping_add(b).into()),
-                (Ok(rhs), Err(lhs)) | (Err(lhs), Ok(rhs))  => Some(Value::Add {
+                (Ok(rhs), Err(lhs)) | (Err(lhs), Ok(rhs)) => Some(Value::Add {
                     lhs,
-                    rhs: rhs.into()
+                    rhs: rhs.into(),
                 }),
-                _ => None
-            }
-        }.ok_or(value).into(),
+                _ => None,
+            },
+        }
+        .ok_or(value)
+        .into(),
         Value::Subtract { lhs, rhs } => match rhs {
-            CouldBeConstant::Constant(c) => known_constants.get(&lhs).copied().map(|a| a.wrapping_sub(c).into()),
-            CouldBeConstant::Binding(other) => match (get_known(known_constants, lhs), get_known(known_constants, other)) {
+            CouldBeConstant::Constant(c) => known_constants
+                .get(&lhs)
+                .copied()
+                .map(|a| a.wrapping_sub(c).into()),
+            CouldBeConstant::Binding(other) => match (
+                get_known(known_constants, lhs),
+                get_known(known_constants, other),
+            ) {
                 (Ok(a), Ok(b)) => Some(a.wrapping_sub(b).into()),
                 (Err(lhs), Ok(rhs)) => Some(Value::Subtract {
                     lhs,
@@ -456,9 +485,17 @@ fn value_propagate_constant(
                 // NOTE: Since substraction is anticommutative, flipping it around would generate
                 // more instructions. If the two values end up known it'll fold it anyway.
                 _ => None,
-            }
-        }.ok_or(value).into(),
-        Value::Multiply { lhs, rhs } => both(known_constants.get(&lhs).copied(), known_constants.get(&rhs).copied()).map(|(a, b)| a.wrapping_mul(b)).ok_or(value).into(),
+            },
+        }
+        .ok_or(value)
+        .into(),
+        Value::Multiply { lhs, rhs } => both(
+            known_constants.get(&lhs).copied(),
+            known_constants.get(&rhs).copied(),
+        )
+        .map(|(a, b)| a.wrapping_mul(b))
+        .ok_or(value)
+        .into(),
         // NOTE: when dividing by zero, don't fold it. The expression is UB so we'll
         // let the user shoot themselves in the foot and insert a division by zero.
         Value::Divide {
@@ -483,11 +520,14 @@ fn value_propagate_constant(
         Value::Lsl { lhs, rhs } => todo!(),
         Value::Lsr { lhs, rhs } => todo!(),
         Value::And { lhs, rhs } => match rhs {
-            CouldBeConstant::Constant(ctant) if let Some(value) = known_constants.get(&lhs) => {
-                PropagationResult::modified(Value::Constant(*value & ctant))
+            CouldBeConstant::Constant(ctant) => {
+                if let Some(value) = known_constants.get(&lhs) {
+                    PropagationResult::modified(Value::Constant(*value & ctant))
+                } else {
+                    PropagationResult::unchanged(value)
+                }
             }
             CouldBeConstant::Binding(other) => {
-
                 let known_lhs = known_constants.get(&lhs).copied().ok_or(lhs);
                 let known_rhs = known_constants.get(&other).copied().ok_or(other);
 
@@ -495,12 +535,11 @@ fn value_propagate_constant(
                     (Ok(a), Ok(b)) => PropagationResult::modified(Value::Constant(a & b)),
                     (Ok(a), Err(b)) | (Err(b), Ok(a)) => PropagationResult::modified(Value::And {
                         lhs: b,
-                        rhs: a.into()
+                        rhs: a.into(),
                     }),
-                    _ => PropagationResult::unchanged(value)
+                    _ => PropagationResult::unchanged(value),
                 }
-            },
-            CouldBeConstant::Constant(_) => PropagationResult::unchanged(value),
+            }
         },
         Value::Or { lhs, rhs } => todo!(),
         Value::Xor { lhs, rhs } => todo!(),

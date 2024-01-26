@@ -1,5 +1,6 @@
 //! First step of code generation is to get the stack memory usage for the code
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use tracing::{debug, span, Level};
@@ -130,7 +131,7 @@ pub fn figure_out_allocations(
             // find a spot with N consecutive free blocks.
             let found_offset = (0..=total_blocks.saturating_sub(allocated_size))
                 .position(|i| (0..allocated_size).all(|offset| free_blocks.contains(&(i + offset))))
-                .inspect(|found| tracing::trace!("found offset: {found}"))
+                .map(|offset| { tracing::trace!("found offset: {offset}"); offset })
                 .unwrap_or_else(|| {
                     // try to find a spot at the end where some amount of blocks is free, so we don't
                     // have to allocate extra blocks for some part of the allocation.
@@ -194,9 +195,9 @@ pub fn make_memory_lifetimes(
     function_block_ranges: &[BlockRange],
 ) -> Box<[analysis::lifetimes::BlockLifetimes<MemBinding>]> {
     let mut all = {
-        let mut uall = Box::new_uninit_slice(ir.code.len());
-        for (block_index, wlt) in uall.iter_mut().enumerate() {
-            wlt.write(BlockLifetimes {
+        let mut uall = Vec::with_capacity(ir.code.len());
+        for block_index in 0..ir.code.len() {
+            uall.push(BlockLifetimes {
                 block_index,
                 ordered_by_start: Vec::new(),
                 binding_starts: HashMap::new(),
@@ -204,7 +205,7 @@ pub fn make_memory_lifetimes(
             });
         }
 
-        unsafe { uall.assume_init() }
+        uall.into_boxed_slice()
     };
 
     for (block, maybe_parent) in analysis::track_last_parent(ir) {
@@ -248,9 +249,9 @@ pub fn make_memory_lifetimes(
 
         // 3. Register "out-of-block" ends for anything that hasn't found an end to itself here.
         for binding in all[block.0].ordered_by_start.iter().copied() {
-            let _ = all[block.0]
-                .binding_ends
-                .try_insert(binding, ir[block].statements.len());
+            if let Entry::Vacant(vacant) = all[block.0].binding_ends.entry(binding) {
+                vacant.insert(ir[block].statements.len());
+            }
         }
     }
 

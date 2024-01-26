@@ -723,11 +723,11 @@ impl BinaryOp {
             }
             Operator::DoubleAnd => {
                 let op = LogicOp::And;
-                    Self::Logic(op)
+                Self::Logic(op)
             }
             Operator::DoublePipe => {
                 let op = LogicOp::Or;
-                    Self::Logic(op)
+                Self::Logic(op)
             }
             Operator::DoubleAngleRight => {
                 let op = BitOp::RightShift;
@@ -785,7 +785,7 @@ impl BinaryOp {
                 } else {
                     Self::Bit(op)
                 }
-            },
+            }
             Operator::Pipe => {
                 let op = BitOp::Or;
                 if has_equal {
@@ -795,7 +795,7 @@ impl BinaryOp {
                 } else {
                     Self::Bit(op)
                 }
-            },
+            }
             Operator::Hat => {
                 let op = BitOp::Xor;
                 if has_equal {
@@ -805,31 +805,30 @@ impl BinaryOp {
                 } else {
                     Self::Bit(op)
                 }
-            }
-            // Operator::Minus => Self::Subtract,
-            // Operator::Plus => Self::Add,
-            // Operator::Star => Self::Multiply,
-            // Operator::Slash => Self::Divide,
-            // Operator::DoubleAnd => Self::LogicAnd,
-            // Operator::DoublePipe => Self::LogicOr,
-            // Operator::AngleLeft => {
-            //     if has_equal {
-            //         Self::Relational(Relational::LessEqual)
-            //     } else {
-            //         Self::Relational(Relational::Less)
-            //     }
-            // }
-            // Operator::AngleRight => {
-            //     if has_equal {
-            //         Self::Relational(Relational::GreaterEqual)
-            //     } else {
-            //         Self::Relational(Relational::Greater)
-            //     }
-            // }
-            // Operator::Equals => Self::Assign,
-            // Operator::DoubleEquals => Self::Equality(Equality::Equals),
-            // Operator::ExclamationEquals => Self::Equality(Equality::NotEquals),
-            // Operator::Tilde | Operator::ExclamationMark => return None,
+            } // Operator::Minus => Self::Subtract,
+              // Operator::Plus => Self::Add,
+              // Operator::Star => Self::Multiply,
+              // Operator::Slash => Self::Divide,
+              // Operator::DoubleAnd => Self::LogicAnd,
+              // Operator::DoublePipe => Self::LogicOr,
+              // Operator::AngleLeft => {
+              //     if has_equal {
+              //         Self::Relational(Relational::LessEqual)
+              //     } else {
+              //         Self::Relational(Relational::Less)
+              //     }
+              // }
+              // Operator::AngleRight => {
+              //     if has_equal {
+              //         Self::Relational(Relational::GreaterEqual)
+              //     } else {
+              //         Self::Relational(Relational::Greater)
+              //     }
+              // }
+              // Operator::Equals => Self::Assign,
+              // Operator::DoubleEquals => Self::Equality(Equality::Equals),
+              // Operator::ExclamationEquals => Self::Equality(Equality::NotEquals),
+              // Operator::Tilde | Operator::ExclamationMark => return None,
         })
     }
 }

@@ -1,4 +1,4 @@
-TCH_PREFIX := aarch64-unknown-linux-gnu-
+TCH_PREFIX := aarch64-linux-gnu-
 
 GCC := $(TCH_PREFIX)gcc
 

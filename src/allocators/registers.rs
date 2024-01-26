@@ -547,8 +547,9 @@ fn linear_alloc_block(
                     .map(RegisterID::from)
                     .find(|reg| !used.contains_key(reg))
                     // register that we used a callee-saved register.
-                    .inspect(|x| {
-                        codegen_hints.callee_saved_per_function[function_index].push(*x);
+                    .map(|x| {
+                        codegen_hints.callee_saved_per_function[function_index].push(x);
+                        x
                     })
                     .or_else(|| {
                         (0..15)
