@@ -18,13 +18,11 @@ type DependencyMap = HashMap<BlockBinding, Vec<Binding>>;
 
 pub type MemoryMap = HashMap<MemBinding, assembly::Memory>;
 
-// assumes to != 0
+// assumes to != 0 and to = 2^N
 pub fn align(value: usize, to: usize) -> usize {
-    if value % to == 0 {
-        value
-    } else {
-        to * (value / to + 1)
-    }
+    assert!(to.is_power_of_two());
+
+    (value + (to - 1)) & to
 }
 
 impl MemBinding {
