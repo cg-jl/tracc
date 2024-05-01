@@ -15,7 +15,7 @@ pub mod lifetimes;
 use itertools::Itertools;
 pub use lifetimes::{CollisionMap, Lifetime, LifetimeMap};
 
-pub use binding_usage::{get_usage_map, BindingUsage, UsageMap};
+pub use binding_usage::BindingUsage;
 
 pub fn order_by_deps(ir: &IR, bindings: impl Iterator<Item = Binding>) -> Vec<Binding> {
     let mut all_bindings: BTreeMap<_, HashSet<_>> = bindings
@@ -92,6 +92,38 @@ pub fn statements<'i>(ir: &'i IR) -> impl Iterator<Item = &'i Statement> + 'i {
     ir.code.iter().flat_map(|block| block.statements.iter())
 }
 
+/// A yielding generator that allows &mut usage inside a loop.
+pub struct StmtAddressIter {
+    cur_block: usize,
+    pub cur_stmt: usize,
+}
+
+impl StmtAddressIter {
+    pub fn new() -> Self {
+        Self {
+            cur_block: 0,
+            cur_stmt: 0,
+        }
+    }
+    pub fn next(&mut self, ir: &IR) -> Option<BlockAddress> {
+        if self.cur_block >= ir.code.len() {
+            return None;
+        }
+        if self.cur_stmt >= ir.code[self.cur_block].statements.len() {
+            self.cur_stmt = 0;
+            self.cur_block += 1;
+            self.next(ir)
+        } else {
+            let addr = BlockAddress {
+                statement: self.cur_stmt,
+                block: BlockBinding(self.cur_block),
+            };
+            self.cur_stmt += 1;
+            Some(addr)
+        }
+    }
+}
+
 pub fn statements_with_addresses<'i>(
     ir: &'i IR,
 ) -> impl Iterator<Item = (&'i Statement, BlockAddress)> + '_ {
@@ -161,6 +193,18 @@ pub fn find_assignment_value(code: &[BasicBlock], binding: Binding) -> Option<&V
                 None
             }
         })
+}
+
+/// Borrows the map instead of the convenience IR struct to allow granularity of lifetime usage.
+pub fn direct_branches<'map>(
+    backwards_map: &'map BranchingMap,
+    block: BlockBinding,
+) -> impl Iterator<Item = BlockBinding> + '_ {
+    backwards_map
+        .get(&block)
+        .into_iter()
+        .flat_map(|v| v)
+        .copied()
 }
 
 pub fn antecessors<'code>(ir: &'code IR, binding: BlockBinding) -> BottomTopTraversal<'code> {

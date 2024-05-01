@@ -88,6 +88,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         mut completely_spilled,
         mut registers,
         stores_condition,
+        phi_transfers,
     } = registers::alloc_registers(&ir, need_allocation, registers::make_allocator_hints(&ir));
 
     assert!(
@@ -205,8 +206,8 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         })
         .collect();
 
+    let mut label_count = 0usize;
     let block_labels = {
-        let mut label_count = 0usize;
         let mut block_labels: HashMap<_, _> = ir
             .function_block_ranges
             .iter()
@@ -262,6 +263,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
     };
     let mut used_epilogue_labels = HashSet::new();
 
+    let mut reg_move_blocks = vec![];
     // now, let's compile everything into blocks and add epilogues/prologues wherever needed.
     let mut asm_blocks: Vec<_> = ir
         .code
@@ -294,10 +296,18 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                 }
             }
 
+            let phis = phi_transfers.get(&BlockBinding(index));
+
 
             match block.end {
                 BlockEnd::Branch(b) => match b {
                     Branch::Unconditional { target } => {
+                        for (source, target) in phis.and_then(|ph| ph.get(&target)).into_iter().flatten().copied() {
+                            compiled_block.push_back(assembly::Instruction::Mov { target: assembly::Register::from_id(target, assembly::BitSize::Bit32),
+                                source: assembly::Data::Register(assembly::Register::from_id(source, assembly::BitSize::Bit32))
+                            });
+                        }
+
                         if target.0 != index + 1 {
                             compiled_block.push_back(assembly::Branch::Unconditional {
                                 register: None,
@@ -337,17 +347,59 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                             });
                         }
 
+                        let phis_for_cond = phis.and_then(|p| p.get(&condition_target));
+
+                            // TODO: for cleaner assembly, try to get the phi moves in the next
+                            // block?
+                        let cond_label = if phis_for_cond.is_some() { 
+                            label_count += 1;
+                            assembly::Label::Numbered(label_count - 1)
+                        } else { block_labels[&condition_target] };
+
                         compiled_block.push_back(assembly::Branch::Conditional {
                             condition,
-                            label: block_labels[&condition_target],
+                            label: cond_label,
                         });
 
+
+                        for (source, target) in phis.and_then(|ph| ph.get(&rest_target)).into_iter().flatten().copied() {
+                            compiled_block.push_back(assembly::Instruction::Mov { target: assembly::Register::from_id(target, assembly::BitSize::Bit32),
+                                source: assembly::Data::Register(assembly::Register::from_id(source, assembly::BitSize::Bit32))
+                            });
+                        }
 
                         if rest_target.0 != index + 1 {
                             compiled_block.push_back(assembly::Branch::Unconditional {
                                 register: None,
                                 label: block_labels[&rest_target],
                             });
+                        }
+
+                        if let Some(phis) = phis_for_cond {
+
+                            tracing::trace!(target: "asmgen::phi", "phis for cond (label = {}): {:?}", &cond_label, &phis);
+
+                            let mut compiled_block = AssemblyOutput::new();
+
+                            compiled_block.push_back(cond_label);
+
+                            for (source, target) in phis.iter().copied() {
+                            compiled_block.push_back(assembly::Instruction::Mov { target: assembly::Register::from_id(target, assembly::BitSize::Bit32),
+                                source: assembly::Data::Register(assembly::Register::from_id(source, assembly::BitSize::Bit32))
+                            });
+                            }
+
+
+                            compiled_block.push_back(assembly::Branch::Unconditional {
+                                    register: None,
+                                    label: block_labels[&condition_target],
+                                });
+                                // NOTE: In order to not need this I'd need to first establish the
+                                // way of the condition and the label for the branch before I get
+                                // to generate the code and add it to the blocks.
+                                // This can be done before, but this hacky way should be enough for
+                                // now to pass the tests.
+                            reg_move_blocks.push(compiled_block);
                         }
                     }
                 },
@@ -378,6 +430,9 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
             compiled_block
         })
         .collect();
+
+    asm_blocks.extend(reg_move_blocks);
+
 
     // add block binding labels before adding the prologue/epilogue labels
     for (used_block, label) in block_labels.iter().map(|(a, b)| (*a, *b)) {
@@ -676,6 +731,10 @@ fn compile_value<'code>(
             }
         }
         .into(),
-        Value::Binding(_) => todo!(),
+        Value::Binding(bind) => assembly::Instruction::Mov {
+            target: assembly::Register::from_id(target_register, assembly::BitSize::Bit32),
+            source: assembly::Data::Register(assembly::Register::from_id(registers[&bind], assembly::BitSize::Bit32))
+        }.into(),
+        Value::Uninit => todo!(),
     }
 }

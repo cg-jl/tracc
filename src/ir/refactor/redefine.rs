@@ -76,6 +76,7 @@ impl Rename for Value {
                 rhs.rename(target, rename_as);
             }
             Value::Constant(_) => (),
+            Value::Uninit => (),
         }
     }
 }

@@ -350,9 +350,10 @@ pub fn compile_expr<'code>(
 
                 Ok((
                     end_builder,
-                    Value::And {
+                    Value::Cmp {
                         lhs: end,
-                        rhs: (1).into(),
+                        condition: Condition::NotEquals,
+                        rhs: (0).into(),
                     },
                 ))
             }

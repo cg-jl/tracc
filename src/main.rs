@@ -56,9 +56,15 @@ fn run() -> Result<(), anyhow::Error> {
         }
     };
 
-    let ir = tracc::ir::fold::constant_fold(ir);
+    let mut ir = tracc::ir::fold::constant_fold(ir);
 
     tracing::debug!(target: "main::ir", "IR: {ir:?}");
+
+    if !opt.fno_stack_lvn {
+        tracc::ir::mem::expand_reads(&mut ir);
+        ir = tracc::ir::fold::constant_fold(ir);
+        tracing::debug!(target: "main::ir", "IR: {ir:?}");
+    }
 
     let output = tracc::asmgen::codegen(ir, function_names).cons(
         tracc::asmgen::assembly::Directive::Architecture("armv8-a".into()),
@@ -84,4 +90,8 @@ struct Opt {
     /// The (optional) output file
     #[structopt(short = "o", long = "output", parse(from_os_str))]
     output: Option<std::path::PathBuf>,
+
+    /// If set, disables stack-based local value numbering
+    #[structopt(long = "fno-stack-lvn")]
+    fno_stack_lvn: bool,
 }

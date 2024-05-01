@@ -77,7 +77,7 @@ pub fn compile_program<'code>(
             function_entrypoints,
             function_argument_bindings,
             function_block_ranges: Vec::new(), // NOTE: the function endpoints are filled only
-                                                   // in asmgen since we don't need them before.
+                                               // in asmgen since we don't need them before.
         };
 
         tracing::info!(target: "irgen", "cleaning up generated code to remove garbo");
@@ -90,6 +90,20 @@ pub fn compile_program<'code>(
         Ok((ir, names))
     } else {
         Err(errors)
+    }
+}
+
+pub fn collect_phis(mut phis: impl Iterator<Item = PhiDescriptor>) -> Value {
+    match phis.next() {
+        None => Value::Uninit,
+        Some(first) => match phis.next() {
+            None => Value::Binding(first.value),
+            Some(second) => {
+                let mut nodes = vec![first, second];
+                nodes.extend(phis);
+                Value::Phi { nodes }
+            }
+        },
     }
 }
 
@@ -236,7 +250,7 @@ pub struct IRGenState {
 #[repr(transparent)]
 #[derive(Default)]
 pub struct BindingCounter {
-    latest_binding: usize,
+    pub latest_binding: usize,
 }
 
 impl BindingCounter {

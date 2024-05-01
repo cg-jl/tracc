@@ -105,6 +105,7 @@ impl fmt::Display for Value {
             Value::Allocate { size } => write_instruction!(f, "alloca", size),
             Value::Constant(constant) => constant.fmt(f),
             Value::Binding(binding) => binding.fmt(f),
+            Value::Uninit => f.write_str("uninit"),
         }
     }
 }

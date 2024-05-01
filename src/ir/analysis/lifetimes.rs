@@ -1,6 +1,6 @@
 use crate::ir::{analysis, Binding, BlockBinding, BlockEnd, Branch, Statement, Value, IR};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     ops::ControlFlow,
 };
 
@@ -11,25 +11,12 @@ pub type CollisionMapWithLocations =
     HashMap<Binding, HashMap<Binding, (BlockAddress, BlockAddress)>>;
 
 pub fn get_defs(ir: &IR) -> impl Iterator<Item = (Binding, BlockAddress)> + '_ {
-    // go through each block and the statements which define a binding
-    super::iterate_with_bindings(&ir.code).flat_map(|(block_binding, block)| {
-        block
-            .statements
-            .iter()
-            .enumerate()
-            .filter_map(move |(statement_index, statement)| {
-                if let Statement::Assign { index, .. } = statement {
-                    Some((
-                        *index,
-                        BlockAddress {
-                            block: block_binding,
-                            statement: statement_index,
-                        },
-                    ))
-                } else {
-                    None
-                }
-            })
+    super::statements_with_addresses(ir).filter_map(|(stmt, addr)| {
+        if let Statement::Assign { index, .. } = stmt {
+            Some((*index, addr))
+        } else {
+            None
+        }
     })
 }
 
@@ -169,34 +156,118 @@ pub struct BlockLifetimes<LB> {
 }
 
 pub fn make_sorted_lifetimes(ir: &IR) -> Vec<BlockLifetimes<Binding>> {
-    let mut lasting_lifetimes = vec![HashSet::new(); ir.code.len()].into_boxed_slice();
-    let mut collected = Vec::with_capacity(ir.code.len());
-    for block in analysis::TopBottomTraversal::from(ir) {
-        tracing::trace!(target: "lifetimes", "visiting block {block}");
-        // collect our
-        let mut this_block_lifetimes = analysis::antecessors(ir, block)
-            .flat_map(|block| lasting_lifetimes[block.0].iter().copied())
-            .collect();
+    // #1. Start on the definitions.
+    // #2. When passing through a block:
+    // - Put it in the path stack.
+    // - If a usage is found, go through all the blocks in the path stack and
+    // say that it passes through the entire block.
+    // - We only find a usage in a phi node by selecting the blocks that are in our path stack.
 
-        let mut calcd_lifetimes = BlockLifetimes {
-            block_index: block.0,
-            ordered_by_start: Vec::new(),
-            binding_starts: HashMap::new(),
-            binding_ends: HashMap::new(),
-        };
+    let mut binding_starts = vec![HashMap::new(); ir.code.len()];
+    let mut binding_ends = vec![HashMap::new(); ir.code.len()];
 
-        // calculate the block's local lifetimes.
-        make_block_lifetimes(
-            &ir[block].statements,
-            &mut this_block_lifetimes,
-            &mut calcd_lifetimes,
+    let defs: HashMap<_, _> = get_defs(ir).collect();
+
+    // Reorganize binding starts
+    for (bind, addr) in defs.iter() {
+        binding_starts[addr.block.0].insert(*bind, addr.statement);
+        // Start by assuming it ends right after it starts.
+        binding_ends[addr.block.0].insert(*bind, addr.statement);
+    }
+
+    fn modify<K>(
+        entry: std::collections::hash_map::Entry<K, usize>,
+        new_stmt: usize,
+        f: impl FnOnce(usize, usize) -> usize,
+    ) {
+        entry
+            .and_modify(|stmt| (*stmt) = f(*stmt, new_stmt))
+            .or_insert(new_stmt);
+    };
+
+    analysis::binding_usage::visit_value_bindings::<()>(ir, |usage| {
+        tracing::trace!(target: "lifetimes", "found usage: {usage:?}, defined in {:?}", defs.get(&usage.binding));
+        modify(
+            binding_ends[usage.addr.block.0].entry(usage.binding),
+            usage.addr.statement,
+            usize::max,
         );
 
-        lasting_lifetimes[block.0] = this_block_lifetimes;
+        // Go back from the block until we reach the definition
 
-        collected.push(calcd_lifetimes);
-    }
-    collected
+        let def_block = defs[&usage.binding].block;
+
+        // TODO: antecessors until some block is visited.
+        // It shouldn't go up from that level!
+
+        if def_block != usage.addr.block {
+            tracing::trace!(target: "lifetimes", "propagating usage till we hit {def_block}");
+            binding_starts[usage.addr.block.0].insert(usage.binding, 0);
+            let mut queue: VecDeque<_> = ir.direct_antecessors(usage.addr.block).collect();
+            let mut visited = HashSet::new();
+
+            while let Some(pred) = queue.pop_back() {
+                if !visited.insert(pred) {
+                    continue;
+                }
+                tracing::trace!(target: "lifetimes", "hit predecessor {pred}");
+                modify(
+                    binding_ends[pred.0].entry(usage.binding),
+                    ir[pred].statements.len(),
+                    usize::max,
+                );
+                // Once we get to the block that the binding is defined in,
+                // we know regardless of branching that we can stop.
+                // The rest of the blocks in the queue won't have the definition,
+                // since when a value is used in some branch, the def block is
+                // guaranteed a root of the subtree, since the binding must be defined in
+                // order to use it.
+
+                if pred == def_block {
+                    break;
+                }
+                binding_starts[pred.0].insert(usage.binding, 0);
+
+                queue.extend(ir.direct_antecessors(pred));
+            }
+        }
+
+        ControlFlow::Continue(())
+    });
+
+    let live_ranges: Vec<HashMap<_, _>> = binding_starts
+        .iter()
+        .zip(binding_ends.iter())
+        .map(|(starts, ends)| {
+            starts
+                .iter()
+                .map(|(bind, start)| (*bind, (*start, ends[bind])))
+                .collect()
+        })
+        .collect();
+
+    tracing::debug!(target: "lifetimes", "live ranges: {:#?}", &live_ranges);
+
+    binding_starts
+        .into_iter()
+        .zip(binding_ends)
+        .enumerate()
+        .map(|(idx, (starts, ends))| {
+            let mut ordered_by_start: Vec<_> = starts.keys().copied().collect();
+
+            // #1. Sort unstable
+            ordered_by_start.sort_unstable_by_key(|k| starts[k]);
+            // #2. Push all bindings that are zero and not declared in this block to the beginning.
+            ordered_by_start.sort_by_key(|k| if defs[k].block.0 == idx { 1 } else { 0 });
+
+            BlockLifetimes {
+                block_index: idx,
+                ordered_by_start,
+                binding_starts: starts,
+                binding_ends: ends,
+            }
+        })
+        .collect()
 }
 
 // NOTE: this doesn't take into account lifetimes that go through a block, but are not used in that

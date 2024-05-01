@@ -1,59 +1,61 @@
-use crate::ir::{BasicBlock, BlockEnd, Branch, IR};
+use crate::ir::{BasicBlock, BlockBinding, BlockEnd, Branch, PhiDescriptor, IR};
 use crate::ir::{Binding, CouldBeConstant, Statement, Value};
 use core::ops::ControlFlow;
 use std::collections::HashMap;
 use std::iter::FromIterator;
 
-#[derive(Debug, Clone, Copy)]
-pub enum Usage {
-    /// the binding is used in a computation of other binding
-    Binding(Binding),
-    /// the binding is used in a store
-    Store(Binding),
-    /// the binding is used in a return statement
-    Return,
-    /// the binding is used as a switch for branch
-    Branch,
+use super::lifetimes::BlockAddress;
+
+#[derive(Debug)]
+pub struct Usage {
+    pub addr: BlockAddress,
+    pub binding: Binding,
 }
-pub type UsageMap = HashMap<Binding, Vec<Usage>>;
 
-// get what each binding is used for
-pub fn get_usage_map(ir: &IR) -> UsageMap {
-    let mut usage_map = UsageMap::new();
-
-    for block in &ir.code {
-        for statement in &block.statements {
-            match statement {
-                Statement::Store {
-                    mem_binding,
+pub fn visit_value_bindings<B>(
+    ir: &IR,
+    mut visit: impl FnMut(Usage) -> ControlFlow<B>,
+) -> ControlFlow<B> {
+    for (bb, block) in super::iterate_with_bindings(&ir.code) {
+        for (stmt_index, stmt) in block.statements.iter().enumerate() {
+            stmt.visit_value_bindings(|binding| {
+                visit(Usage {
                     binding,
-                    ..
-                } => usage_map
-                    .entry(*binding)
-                    .or_default()
-                    .push(Usage::Store(*mem_binding)),
-                Statement::Assign { index, value } => {
-                    value.visit_value_bindings(&mut |dep| {
-                        usage_map
-                            .entry(dep)
-                            .or_default()
-                            .push(Usage::Binding(*index));
-                        ControlFlow::<(), _>::Continue(())
-                    });
-                }
-            }
+                    addr: BlockAddress {
+                        block: bb,
+                        statement: stmt_index,
+                    },
+                })
+            })?;
         }
 
         match block.end {
-            BlockEnd::Return(ret) => usage_map.entry(ret).or_default().push(Usage::Return),
-            BlockEnd::Branch(Branch::Conditional { flag, .. }) => {
-                usage_map.entry(flag).or_default().push(Usage::Branch)
+            BlockEnd::Branch(branch) => {
+                if let Branch::Conditional { flag, .. } = branch {
+                    visit(Usage {
+                        binding: flag,
+                        addr: BlockAddress {
+                            block: bb,
+                            statement: block.statements.len(),
+                        },
+                    })?;
+                }
             }
-            BlockEnd::Branch(Branch::Unconditional { .. }) => {}
+            BlockEnd::Return(binding) => {
+                visit(Usage {
+                    binding,
+                    addr: BlockAddress {
+                        block: bb,
+                        statement: block.statements.len(),
+                    },
+                })?;
+            }
         }
     }
-    usage_map
+    ControlFlow::Continue(())
 }
+
+// get what each binding is used for
 
 pub trait BindingUsage {
     // Check if a binding is used
@@ -129,6 +131,7 @@ impl BindingUsage for Value {
             } => lhs.contains_binding(search_target) || rhs.contains_binding(search_target),
             Value::Constant(_) => false,
             Value::Binding(b) => b.contains_binding(search_target),
+            Value::Uninit => false,
         }
     }
 
@@ -171,6 +174,7 @@ impl BindingUsage for Value {
             Value::Binding(binding) | Value::Negate { binding } | Value::FlipBits { binding } => {
                 f(*binding)
             }
+            Value::Uninit => ControlFlow::Continue(()),
         }
     }
 }

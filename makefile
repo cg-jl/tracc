@@ -7,10 +7,13 @@ GCC := $(TCH_PREFIX)gcc
 	sed -i '/cfi/d' $@
 
 %.s: %.c target/debug/tracc
-	cargo run -- -o $@ $<
+	TRACC_TRACE='' cargo run -- -o $@ $<
 
 %.gcc: %.c
-	$(GCC) -o $@ $^
+	$(GCC) -static -o $@ $^
 
 %.tracc: %.s
-	$(GCC) -o $@ $^
+	$(GCC) -static -o $@ $^
+
+cleanall:
+	find write_a_c_compiler -type f '-(' -name '*.s' -or -name '*.*cc' '-)' | parallel --bar rm

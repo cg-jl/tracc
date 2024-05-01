@@ -61,6 +61,7 @@ impl BindingUsage for Value {
             } => lhs.uses_binding(binding) || rhs.uses_binding(binding),
             Value::Constant(_) => todo!(),
             Value::Binding(other) => other.uses_binding(binding),
+            Value::Uninit => todo!(),
         }
     }
 }

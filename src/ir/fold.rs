@@ -1,13 +1,14 @@
 // Constant fold IR
 use super::*;
+use itertools::*;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
 fn fold_ir_blocks(ir: &mut IR) {
     // NOTE: This is the most common layer of cache we can get the constants to without having to
-    // worry about invalidation. 
+    // worry about invalidation.
     // All blocks can benefit to any constants declared in other blocks,
-    // which comes handy when simplifying across loops. 
+    // which comes handy when simplifying across loops.
     // The iteration order (by order of block generation) is mostly pre-order: We visit first the
     // blocks that either form a loop or don't have any dependencies from e.g branching. Then other
     // blocks can fold from cascaded information earlier.
@@ -94,17 +95,22 @@ fn try_merge(ir: &mut IR) -> bool {
 
     while let Some((parent, child)) = find_noncolliding_merge(&mut jumps) {
         tracing::trace!(target: "fold::merge",  "found jump {parent} -> {child}");
-        // rename the child block to the block it's inlined before removing it
+
         // before renaming, we set the predecessor
         block_set_predecessor(&mut ir[child], parent);
+        // Replace any reference to `parent` in phi nodes with `child`,
+        // so that we get the most updated value.
+        unsafe { refactor::replace_phi_source(ir, parent, child) };
+        // Now we can replace all references to `child` with references to its parent.
         unsafe { refactor::rename_block(ir, child, parent) };
+
+        let child_block = unsafe { refactor::remove_block(ir, child) };
         // if the parent happens after the child, it was renamed after the block removal!
         let parent = if child > parent {
             parent
         } else {
             BlockBinding(parent.0 - 1)
         };
-        let child_block = unsafe { refactor::remove_block(ir, child) };
         merge_blocks(&mut ir[parent], child_block, parent);
         tracing::trace!(target: "irshow::fold::merge", "after: {ir:?}");
     }
@@ -115,33 +121,20 @@ fn try_merge(ir: &mut IR) -> bool {
 // searches phi nodes to update them with the selected value since we know exactly
 // what's selected.
 fn block_set_predecessor(block: &mut BasicBlock, predecessor: BlockBinding) {
-    block.statements = std::mem::take(&mut block.statements)
-        .into_iter()
-        .map(|statement| {
-            if let Statement::Assign {
-                index,
-                value: Value::Phi { nodes },
-            } = statement
-            {
-                let bind = nodes
-                    .into_iter()
-                    .find_map(|descriptor| {
-                        if descriptor.block_from == predecessor {
-                            Some(descriptor.value)
-                        } else {
-                            None
-                        }
-                    })
-                    .expect("Inlining with no phi node data");
-                Statement::Assign {
-                    index,
-                    value: Value::Binding(bind),
-                }
-            } else {
-                statement
-            }
-        })
-        .collect();
+    for stmt in &mut block.statements {
+        if let Statement::Assign { index, value } = stmt {
+            let new_value = match std::mem::take(value) {
+                Value::Phi { nodes } => Value::Binding(
+                    nodes
+                        .into_iter()
+                        .find_map(|desc| (desc.block_from == predecessor).then_some(desc.value))
+                        .expect("Inlining with no phi node data"),
+                ),
+                other => other,
+            };
+            std::mem::replace(value, new_value);
+        }
+    }
 }
 
 fn merge_blocks(
@@ -151,7 +144,6 @@ fn merge_blocks(
 ) {
     predecessor.end = next.end;
     predecessor.statements.extend(next.statements);
-    cleanup::remove_aliases_in_same_block(predecessor);
     // TODO: set predecessor to the other basic block in the predecessor if there's a loop between
 }
 
@@ -259,9 +251,20 @@ fn fold_block(ir: &mut IR, block: BlockBinding, found_constants: &mut HashMap<Bi
     }) = ir[block].end
     {
         if let Value::Constant(c) = analysis::find_assignment_value(&ir.code, flag).unwrap() {
-            ir[block].end = BlockEnd::Branch(Branch::Unconditional {
-                target: if *c == 0 { target_false } else { target_true },
-            })
+            let (taken, not_taken) = if *c == 0 {
+                (target_false, target_true)
+            } else {
+                (target_true, target_false)
+            };
+            ir[block].end = BlockEnd::Branch(Branch::Unconditional { target: taken });
+
+            // Remove the relation between the not taken branch and the parent.
+            if let Some(bw) = ir.backwards_map.get_mut(&not_taken) {
+                bw.retain(|parent| parent != &block);
+            }
+
+            // Replace the branches with a single one.
+            ir.forward_map.insert(block, vec![taken]);
         }
     }
 }
@@ -567,7 +570,8 @@ fn value_propagate_constant(
         Value::Xor { lhs, rhs } => todo!(),
         // already a constant, cannot fold further
         Value::Constant(_) => PropagationResult::unchanged(value),
-        Value::Binding(_) => todo!(),
+        Value::Binding(x) => PropagationResult::unchanged(value),
+        Value::Uninit => todo!(),
     }
 }
 

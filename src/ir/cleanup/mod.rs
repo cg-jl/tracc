@@ -1,15 +1,30 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use super::PhiDescriptor;
 use super::{
     refactor::{self, redefine::Rename},
     BasicBlock, Binding, BlockBinding, BlockEnd, Branch, IRCode, Statement, Value, IR,
 };
 
-pub fn run_safe_cleanup(ir: &mut IR) {
-    remove_aliases(&mut ir.code);
+pub struct CleanupResult {
+    /// Whether the cleanup removed aliases
+    pub renamed_bindings: bool,
+    pub rewrote_phis: bool,
+    pub inlined_blocks: bool,
+}
+
+pub fn run_safe_cleanup(ir: &mut IR) -> CleanupResult {
+    let rewrote_phis = rewrite_nonunique_phis(ir);
+    let alias = remove_aliases(&mut ir.code);
     remove_unused_bindings(ir);
-    remove_redundant_jumps(ir);
+    prune_unreached_blocks(ir);
+    let inlined_blocks = remove_redundant_jumps(ir);
+    CleanupResult {
+        renamed_bindings: alias,
+        rewrote_phis,
+        inlined_blocks,
+    }
 }
 
 pub fn remove_unused_bindings(ir: &mut IR) {
@@ -110,10 +125,40 @@ pub fn remove_aliases_in_same_block(block: &mut BasicBlock) {
     }
 }
 
-pub fn remove_aliases(code: &mut IRCode) {
+// Make all phi nodes standard:
+// - remove any arguments that are not their direct parents
+// - remove any phi nodes that point to a single binding/ single argument.
+// - remove any empty phi nodes, replacing them with uninit.
+pub fn rewrite_nonunique_phis(ir: &mut IR) -> bool {
+    tracing::debug!(target: "irshow::cleanup::nonunique_phis", "ir: {ir:?}");
+
+    let mut rewrote_phis = false;
+
+    for (bb, block) in ir.code.iter_mut().enumerate() {
+        // Either a root or unreachable
+        let Some(parents) = ir.backwards_map.get(&BlockBinding(bb)) else {
+            continue;
+        };
+
+        for value in refactor::values_mut(block) {
+            if let Value::Phi { nodes } = value {
+                rewrote_phis = true;
+                let mut nodes = std::mem::take(nodes);
+
+                nodes.retain(|phi| parents.contains(&phi.block_from));
+
+                std::mem::replace(value, recount_phi(nodes));
+            }
+        }
+    }
+
+    rewrote_phis
+}
+
+pub fn remove_aliases(code: &mut IRCode) -> bool {
     tracing::debug!(target: "cleanup::alias", "code: {code:?}");
     // #1. Catch all the aliases
-    let mut aliases = HashMap::new();
+    let mut aliases = Vec::new();
 
     for (block_index, block) in code.iter().enumerate() {
         for (statement_index, statement) in block.statements.iter().enumerate() {
@@ -122,39 +167,26 @@ pub fn remove_aliases(code: &mut IRCode) {
                 value: Value::Binding(other),
             } = statement
             {
-                aliases.insert(*target, (*other, block_index, statement_index));
+                aliases.push((*target, *other));
             }
         }
     }
 
-    let mut aliases: Vec<_> = aliases.into_iter().collect();
-
-    aliases.sort_unstable_by(
-        |(_, (_, block1, statement1)), (_, (_, block2, statement2))| match block1.cmp(block2) {
-            std::cmp::Ordering::Equal => statement1.cmp(statement2).reverse(),
-            other => other,
-        },
-    );
-
     tracing::debug!(target: "cleanup::alias", "found aliases: {aliases:?}");
 
+    let had_aliases = !aliases.is_empty();
+
     // #2. Rebind aliases
-    for (from, (to, block_index, statement_index)) in aliases {
+    for (from, to) in aliases {
         code.rename(from, to); // rebind
-        debug_assert_eq!(
-            code[block_index].statements.remove(statement_index),
-            Statement::Assign {
-                index: from,
-                value: Value::Binding(to)
-            },
-            "Health check: remove alias correctly"
-        );
     }
+    had_aliases
 }
 
 /// Removes blocks that just serve to redirect a jump, which might have resulted from compiling
 /// `break`/`continue` statements, which have some redundant redirection built into them.
-pub fn remove_redundant_jumps(ir: &mut IR) {
+pub fn remove_redundant_jumps(ir: &mut IR) -> bool {
+    let mut inlined_blocks = false;
     for b in (0..ir.code.len()).rev().map(BlockBinding) {
         {
             if ir[b].statements.is_empty() {
@@ -162,6 +194,13 @@ pub fn remove_redundant_jumps(ir: &mut IR) {
                     // only those who don't make an endless loop into themselves.
                     if target != b {
                         tracing::debug!(target: "cleanup", "found redundant jumping block {b} -> {target}");
+                        inlined_blocks = true;
+                        // HACK: When calling this from redundant jump optimization,
+                        // we end up with an incorrect backwards map,
+                        // but most of the time it doesn't matter since we're removing the faulty block.
+                        // The mishap is that what we want is to merge the antecessors of `b` with
+                        // the antecessors of `target`. Since `b` has no code, any phi nodes that
+                        // pointed to `b` should have already been taken care of by now.
                         unsafe {
                             refactor::rename_block(ir, b, target);
                         }
@@ -171,10 +210,28 @@ pub fn remove_redundant_jumps(ir: &mut IR) {
         }
     }
 
-    // re-compute the branching graph
-    let (forward_map, backwards_map) = super::generate::generate_branching_graphs(&ir.code);
-    ir.forward_map = forward_map;
-    ir.backwards_map = backwards_map;
+    if inlined_blocks {
+        // re-compute the branching graph
+        let (forward_map, backwards_map) = super::generate::generate_branching_graphs(&ir.code);
+        ir.forward_map = forward_map;
+        ir.backwards_map = backwards_map;
+    }
+    inlined_blocks
+}
+
+pub fn recount_phi(nodes: Vec<PhiDescriptor>) -> Value {
+    match nodes.len() {
+        0 => Value::Uninit,
+        1 => Value::Binding(nodes[0].value),
+        _ => {
+            let first = nodes[0].value;
+            if nodes[1..].iter().all(|ph| ph.value == first) {
+                Value::Binding(first)
+            } else {
+                Value::Phi { nodes }
+            }
+        }
+    }
 }
 
 /// prune not reached blocks
@@ -235,7 +292,7 @@ pub fn prune_unreached_blocks(ir: &mut IR) {
     // for all unused blocks:
     for unused_binding in unused_blocks {
         // SAFE: the block is proven to be unreachable.
-        unsafe { refactor::remove_unreached_block_from_phi_statements(ir, unused_binding) };
+        unsafe { refactor::remove_block_from_phis(ir, unused_binding) };
         // remove the block
         // UNSAFE: safe. the block is no longer used.
         unsafe { refactor::remove_block(ir, unused_binding) };

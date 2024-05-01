@@ -1,7 +1,7 @@
 //! Register analysis of the code
 use crate::asmgen::assembly::{Condition, RegisterID};
 use crate::ir::{analysis::CollisionMap, Binding, BlockEnd, IR};
-use crate::ir::{Statement, Value};
+use crate::ir::{BlockBinding, Statement, Value};
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -168,6 +168,10 @@ pub struct CodegenHints {
     #[allow(dead_code)]
     pub completely_spilled: HashSet<Binding>,
 
+    /// Transfers that are required before branching due to phi nodes
+    pub phi_transfers:
+        HashMap<BlockBinding, HashMap<BlockBinding, HashSet<(RegisterID, RegisterID)>>>,
+
     /// Set of bindings that are just to store a condition.
     pub stores_condition: HashMap<Binding, Condition>,
 
@@ -284,10 +288,10 @@ impl AllocatorState {
         collides_with: &HashSet<Binding>,
         register: u8,
     ) -> Option<RegisterID> {
-        tracing::trace!(target: "register_alloc::state", "Collisions: {collides_with:?} \\ {bucket:?}",
+        tracing::trace!(target: "alloc::registers::state", "Collisions: {collides_with:?} \\ {bucket:?}",
                         bucket=&self.buckets[register as usize]);
         if self.buckets[register as usize].is_disjoint(collides_with) {
-            tracing::trace!(target: "register_alloc::state", "Found available {binding} -> x{register}");
+            tracing::trace!(target: "alloc::registers::state", "Found available {binding} -> x{register}");
             self.buckets[register as usize].insert(binding);
             Some(RegisterID::GeneralPurpose { index: register })
         } else {
@@ -413,7 +417,7 @@ fn linear_alloc_block(
     function_index: usize,
 ) {
     let mut active = ActiveBindingSet::new();
-    let mut used = HashMap::new();
+    let mut used: HashMap<RegisterID, usize> = HashMap::new();
 
     //     tracing::trace!(target: "alloc::registers::block", "ordered by start: {ordered_bindings_by_start:?}");
     //     tracing::trace!(target: "alloc::registers::block", "ends: {ends:?}");
@@ -430,11 +434,9 @@ fn linear_alloc_block(
 
         for dropped_binding in active.bindings.drain(..end_i) {
             let reg = &codegen_hints.registers[&dropped_binding];
-            if used[reg] == 1 {
-                used.remove(reg);
-            } else {
-                // SAFE: the if above already asserted that we have the value.
-                *unsafe { used.get_mut(reg).unwrap_unchecked() } -= 1;
+            let new_count = used.remove(reg).unwrap().checked_sub(1);
+            if let Some(count) = new_count {
+                used.insert(*reg, count);
             }
         }
 
@@ -454,62 +456,30 @@ fn linear_alloc_block(
             continue;
         }
 
-        let phi_alloc =  phi_edges
-            .remove(&binding)
-            .and_then(|edges| {
-                let allocs: HashSet<_> = edges
-                    .iter()
-                    .flat_map(|binding| codegen_hints.registers.get(binding).copied())
-                    .collect();
+        let mut has_phi_alloc = false;
 
-                if allocs.is_empty() {
-                    None // not going to do anything, use another hint
-                } else {
-                    tracing::debug!(target: "register_alloc::phi::full", "found phi edges: {edges:?}");
-                    // allocate the same as the rest of bindings that it is target to
-                    debug_assert_eq!(
-                        allocs.len(),
-                        1,
-                        "Expecting all allocated edges to be in the same place"
-                        );
-                    // SAFE: assertion above.
-                    let unique_alloc = unsafe { allocs.into_iter().next().unwrap_unchecked() };
-                    tracing::trace!(target: "register_alloc::phi::full", "setting allocation through phi nodes: {unique_alloc:?}");
-
-                    Some(unique_alloc)
-                }
-            })
-        .or_else(|| {
-            phi_nodes.remove(&binding).map(|phi_nodes| {
-                // NOTE: might have to reorder allocations so that collisions are resolved
-                // must have allocated everyone
+        let phi_alloc =
+            phi_nodes.remove(&binding).and_then(|phi_nodes| {
+                // NOTE: This requires processing each block in flow-traversal order,
+                // and loops won't allow this.
                 let allocs: Vec<_> = phi_nodes
                     .iter()
                     .flat_map(|binding| codegen_hints.registers.get(binding).copied())
                     .collect();
 
-                tracing::trace!(target: "alloc::registers", "found phi nodes: {phi_nodes:?} | {allocs:?}");
-                debug_assert_eq!(
-                    allocs.len(),
-                    phi_nodes.len(),
-                    "All phi nodes must have been previously allocated"
-                    );
+                tracing::trace!(target: "alloc::registers::phi", "found phi nodes for {binding}: {phi_nodes:?} | {allocs:?}");
 
-                let allocs: HashSet<_> = allocs.into_iter().collect();
 
-                // NOTE: this will be removed if needed
-                debug_assert_eq!(
-                    allocs.len(),
-                    1,
-                    "All allocated phi nodes must be on the same register"
-                    );
-
-                let unique_alloc = allocs.into_iter().next().unwrap();
+                // Choose a different register
+                // TODO: change the choosing strategy if this results in caller-saved
+                // registers being used.
+                let unique_alloc = allocs.into_iter().filter(|reg| !used.contains_key(&reg)).min()?;
                 tracing::trace!(target: "alloc::registers", "found allocated phi node: {unique_alloc:?}");
 
-                unique_alloc
-            })
-        });
+                Some(unique_alloc)
+            });
+
+        let has_phi_alloc = phi_alloc.is_some();
 
         let result_register = phi_alloc.or_else(|| {
             used_in_return
@@ -577,7 +547,7 @@ fn linear_alloc_block(
             let longest_lived = unsafe { active.last().unwrap_unchecked() };
             if ends[&longest_lived] > ends[&binding] {
 
-                tracing::trace!(target: "register_alloc", "spilling {longest_lived} in favor of {binding}");
+                tracing::trace!(target: "alloc::registers", "spilling {longest_lived} in favor of {binding}");
                 // spill the longest lived and allocate this one since it has a shorter span.
                 active.remove(longest_lived);
                 codegen_hints.completely_spilled.insert(longest_lived);
@@ -595,11 +565,13 @@ fn linear_alloc_block(
         });
 
         if let Some(register) = found_register {
-            tracing::trace!(target: "alloc::registers", "found register {register:?} for {binding}");
-            assert!(
-                used.insert(register, 1).is_none(),
-                "this register shouldn't be being used!"
-            );
+            tracing::trace!(target: "alloc::registers", "found register {register:?} for {binding} is phi: {has_phi_alloc}");
+            if !has_phi_alloc {
+                assert!(
+                    used.insert(register, 1).is_none(),
+                    "this register shouldn't be being used!"
+                );
+            }
             codegen_hints.registers.insert(binding, register);
             active.add(binding, ends);
         } else {
@@ -616,8 +588,8 @@ pub fn alloc_registers(
     need_allocation: Vec<Binding>,
     alloc_hints: AllocatorHints,
 ) -> CodegenHints {
-    tracing::trace!(target: "register_alloc", "requested allocations: {need_allocation:?}");
-    tracing::trace!(target: "register_alloc", "allocator hints: {alloc_hints:?}");
+    tracing::trace!(target: "alloc::registers", "requested allocations: {need_allocation:?}");
+    tracing::trace!(target: "alloc::registers", "allocator hints: {alloc_hints:?}");
     // TODO: reserve phi nodes hints for later, when all of its dependencies are allocated.
     // and so on.
     let mut state = AllocatorState::new();
@@ -640,6 +612,17 @@ pub fn alloc_registers(
     use crate::ir::analysis;
 
     let mut all_lifetimes = analysis::lifetimes::make_sorted_lifetimes(ir);
+
+    // All bindings pointing to memory special.
+    // TODO: if addresses are to be taken, then the bindings that contain the addresses (that we
+    // can compute with) should be flagged so that one of these two happens:
+    // - address occupies a register
+    // - address is computed on the fly on each usage (accessing modes?)
+    codegen_hints.registers.extend(
+        in_memory
+            .into_iter()
+            .map(|bind| (bind, RegisterID::StackPointer)),
+    );
 
     let used_through_call =
         {
@@ -687,14 +670,10 @@ pub fn alloc_registers(
         }
     }
 
-    // It's important that we allocate first the blocks that have the most constraints.
-    let choose_lifetime = move || {
-        let best_index =
-            (0..all_lifetimes.len()).max_by_key(|i| all_lifetimes[*i].ordered_by_start.len())?;
-        Some(all_lifetimes.remove(best_index))
-    };
-
-    for full_lifetime in std::iter::from_fn(choose_lifetime) {
+    // NOTE: flow order traversal is enough to ensure that all phi edges are
+    // allocated before their dependent values.
+    for block in analysis::full_flow_traversal(ir) {
+        let full_lifetime = &all_lifetimes[block.0];
         let function_index = ir
             .function_block_ranges
             .iter()
@@ -736,6 +715,35 @@ pub fn alloc_registers(
             .into_iter()
             .filter(|b| used_through_call.contains(b)),
     );
+
+    let mut phi_transfers = std::mem::take(&mut codegen_hints.phi_transfers);
+    for (stmt, addr) in analysis::statements_with_addresses(ir) {
+        if let Statement::Assign {
+            index: target,
+            value: Value::Phi { nodes },
+        } = stmt
+        {
+            let Some(target_reg) = codegen_hints.registers.get(target) else {
+                continue;
+            };
+
+            for node in nodes {
+                let Some(source_reg) = codegen_hints.registers.get(&node.value) else {
+                    continue;
+                };
+
+                if source_reg != target_reg {
+                    phi_transfers
+                        .entry(node.block_from)
+                        .or_default()
+                        .entry(addr.block)
+                        .or_default()
+                        .insert((*source_reg, *target_reg));
+                }
+            }
+        }
+    }
+    std::mem::replace(&mut codegen_hints.phi_transfers, phi_transfers);
 
     codegen_hints
 }

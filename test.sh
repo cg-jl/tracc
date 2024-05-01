@@ -19,9 +19,9 @@ try_compile_normal() {
 }
 
 compare_results() {
-  qemu-aarch64 ./$1.tracc
+  qemu-aarch64-static ./$1.tracc
   local res1=$?
-  qemu-aarch64 ./$1.gcc
+  qemu-aarch64-static ./$1.gcc
   local res2=$?
   if [ $res1 -eq $res2 ]; then
     return 0

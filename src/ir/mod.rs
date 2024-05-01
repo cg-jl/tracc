@@ -6,6 +6,7 @@ mod convert;
 pub mod fold;
 mod format;
 pub mod generate;
+pub mod mem;
 pub mod refactor;
 
 use crate::asmgen::assembly::Condition;
@@ -35,6 +36,17 @@ pub struct IR {
 impl IR {
     pub fn get_statement(&self, addr: &BlockAddress) -> Option<&Statement> {
         self[addr.block].statements.get(addr.statement)
+    }
+
+    pub fn direct_antecessors(
+        &self,
+        block: BlockBinding,
+    ) -> impl Iterator<Item = BlockBinding> + '_ {
+        self.backwards_map
+            .get(&block)
+            .into_iter()
+            .flat_map(|v| v)
+            .copied()
     }
 }
 
@@ -75,15 +87,29 @@ pub enum Statement {
     Store {
         mem_binding: Binding,
         binding: Binding,
+        // TODO: The size shouldn't be here, it should be in the type information
+        // for codegen.
         byte_size: ByteSize,
     },
+}
+
+impl Statement {
+    pub fn value_mut(&mut self) -> Option<&mut Value> {
+        match self {
+            Statement::Assign { value, .. } => Some(value),
+            Statement::Store { .. } => None,
+        }
+    }
 }
 
 // TODO: merge binary ops from `Value` into the same value kind, same for unops
 
 // phi, cmp, add, sub, neg.... all operations
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub enum Value {
+    /// Value for uninitialized (arbitrary) values.
+    #[default]
+    Uninit,
     // allocate memory
     Allocate {
         size: usize,
@@ -238,6 +264,11 @@ impl core::ops::Index<analysis::lifetimes::BlockAddress> for IR {
 
     fn index(&self, index: analysis::lifetimes::BlockAddress) -> &Self::Output {
         &self[index.block].statements[index.statement]
+    }
+}
+impl core::ops::IndexMut<analysis::lifetimes::BlockAddress> for IR {
+    fn index_mut(&mut self, index: analysis::lifetimes::BlockAddress) -> &mut Self::Output {
+        &mut self[index.block].statements[index.statement]
     }
 }
 
