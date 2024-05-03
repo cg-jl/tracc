@@ -298,11 +298,25 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
             let phis = phi_transfers.get(&BlockBinding(index));
 
+            fn topo_sort_by_target(pairs: &HashSet<(RegisterID, RegisterID)>) -> impl Iterator<Item = (RegisterID, RegisterID)> {
+                let mut by_source: HashMap<_, _> = pairs.iter().copied().collect();
+
+                std::iter::from_fn(move || {
+                    if by_source.is_empty() {
+                        return None;
+                    }
+
+                    let key = *by_source.iter().find(|(src, target)| !by_source.contains_key(target)).expect("No registers should collide. If this message pops up this means that the register allocator allocated the same register to colliding bindings.").0;
+                    by_source.remove_entry(&key)
+
+                })
+            }
+
 
             match block.end {
                 BlockEnd::Branch(b) => match b {
                     Branch::Unconditional { target } => {
-                        for (source, target) in phis.and_then(|ph| ph.get(&target)).into_iter().flatten().copied() {
+                        for (source, target) in phis.and_then(|ph| ph.get(&target)).into_iter().flat_map(topo_sort_by_target) {
                             compiled_block.push_back(assembly::Instruction::Mov { target: assembly::Register::from_id(target, assembly::BitSize::Bit32),
                                 source: assembly::Data::Register(assembly::Register::from_id(source, assembly::BitSize::Bit32))
                             });
@@ -362,7 +376,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                         });
 
 
-                        for (source, target) in phis.and_then(|ph| ph.get(&rest_target)).into_iter().flatten().copied() {
+                        for (source, target) in phis.and_then(|ph| ph.get(&rest_target)).into_iter().flat_map(topo_sort_by_target) {
                             compiled_block.push_back(assembly::Instruction::Mov { target: assembly::Register::from_id(target, assembly::BitSize::Bit32),
                                 source: assembly::Data::Register(assembly::Register::from_id(source, assembly::BitSize::Bit32))
                             });
@@ -383,7 +397,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
                             compiled_block.push_back(cond_label);
 
-                            for (source, target) in phis.iter().copied() {
+                            for (source, target) in topo_sort_by_target(phis) {
                             compiled_block.push_back(assembly::Instruction::Mov { target: assembly::Register::from_id(target, assembly::BitSize::Bit32),
                                 source: assembly::Data::Register(assembly::Register::from_id(source, assembly::BitSize::Bit32))
                             });
