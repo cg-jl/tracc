@@ -18,6 +18,7 @@ pub struct AllocatorHints {
     used_as_arguments: HashMap<Binding, u8>,
     from_phi_node: HashMap<Binding, HashSet<Binding>>,
     is_phi_node_with: HashMap<Binding, HashSet<Binding>>,
+    dependencies: HashMap<Binding, Vec<Binding>>,
     zeroes: HashSet<Binding>,
 }
 
@@ -96,6 +97,15 @@ pub fn make_allocator_hints(code: &IR) -> AllocatorHints {
     for block in &code.code {
         for statement in &block.statements {
             if let crate::ir::Statement::Assign { index, value } = statement {
+                use crate::ir::analysis::BindingUsage;
+
+                let mut deps = Vec::new();
+                value.visit_value_bindings(|bind| {
+                    std::ops::ControlFlow::<()>::Continue(deps.push(bind))
+                });
+
+                hints.dependencies.insert(*index, deps);
+
                 match value {
                     crate::ir::Value::Constant(0) => {
                         map.entry(*index)
@@ -406,6 +416,7 @@ type BindingGraph = HashMap<Binding, HashSet<Binding>>;
 // NOTE: considers everything is 'dead' at the end of the block.
 fn linear_alloc_block(
     codegen_hints: &mut CodegenHints,
+    dependencies: &HashMap<Binding, Vec<Binding>>,
     phi_nodes: &mut BindingGraph,
     phi_edges: &mut BindingGraph,
     ordered_bindings_by_start: &[Binding],
@@ -456,8 +467,6 @@ fn linear_alloc_block(
             continue;
         }
 
-        let mut has_phi_alloc = false;
-
         let phi_alloc =
             phi_nodes.remove(&binding).and_then(|phi_nodes| {
                 // NOTE: This requires processing each block in flow-traversal order,
@@ -478,8 +487,6 @@ fn linear_alloc_block(
 
                 Some(unique_alloc)
             });
-
-        let has_phi_alloc = phi_alloc.is_some();
 
         let result_register = phi_alloc.or_else(|| {
             used_in_return
@@ -508,8 +515,32 @@ fn linear_alloc_block(
             })
         });
 
+        // if nothing of greater relevance is found, search a suitable, available register and
+        // try to reuse the registers from its nodes.
+
+        let dep_alloc = argument_register.or_else(|| {
+            let mut dep_regs = dependencies[&binding]
+                .iter()
+                .copied()
+                .filter_map(|dep| codegen_hints.registers.get(&dep))
+                .filter(|reg| !used.contains_key(reg))
+                .copied();
+
+            if used_through_call.contains(&binding) {
+                dep_regs.find(|reg| {
+                    if let RegisterID::GeneralPurpose { index } = reg {
+                        (19..=28).contains(index)
+                    } else {
+                        false
+                    }
+                })
+            } else {
+                dep_regs.next()
+            }
+        });
+
         // try to find an available register.
-        let unused_register = argument_register.or_else(|| {
+        let unused_register = dep_alloc.or_else(|| {
             if used_through_call.contains(&binding) {
                 tracing::trace!(target: "alloc::registers", "caught {binding} used through call");
                 // try a callee-saved register, otherwise hint that we couldn't
@@ -565,13 +596,11 @@ fn linear_alloc_block(
         });
 
         if let Some(register) = found_register {
-            tracing::trace!(target: "alloc::registers", "found register {register:?} for {binding} is phi: {has_phi_alloc}");
-            if !has_phi_alloc {
-                assert!(
-                    used.insert(register, 1).is_none(),
-                    "this register shouldn't be being used!"
-                );
-            }
+            tracing::trace!(target: "alloc::registers", "found register {register:?} for {binding}");
+            assert!(
+                used.insert(register, 1).is_none(),
+                "this register shouldn't be being used!"
+            );
             codegen_hints.registers.insert(binding, register);
             active.add(binding, ends);
         } else {
@@ -604,6 +633,7 @@ pub fn alloc_registers(
         from_phi_node: mut phi_nodes,
         is_phi_node_with: mut phi_edges,
         used_as_arguments,
+        dependencies,
         zeroes,
     } = alloc_hints;
 
@@ -681,6 +711,7 @@ pub fn alloc_registers(
             .expect("all blocks should belong to a function");
         linear_alloc_block(
             &mut codegen_hints,
+            &dependencies,
             &mut phi_nodes,
             &mut phi_edges,
             &full_lifetime.ordered_by_start,
