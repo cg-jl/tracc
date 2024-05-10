@@ -155,7 +155,10 @@ pub struct BlockLifetimes<LB> {
     pub binding_ends: HashMap<LB, usize>,
 }
 
-pub fn make_sorted_lifetimes(ir: &IR) -> Vec<BlockLifetimes<Binding>> {
+pub fn make_sorted_lifetimes(
+    ir: &IR,
+    defs: &HashMap<Binding, BlockAddress>,
+) -> Vec<BlockLifetimes<Binding>> {
     // #1. Start on the definitions.
     // #2. When passing through a block:
     // - Put it in the path stack.
@@ -165,8 +168,6 @@ pub fn make_sorted_lifetimes(ir: &IR) -> Vec<BlockLifetimes<Binding>> {
 
     let mut binding_starts = vec![HashMap::new(); ir.code.len()];
     let mut binding_ends = vec![HashMap::new(); ir.code.len()];
-
-    let defs: HashMap<_, _> = get_defs(ir).collect();
 
     // Reorganize binding starts
     for (bind, addr) in defs.iter() {

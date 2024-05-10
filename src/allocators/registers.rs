@@ -641,7 +641,9 @@ pub fn alloc_registers(
 
     use crate::ir::analysis;
 
-    let mut all_lifetimes = analysis::lifetimes::make_sorted_lifetimes(ir);
+    let defs = analysis::lifetimes::get_defs(ir).collect();
+
+    let mut all_lifetimes = analysis::lifetimes::make_sorted_lifetimes(ir, &defs);
 
     // All bindings pointing to memory special.
     // TODO: if addresses are to be taken, then the bindings that contain the addresses (that we
@@ -764,6 +766,7 @@ pub fn alloc_registers(
                 };
 
                 if source_reg != target_reg {
+                    tracing::trace!(target: "alloc::registers::phi", "{source_reg:?}, {} {target_reg:?}", node.block_from);
                     phi_transfers
                         .entry(node.block_from)
                         .or_default()
@@ -775,6 +778,7 @@ pub fn alloc_registers(
         }
     }
     std::mem::replace(&mut codegen_hints.phi_transfers, phi_transfers);
+    tracing::debug!(target: "alloc::registers", "phi transfers: {:?}", &codegen_hints.phi_transfers);
 
     codegen_hints
 }

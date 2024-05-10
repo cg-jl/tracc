@@ -79,6 +79,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
         })
         .collect();
 
+
     let registers::CodegenHints {
         mut need_move_from_r0,
         callee_saved_per_function,
@@ -316,7 +317,9 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
             match block.end {
                 BlockEnd::Branch(b) => match b {
                     Branch::Unconditional { target } => {
+                        tracing::debug!(target: "asmgen::phi", "phis for unconditional in BB{index}, {phis:?}");
                         for (source, target) in phis.and_then(|ph| ph.get(&target)).into_iter().flat_map(topo_sort_by_target) {
+                        tracing::trace!(target: "asmgen::phi", "{source:?} -> {target:?}");
                             compiled_block.push_back(assembly::Instruction::Mov { target: assembly::Register::from_id(target, assembly::BitSize::Bit32),
                                 source: assembly::Data::Register(assembly::Register::from_id(source, assembly::BitSize::Bit32))
                             });
