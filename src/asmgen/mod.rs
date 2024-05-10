@@ -5,6 +5,7 @@ mod output;
 use self::assembly::Condition;
 use crate::allocators::memory::MemBinding;
 use crate::asmgen::assembly::Assembly;
+use crate::asmgen::assembly::GPIndex;
 use crate::asmgen::assembly::RegisterID;
 
 // TODO: change output for a better builder (block based, receives IR branching maps for finishing)
@@ -299,18 +300,36 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
             let phis = phi_transfers.get(&BlockBinding(index));
 
-            fn topo_sort_by_target(pairs: &HashSet<(RegisterID, RegisterID)>) -> impl Iterator<Item = (RegisterID, RegisterID)> {
-                let mut by_source: HashMap<_, _> = pairs.iter().copied().collect();
+            fn topo_sort_by_target<'a>(pairs: &'a HashSet<(RegisterID, GPIndex)>) -> impl Iterator<Item = (RegisterID, RegisterID)> + '_ {
 
-                std::iter::from_fn(move || {
-                    if by_source.is_empty() {
+
+                // Targets are assigned only once, but may be used more than once as sources
+                let mut gps_by_target: HashMap<_, _> = pairs.iter().copied().filter_map(|(src, target)| src.gp_index().map(|isrc| (target, isrc))).collect();
+                let mut used_counts = pairs.iter().copied().filter_map(|(src, _)| src.gp_index()).fold(HashMap::new(), |mut acc, next| {
+                    acc.entry(next).and_modify(|x| *x += 1).or_insert(1usize);
+                    acc
+                });
+
+                let gps = std::iter::from_fn(move || {
+                    if gps_by_target.is_empty() {
                         return None;
                     }
 
-                    let key = *by_source.iter().find(|(src, target)| !by_source.contains_key(target)).expect("No registers should collide. If this message pops up this means that the register allocator allocated the same register to colliding bindings.").0;
-                    by_source.remove_entry(&key)
+                    tracing::trace!(target: "asmgen::phi::topo_sort", "used counts: {used_counts:?}");
 
-                })
+                    let &target = gps_by_target.keys().find(|target| !used_counts.contains_key(target)).expect("There should be no loops in register maps");
+                    let (_, src) = gps_by_target.remove_entry(&target).unwrap();
+                    used_counts.retain(|s, cnt| if s == &src{
+                        *cnt -= 1;
+                        *cnt != 0
+                    } else { true });
+                    Some((RegisterID::GeneralPurpose {index: src }, target))
+                });
+
+                let non_gps = pairs.iter().copied().filter(|(src, target)| !matches!(src, RegisterID::GeneralPurpose { .. }));
+
+                // First, we source from non-gps -> gps. Then, we write gps.
+                non_gps.chain(gps).map(|(src, target)| (src, RegisterID::GeneralPurpose { index: target }))
             }
 
 
@@ -394,7 +413,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
 
                         if let Some(phis) = phis_for_cond {
 
-                            tracing::trace!(target: "asmgen::phi", "phis for cond (label = {}): {:?}", &cond_label, &phis);
+                            tracing::trace!(target: "asmgen::phi", "phis for cond in BB{index} (label = {}): {:?}", &cond_label, &phis);
 
                             let mut compiled_block = AssemblyOutput::new();
 
@@ -494,7 +513,7 @@ pub fn codegen<'code>(mut ir: IR, function_names: Vec<&'code str>) -> AssemblyOu
                     // TODO: we can detect that we need to store the stack pointer before allocating!
                     // why not pass that as an allocator hint? maybe extend the allocator to not be
                     // focused on bindings but rather just on lifetimes?
-                    if (regids[i] == RegisterID::GeneralPurpose { index: 29 }) {
+                    if (regids[i] == RegisterID::GeneralPurpose { index: GPIndex(29) }) {
                         save.push_back(assembly::Instruction::Mov {
                             target: assembly::Register::GeneralPurpose {
                                 index: 29,

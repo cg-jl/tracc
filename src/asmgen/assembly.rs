@@ -437,16 +437,32 @@ pub enum Register {
     StackPointer,
 }
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, PartialOrd, Ord, Eq)]
+pub struct GPIndex(pub u8);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RegisterID {
-    GeneralPurpose { index: u8 },
+    GeneralPurpose { index: GPIndex },
     StackPointer,
     ZeroRegister,
 }
 
+impl RegisterID {
+    pub fn gp_index(&self) -> Option<GPIndex> {
+        if let Self::GeneralPurpose { index } = self {
+            Some(*index)
+        } else {
+            None
+        }
+    }
+}
+
 impl From<u8> for RegisterID {
     fn from(index: u8) -> Self {
-        Self::GeneralPurpose { index }
+        assert!(index <= 31);
+        Self::GeneralPurpose {
+            index: GPIndex(index),
+        }
     }
 }
 
@@ -463,7 +479,10 @@ impl fmt::Display for Register {
 impl Register {
     pub const fn from_id(id: RegisterID, bit_size: BitSize) -> Self {
         match id {
-            RegisterID::GeneralPurpose { index } => Self::GeneralPurpose { index, bit_size },
+            RegisterID::GeneralPurpose { index } => Self::GeneralPurpose {
+                index: index.0,
+                bit_size,
+            },
             RegisterID::StackPointer => Self::StackPointer,
             RegisterID::ZeroRegister => Self::ZeroRegister { bit_size },
         }

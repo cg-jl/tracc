@@ -1,5 +1,5 @@
 //! Register analysis of the code
-use crate::asmgen::assembly::{Condition, RegisterID};
+use crate::asmgen::assembly::{Condition, GPIndex, RegisterID};
 use crate::ir::{analysis::CollisionMap, Binding, BlockEnd, IR};
 use crate::ir::{BlockBinding, Statement, Value};
 use std::collections::HashMap;
@@ -179,8 +179,7 @@ pub struct CodegenHints {
     pub completely_spilled: HashSet<Binding>,
 
     /// Transfers that are required before branching due to phi nodes
-    pub phi_transfers:
-        HashMap<BlockBinding, HashMap<BlockBinding, HashSet<(RegisterID, RegisterID)>>>,
+    pub phi_transfers: HashMap<BlockBinding, HashMap<BlockBinding, HashSet<(RegisterID, GPIndex)>>>,
 
     /// Set of bindings that are just to store a condition.
     pub stores_condition: HashMap<Binding, Condition>,
@@ -286,7 +285,7 @@ impl AllocatorState {
         match alloc {
             RegisterID::ZeroRegister => Some(self.is_zero(binding)),
             RegisterID::GeneralPurpose { index } => {
-                self.try_register(binding, collides_with, index)
+                self.try_register(binding, collides_with, index.0)
             }
             RegisterID::StackPointer => Some(self.spill(binding)),
         }
@@ -303,7 +302,9 @@ impl AllocatorState {
         if self.buckets[register as usize].is_disjoint(collides_with) {
             tracing::trace!(target: "alloc::registers::state", "Found available {binding} -> x{register}");
             self.buckets[register as usize].insert(binding);
-            Some(RegisterID::GeneralPurpose { index: register })
+            Some(RegisterID::GeneralPurpose {
+                index: GPIndex(register),
+            })
         } else {
             None
         }
@@ -349,7 +350,9 @@ impl AllocatorState {
             .or_else(|| {
                 self.buckets.iter().enumerate().find_map(|(index, set)| {
                     if set.contains(&binding) {
-                        Some(RegisterID::GeneralPurpose { index: index as u8 })
+                        Some(RegisterID::GeneralPurpose {
+                            index: GPIndex(index as u8),
+                        })
                     } else {
                         None
                     }
@@ -529,7 +532,7 @@ fn linear_alloc_block(
             if used_through_call.contains(&binding) {
                 dep_regs.find(|reg| {
                     if let RegisterID::GeneralPurpose { index } = reg {
-                        (19..=28).contains(index)
+                        (19..=28).contains(&index.0)
                     } else {
                         false
                     }
@@ -705,7 +708,7 @@ pub fn alloc_registers(
         if !used_through_call.contains(ret) {
             codegen_hints
                 .registers
-                .insert(*ret, RegisterID::GeneralPurpose { index: 0 });
+                .insert(*ret, RegisterID::GeneralPurpose { index: GPIndex(0) });
         }
     }
 
@@ -763,7 +766,11 @@ pub fn alloc_registers(
             value: Value::Phi { nodes },
         } = stmt
         {
-            let Some(target_reg) = codegen_hints.registers.get(target) else {
+            let Some(target_reg) = codegen_hints
+                .registers
+                .get(target)
+                .and_then(RegisterID::gp_index)
+            else {
                 continue;
             };
 
@@ -772,14 +779,14 @@ pub fn alloc_registers(
                     continue;
                 };
 
-                if source_reg != target_reg {
+                if *source_reg != (RegisterID::GeneralPurpose { index: target_reg }) {
                     tracing::trace!(target: "alloc::registers::phi", "{source_reg:?}, {} {target_reg:?}", node.block_from);
                     phi_transfers
                         .entry(node.block_from)
                         .or_default()
                         .entry(addr.block)
                         .or_default()
-                        .insert((*source_reg, *target_reg));
+                        .insert((*source_reg, target_reg));
                 }
             }
         }
