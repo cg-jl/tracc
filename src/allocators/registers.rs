@@ -639,6 +639,13 @@ pub fn alloc_registers(
 
     codegen_hints.stores_condition = super::flag::get_used_flags(ir).collect();
 
+    codegen_hints.registers.extend(
+        zeroes
+            .into_iter()
+            .inspect(|bind| tracing::trace!(target: "alloc::registers", "{bind} is zero"))
+            .map(|bind| (bind, RegisterID::ZeroRegister)),
+    );
+
     use crate::ir::analysis;
 
     let defs = analysis::lifetimes::get_defs(ir).collect();
