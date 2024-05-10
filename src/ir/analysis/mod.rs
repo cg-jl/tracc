@@ -494,15 +494,9 @@ impl<'code> Iterator for TopBottomTraversal<'code> {
     type Item = BlockBinding;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next = self.queue.pop()?; // no queue, no worries
+        let next = std::iter::from_fn(|| self.queue.pop()).find(|b| !self.visited.contains(b))?;
 
-        let children = self
-            .forward_map
-            .get(&next)
-            .into_iter()
-            .flatten()
-            .copied()
-            .filter(|x| !self.visited.contains(x));
+        let children = direct_branches(&self.forward_map, next);
         // extend the queue with the children as we know the parent is already yielded
         self.queue.extend(children);
         self.visited.insert(next);
